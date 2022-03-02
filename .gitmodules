@@ -1,0 +1,3 @@
+[submodule "ut_sdk_python"]
+	path = ut_sdk_python
+	url = https://github.com/UmbraTek/ut_sdk_python.git
