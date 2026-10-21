@@ -1,0 +1,16 @@
+{"t": "2026-10-21T13:04:01.534", "event": "run.start", "program": "check", "mode": "run", "override": 20, "manual": false}
+{"t": "2026-10-21T13:04:01.536", "event": "step.start", "id": "s1", "type": "move", "text": "Joint move to home", "path": "1"}
+{"t": "2026-10-21T13:04:01.549", "event": "move.planned", "text": "Joint move to home at 4\u00b0/s, about 0.1 s", "durationS": 0.09, "path": "1"}
+{"t": "2026-10-21T13:04:01.564", "event": "move.sent", "segment": 1, "of": 1, "speed": 4.0, "path": "1"}
+{"t": "2026-10-21T13:04:02.193", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 0.62, "path": "1"}
+{"t": "2026-10-21T13:04:02.194", "event": "step.done", "id": "s1", "seconds": 0.66, "path": "1"}
+{"t": "2026-10-21T13:04:02.194", "event": "step.start", "id": "s2", "type": "move", "text": "Straight line to a", "path": "2"}
+{"t": "2026-10-21T13:04:02.207", "event": "move.planned", "text": "Straight line to a, 0.1 mm, at 10 mm/s, about 0.1 s", "durationS": 0.13, "path": "2"}
+{"t": "2026-10-21T13:04:02.211", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "2"}
+{"t": "2026-10-21T13:04:02.333", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 0.11, "path": "2"}
+{"t": "2026-10-21T13:04:02.334", "event": "step.done", "id": "s2", "seconds": 0.14, "path": "2"}
+{"t": "2026-10-21T13:04:02.335", "event": "step.start", "id": "s3", "type": "move", "text": "Straight line to b", "path": "3"}
+{"t": "2026-10-21T13:04:02.848", "event": "move.planned", "text": "Straight line to b, 100.0 mm, at 4 mm/s, about 25.1 s", "durationS": 25.09, "path": "3"}
+{"t": "2026-10-21T13:04:02.852", "event": "move.sent", "segment": 1, "of": 1, "speed": 4.0, "path": "3"}
+{"t": "2026-10-21T13:04:07.336", "event": "operator", "action": "stop", "cause": "Stop run was pressed", "path": "3"}
+{"t": "2026-10-21T13:04:07.375", "event": "run.stopped", "reason": "Stop run was pressed", "path": "3"}

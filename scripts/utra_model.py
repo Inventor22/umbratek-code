@@ -10,6 +10,7 @@ same checks from collision_config(), so its preview matches the server's verdict
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -299,8 +300,24 @@ class ArmModel:
         floors = [o.centre[2] + sum(abs(axis[2]) * half for axis, half in zip(o.axes, o.half))
                   for o in self.obstacles if o.label == "the floor" and o.kind == "box"]
         self.floor_z = max(floors) if floors else 0.0
-        skip = {frozenset((bodies[a], bodies[b])) for a, b in shapes.get("skip", [])}
+        self._skip = {frozenset((bodies[a], bodies[b])) for a, b in shapes.get("skip", [])}
+        self._base_capsules, self._base_obstacles = list(self.capsules), list(self.obstacles)
+        self._build((), ())
 
+    def with_cell(self, capsules=(), obstacles=()):
+        """A copy of the model with more capsules, (body, end a, end b, radius, label) with the ends in the body's
+        link frame (a tool's capsules ride on the flange, body 6), and more obstacles (keep-out zones). The copy's
+        checks and collision_config() include them; this model is unchanged."""
+        other = copy.copy(self)
+        other._build(capsules, obstacles)
+        return other
+
+    def _build(self, extra_capsules, extra_obstacles):
+        self.capsules = self._base_capsules + [(int(c[0]), [float(v) for v in c[1]], [float(v) for v in c[2]],
+                                                float(c[3])) for c in extra_capsules]
+        self.capsule_labels = [None] * len(self._base_capsules) + [c[4] if len(c) > 4 else None for c in extra_capsules]
+        self.obstacles = self._base_obstacles + list(extra_obstacles)
+        skip = self._skip
         # Pairs to check: (capsule, obstacle or capsule, against an obstacle?, first joint that moves them
         # apart). Neighbouring links touch by design and aren't checked against each other, nor are the pairs
         # in collision.json's skip list.
@@ -381,8 +398,11 @@ class ArmModel:
 
     def _names(self, pair):
         c, o, fixed, _ = pair
-        other = self.obstacles[o].label if fixed else BODY_LABELS[self.capsules[o][0]]
-        return BODY_LABELS[self.capsules[c][0]], other
+        other = self.obstacles[o].label if fixed else self._label(o)
+        return self._label(c), other
+
+    def _label(self, c):
+        return self.capsule_labels[c] or BODY_LABELS[self.capsules[c][0]]
 
     def check_path(self, start_deg, goal_deg, margin=MARGIN_M):
         """Where a straight joint-space move first brings two things closer than `margin`, or None.
@@ -430,7 +450,8 @@ class ArmModel:
         return {
             "margin": MARGIN_M, "slack": SLACK_M, "advance": ADVANCE_M, "labels": BODY_LABELS,
             "joints": [{"fixed": fixed, "axis": axis} for _, fixed, axis, _ in self.joints],
-            "capsules": [{"body": body, "a": a, "b": b, "radius": r} for body, a, b, r in self.capsules],
+            "capsules": [dict({"body": body, "a": a, "b": b, "radius": r}, **({"label": label} if label else {}))
+                         for (body, a, b, r), label in zip(self.capsules, self.capsule_labels)],
             "obstacles": [o.config() for o in self.obstacles],
             "pairs": [[c, o, fixed, low] for c, o, fixed, low in self.pairs],
             "reach": self.reach,

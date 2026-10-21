@@ -1,0 +1,420 @@
+{
+ "start": [
+  36.112,
+  28.528,
+  138.784,
+  108.432,
+  45.764,
+  64.622
+ ],
+ "marks": [
+  {
+   "label": "rest",
+   "wallNs": 1792575464004007100,
+   "monoNs": 2831336500
+  },
+  {
+   "label": "J1 +15 deg at 10 deg/s",
+   "wallNs": 1792575524014269100,
+   "monoNs": 62840429800
+  },
+  {
+   "label": "J1 back at 10 deg/s",
+   "wallNs": 1792575526130376500,
+   "monoNs": 64956581200
+  },
+  {
+   "label": "J1 -15 deg at 10 deg/s",
+   "wallNs": 1792575528306375000,
+   "monoNs": 67132585000
+  },
+  {
+   "label": "J1 back at 10 deg/s",
+   "wallNs": 1792575530486408400,
+   "monoNs": 69312817900
+  },
+  {
+   "label": "J1 +15 deg at 30 deg/s",
+   "wallNs": 1792575532665584000,
+   "monoNs": 71491782900
+  },
+  {
+   "label": "J1 back at 30 deg/s",
+   "wallNs": 1792575533993240900,
+   "monoNs": 72819376400
+  },
+  {
+   "label": "J1 -15 deg at 30 deg/s",
+   "wallNs": 1792575535367657900,
+   "monoNs": 74193823700
+  },
+  {
+   "label": "J1 back at 30 deg/s",
+   "wallNs": 1792575536684556900,
+   "monoNs": 75510698800
+  },
+  {
+   "label": "J2 +10 deg at 10 deg/s",
+   "wallNs": 1792575538038484300,
+   "monoNs": 76865156300
+  },
+  {
+   "label": "J2 back at 10 deg/s",
+   "wallNs": 1792575539642242000,
+   "monoNs": 78468952800
+  },
+  {
+   "label": "J2 -10 deg at 10 deg/s",
+   "wallNs": 1792575541322495800,
+   "monoNs": 80148617400
+  },
+  {
+   "label": "J2 back at 10 deg/s",
+   "wallNs": 1792575543002433300,
+   "monoNs": 81828754200
+  },
+  {
+   "label": "J2 +10 deg at 20 deg/s",
+   "wallNs": 1792575544684681800,
+   "monoNs": 83510790700
+  },
+  {
+   "label": "J2 back at 20 deg/s",
+   "wallNs": 1792575545920991600,
+   "monoNs": 84747137100
+  },
+  {
+   "label": "J2 -10 deg at 20 deg/s",
+   "wallNs": 1792575547170798900,
+   "monoNs": 85996842200
+  },
+  {
+   "label": "J2 back at 20 deg/s",
+   "wallNs": 1792575548468988000,
+   "monoNs": 87295182400
+  },
+  {
+   "label": "J3 +10 deg at 10 deg/s",
+   "wallNs": 1792575549833491400,
+   "monoNs": 88659545500
+  },
+  {
+   "label": "J3 back at 10 deg/s",
+   "wallNs": 1792575551436793000,
+   "monoNs": 90263066500
+  },
+  {
+   "label": "J3 -10 deg at 10 deg/s",
+   "wallNs": 1792575553056787700,
+   "monoNs": 91882768400
+  },
+  {
+   "label": "J3 back at 10 deg/s",
+   "wallNs": 1792575554725864100,
+   "monoNs": 93551889500
+  },
+  {
+   "label": "J3 +10 deg at 20 deg/s",
+   "wallNs": 1792575556453586100,
+   "monoNs": 95279524900
+  },
+  {
+   "label": "J3 back at 20 deg/s",
+   "wallNs": 1792575557633958100,
+   "monoNs": 96459896000
+  },
+  {
+   "label": "J3 -10 deg at 20 deg/s",
+   "wallNs": 1792575558798864500,
+   "monoNs": 97624995400
+  },
+  {
+   "label": "J3 back at 20 deg/s",
+   "wallNs": 1792575560094832400,
+   "monoNs": 98920763700
+  },
+  {
+   "label": "J4 +20 deg at 15 deg/s",
+   "wallNs": 1792575561382682800,
+   "monoNs": 100208586000
+  },
+  {
+   "label": "J4 back at 15 deg/s",
+   "wallNs": 1792575563433349200,
+   "monoNs": 102259607500
+  },
+  {
+   "label": "J4 -20 deg at 15 deg/s",
+   "wallNs": 1792575565433957900,
+   "monoNs": 104260034100
+  },
+  {
+   "label": "J4 back at 15 deg/s",
+   "wallNs": 1792575567489860200,
+   "monoNs": 106315698900
+  },
+  {
+   "label": "J4 +20 deg at 45 deg/s",
+   "wallNs": 1792575569531318000,
+   "monoNs": 108357174100
+  },
+  {
+   "label": "J4 back at 45 deg/s",
+   "wallNs": 1792575570835640300,
+   "monoNs": 109661440800
+  },
+  {
+   "label": "J4 -20 deg at 45 deg/s",
+   "wallNs": 1792575572193272200,
+   "monoNs": 111019082400
+  },
+  {
+   "label": "J4 back at 45 deg/s",
+   "wallNs": 1792575573575921600,
+   "monoNs": 112401883700
+  },
+  {
+   "label": "J5 +20 deg at 15 deg/s",
+   "wallNs": 1792575574815806700,
+   "monoNs": 113641663500
+  },
+  {
+   "label": "J5 back at 15 deg/s",
+   "wallNs": 1792575576884838900,
+   "monoNs": 115710608000
+  },
+  {
+   "label": "J5 -20 deg at 15 deg/s",
+   "wallNs": 1792575578930448500,
+   "monoNs": 117756135400
+  },
+  {
+   "label": "J5 back at 15 deg/s",
+   "wallNs": 1792575580912050000,
+   "monoNs": 119737999600
+  },
+  {
+   "label": "J5 +20 deg at 45 deg/s",
+   "wallNs": 1792575582944656300,
+   "monoNs": 121770309000
+  },
+  {
+   "label": "J5 back at 45 deg/s",
+   "wallNs": 1792575584238709800,
+   "monoNs": 123064529400
+  },
+  {
+   "label": "J5 -20 deg at 45 deg/s",
+   "wallNs": 1792575585531991900,
+   "monoNs": 124357719100
+  },
+  {
+   "label": "J5 back at 45 deg/s",
+   "wallNs": 1792575586889338000,
+   "monoNs": 125715017600
+  },
+  {
+   "label": "J6 +30 deg at 15 deg/s",
+   "wallNs": 1792575588262259200,
+   "monoNs": 127087913700
+  },
+  {
+   "label": "J6 back at 15 deg/s",
+   "wallNs": 1792575590948715700,
+   "monoNs": 129774428200
+  },
+  {
+   "label": "J6 -30 deg at 15 deg/s",
+   "wallNs": 1792575593696262600,
+   "monoNs": 132521835900
+  },
+  {
+   "label": "J6 back at 15 deg/s",
+   "wallNs": 1792575596305251000,
+   "monoNs": 135131045400
+  },
+  {
+   "label": "J6 +30 deg at 60 deg/s",
+   "wallNs": 1792575599044562200,
+   "monoNs": 137870180700
+  },
+  {
+   "label": "J6 back at 60 deg/s",
+   "wallNs": 1792575600458492500,
+   "monoNs": 139284170300
+  },
+  {
+   "label": "J6 -30 deg at 60 deg/s",
+   "wallNs": 1792575601817520800,
+   "monoNs": 140643086400
+  },
+  {
+   "label": "J6 back at 60 deg/s",
+   "wallNs": 1792575603304784900,
+   "monoNs": 142130259500
+  },
+  {
+   "label": "line X +100 mm at 50 mm/s",
+   "wallNs": 1792575604717418300,
+   "monoNs": 143543343700
+  },
+  {
+   "label": "line X back at 50 mm/s",
+   "wallNs": 1792575607774939600,
+   "monoNs": 146600455100
+  },
+  {
+   "label": "line X +100 mm at 100 mm/s",
+   "wallNs": 1792575610885107000,
+   "monoNs": 149710555700
+  },
+  {
+   "label": "line X back at 100 mm/s",
+   "wallNs": 1792575613500707700,
+   "monoNs": 152326191100
+  },
+  {
+   "label": "line X -50 mm at 50 mm/s",
+   "wallNs": 1792575616171985800,
+   "monoNs": 154997367600
+  },
+  {
+   "label": "line X back at 50 mm/s",
+   "wallNs": 1792575617906003500,
+   "monoNs": 156731340400
+  },
+  {
+   "label": "line X -50 mm at 100 mm/s",
+   "wallNs": 1792575619719050100,
+   "monoNs": 158544375100
+  },
+  {
+   "label": "line X back at 100 mm/s",
+   "wallNs": 1792575621257118600,
+   "monoNs": 160082410200
+  },
+  {
+   "label": "line Y +100 mm at 50 mm/s",
+   "wallNs": 1792575622814382500,
+   "monoNs": 161639768200
+  },
+  {
+   "label": "line Y back at 50 mm/s",
+   "wallNs": 1792575625908333600,
+   "monoNs": 164733608300
+  },
+  {
+   "label": "line Y +100 mm at 100 mm/s",
+   "wallNs": 1792575629038564200,
+   "monoNs": 167863807000
+  },
+  {
+   "label": "line Y back at 100 mm/s",
+   "wallNs": 1792575631743709600,
+   "monoNs": 170568998100
+  },
+  {
+   "label": "line Y -100 mm at 50 mm/s",
+   "wallNs": 1792575634386950400,
+   "monoNs": 173212077100
+  },
+  {
+   "label": "line Y back at 50 mm/s",
+   "wallNs": 1792575637525945800,
+   "monoNs": 176351327200
+  },
+  {
+   "label": "line Y -100 mm at 100 mm/s",
+   "wallNs": 1792575640726387900,
+   "monoNs": 179551757900
+  },
+  {
+   "label": "line Y back at 100 mm/s",
+   "wallNs": 1792575643460977800,
+   "monoNs": 182286126600
+  },
+  {
+   "label": "line Z +100 mm at 50 mm/s",
+   "wallNs": 1792575646087753100,
+   "monoNs": 184912825200
+  },
+  {
+   "label": "line Z back at 50 mm/s",
+   "wallNs": 1792575649278311200,
+   "monoNs": 188103282000
+  },
+  {
+   "label": "line Z +100 mm at 100 mm/s",
+   "wallNs": 1792575652432136000,
+   "monoNs": 191257139800
+  },
+  {
+   "label": "line Z back at 100 mm/s",
+   "wallNs": 1792575655110270900,
+   "monoNs": 193935218600
+  },
+  {
+   "label": "line Z -100 mm at 50 mm/s",
+   "wallNs": 1792575657787886700,
+   "monoNs": 196612908700
+  },
+  {
+   "label": "line Z back at 50 mm/s",
+   "wallNs": 1792575660909680600,
+   "monoNs": 199734616200
+  },
+  {
+   "label": "line Z -100 mm at 100 mm/s",
+   "wallNs": 1792575664026073600,
+   "monoNs": 202850992700
+  },
+  {
+   "label": "line Z back at 100 mm/s",
+   "wallNs": 1792575666768096000,
+   "monoNs": 205592953800
+  },
+  {
+   "label": "joint return after lines",
+   "wallNs": 1792575669389850100,
+   "monoNs": 208214673300
+  },
+  {
+   "label": "STOP test: J1 +30 deg at 30 deg/s",
+   "wallNs": 1792575670429079300,
+   "monoNs": 209254159900
+  },
+  {
+   "label": "STOP sent",
+   "wallNs": 1792575671227622000,
+   "monoNs": 210052370800
+  },
+  {
+   "label": "enable after STOP",
+   "wallNs": 1792575673743653800,
+   "monoNs": 212568390200
+  },
+  {
+   "label": "return to start",
+   "wallNs": 1792575675567568900,
+   "monoNs": 214392356600
+  },
+  {
+   "label": "rest at end",
+   "wallNs": 1792575677957129700,
+   "monoNs": 216781810400
+  },
+  {
+   "label": "done",
+   "wallNs": 1792575692962578400,
+   "monoNs": 231787163000
+  }
+ ],
+ "recorderErrors": [
+  null,
+  null
+ ],
+ "resyncs": [
+  0,
+  0
+ ]
+}

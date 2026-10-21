@@ -1,0 +1,32 @@
+{"t": "2026-10-21T13:31:32.519", "event": "run.start", "program": "check", "mode": "run", "override": 50, "manual": false}
+{"t": "2026-10-21T13:31:32.521", "event": "step.start", "id": "s1", "type": "move", "text": "Joint move to home", "path": "1"}
+{"t": "2026-10-21T13:31:32.535", "event": "move.planned", "text": "Joint move to home at 10\u00b0/s, about 0.1 s", "durationS": 0.14, "path": "1"}
+{"t": "2026-10-21T13:31:32.537", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "1"}
+{"t": "2026-10-21T13:31:32.778", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 0.23, "path": "1"}
+{"t": "2026-10-21T13:31:32.779", "event": "step.done", "id": "s1", "seconds": 0.27, "path": "1"}
+{"t": "2026-10-21T13:31:32.780", "event": "step.start", "id": "s2", "type": "move", "text": "Straight line to a", "path": "2"}
+{"t": "2026-10-21T13:31:32.794", "event": "move.planned", "text": "Straight line to a, 0.2 mm, at 25 mm/s, about 0.2 s", "durationS": 0.15, "path": "2"}
+{"t": "2026-10-21T13:31:32.796", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "2"}
+{"t": "2026-10-21T13:31:33.412", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 0.62, "path": "2"}
+{"t": "2026-10-21T13:31:33.413", "event": "step.done", "id": "s2", "seconds": 0.64, "path": "2"}
+{"t": "2026-10-21T13:31:33.413", "event": "step.start", "id": "s3", "type": "move", "text": "Straight line to b", "path": "3"}
+{"t": "2026-10-21T13:31:33.948", "event": "move.planned", "text": "Straight line to b, 100.0 mm, at 10 mm/s, about 10.1 s", "durationS": 10.15, "path": "3"}
+{"t": "2026-10-21T13:31:33.950", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "3"}
+{"t": "2026-10-21T13:31:44.139", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 10.19, "path": "3"}
+{"t": "2026-10-21T13:31:44.140", "event": "step.done", "id": "s3", "seconds": 10.72, "path": "3"}
+{"t": "2026-10-21T13:31:44.140", "event": "step.start", "id": "s4", "type": "move", "text": "Straight line to b_turned", "path": "4"}
+{"t": "2026-10-21T13:31:44.255", "event": "move.planned", "text": "Straight line to b_turned, 0.3 mm turning 10.0\u00b0, at 25 mm/s, about 0.9 s", "durationS": 0.93, "path": "4"}
+{"t": "2026-10-21T13:31:44.257", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "4"}
+{"t": "2026-10-21T13:31:45.248", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 0.99, "path": "4"}
+{"t": "2026-10-21T13:31:45.250", "event": "step.done", "id": "s4", "seconds": 1.11, "path": "4"}
+{"t": "2026-10-21T13:31:45.250", "event": "step.start", "id": "s5", "type": "move", "text": "Straight line to a with an offset", "path": "5"}
+{"t": "2026-10-21T13:31:45.939", "event": "move.planned", "text": "Straight line to a (offset), 100.4 mm turning 10.0\u00b0, at 25 mm/s, about 4.3 s", "durationS": 4.25, "path": "5"}
+{"t": "2026-10-21T13:31:45.940", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "5"}
+{"t": "2026-10-21T13:31:50.244", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 4.31, "path": "5"}
+{"t": "2026-10-21T13:31:50.245", "event": "step.done", "id": "s5", "seconds": 5.0, "path": "5"}
+{"t": "2026-10-21T13:31:50.245", "event": "step.start", "id": "s6", "type": "move", "text": "Joint move to home", "path": "6"}
+{"t": "2026-10-21T13:31:50.268", "event": "move.planned", "text": "Joint move to home at 10\u00b0/s, about 1.0 s", "durationS": 0.95, "path": "6"}
+{"t": "2026-10-21T13:31:50.269", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "6"}
+{"t": "2026-10-21T13:31:51.380", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 1.12, "path": "6"}
+{"t": "2026-10-21T13:31:51.381", "event": "step.done", "id": "s6", "seconds": 1.14, "path": "6"}
+{"t": "2026-10-21T13:31:51.381", "event": "run.done", "seconds": 18.88}

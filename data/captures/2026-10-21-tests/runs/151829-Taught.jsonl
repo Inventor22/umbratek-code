@@ -1,0 +1,19 @@
+{"t": "2026-10-21T15:18:29.324", "event": "run.start", "program": "Taught", "mode": "run", "override": 20, "manual": false}
+{"t": "2026-10-21T15:18:29.325", "event": "step.start", "id": "s1", "type": "move", "text": "Straight line to p1", "path": "1"}
+{"t": "2026-10-21T15:18:32.517", "event": "move.planned", "text": "Straight line to p1, 520.2 mm turning 105.4\u00b0, at 10 mm/s, about 52.2 s", "durationS": 52.17, "path": "1"}
+{"t": "2026-10-21T15:18:32.518", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "1"}
+{"t": "2026-10-21T15:19:24.695", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 52.19, "path": "1"}
+{"t": "2026-10-21T15:19:24.697", "event": "step.done", "id": "s1", "seconds": 55.38, "path": "1"}
+{"t": "2026-10-21T15:19:24.697", "event": "step.start", "id": "s2", "type": "move", "text": "Straight line to p2", "path": "2"}
+{"t": "2026-10-21T15:19:25.685", "event": "move.planned", "text": "Straight line to p2, 176.9 mm turning 12.0\u00b0, at 10 mm/s, about 17.8 s", "durationS": 17.85, "path": "2"}
+{"t": "2026-10-21T15:19:25.686", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "2"}
+{"t": "2026-10-21T15:19:43.568", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 17.88, "path": "2"}
+{"t": "2026-10-21T15:19:43.569", "event": "step.done", "id": "s2", "seconds": 18.86, "path": "2"}
+{"t": "2026-10-21T15:19:43.569", "event": "step.start", "id": "s3", "type": "move", "text": "Straight line to p3", "path": "3"}
+{"t": "2026-10-21T15:19:47.281", "event": "move.planned", "text": "Straight line to p3, 638.9 mm turning 94.9\u00b0, at 10 mm/s, about 64.0 s", "durationS": 64.04, "path": "3"}
+{"t": "2026-10-21T15:19:47.282", "event": "move.sent", "segment": 1, "of": 1, "speed": 10.0, "path": "3"}
+{"t": "2026-10-21T15:20:51.377", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 64.09, "path": "3"}
+{"t": "2026-10-21T15:20:51.378", "event": "step.done", "id": "s3", "seconds": 67.81, "path": "3"}
+{"t": "2026-10-21T15:20:51.379", "event": "run.done", "seconds": 142.05}
+{"t": "2026-10-21T15:23:39.591", "event": "operator", "action": "override", "percent": 40}
+{"t": "2026-10-21T15:23:40.440", "event": "operator", "action": "override", "percent": 50}

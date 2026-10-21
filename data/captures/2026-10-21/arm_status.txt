@@ -1,0 +1,17 @@
+[SockeTcp] recv_proc thread start
+
+UTRA arm at 192.168.2.1
+  UUID          : 00:e0:4c:68:00:3d
+  Software      : 739c89bb82 / 2021-12-18
+  Hardware      : 0001110001 / x86J1900
+  Axes          : 6
+  Motion mode   : 0 (position control)
+  Motion state  : 4 (stopped)
+  Joints enabled: 0x0
+  Brakes        : 0x0
+  Error/warning : 0 / 0
+  Servos        : comm [0 0 0 0 0 0]  errors [0 0 0 0 0 0]
+  Queued cmds   : 0
+  Joints (deg)  :    36.11    28.53   138.72   108.44    45.77    64.63
+  Targets (deg) :    36.11    28.53   138.72   108.44    45.77    64.63
+  TCP pose      : x 308.4  y -13.3  z 477.8 mm   rx 92.8  ry -63.4  rz 79.4 deg

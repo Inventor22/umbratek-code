@@ -32,10 +32,16 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import arm
+import cell as cellmod
+import kinematics as kin
+import planner as plannermod
+import runner as runnermod
 import utra_model
+from executor import Executor, MoveFailed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "jog_panel.html")
+CELL_DIR = os.path.join(os.path.dirname(HERE), "cell")
 # Files the page may load: the 3D view's scripts and the arm and cart models (and three.js, below). Anything else is
 # a 404.
 STATIC_ROOTS = {"/web/": os.path.join(HERE, "web"), "/model/": os.path.join(HERE, "model")}
@@ -81,12 +87,12 @@ ARM_REACH_MM = 1000.0
 # angle) are 120:1 for J1 and J2 and 100:1 for the rest. So the joints top out at 105.0, 143.2 and 149.0 deg/s.
 # The controller faulted ("Motor_proc angle speed limit") on a J3 move at 120.3 deg/s, under J3's servo limit, so
 # moves keep 20% in hand: 84.0, 114.5 and 119.1 deg/s, rounded down to 0.1. (Umbratek's ROS model of the arm rates
-# the joints faster, at 2.0, 2.0, 2.1 and 3.0 rad/s, which these servos can't do.)
-SERVO_SPEED_LIMITS = (220.0, 220.0, 250.0, 260.0, 260.0, 260.0)  # rad/s at the motor
-GEAR_RATIOS = (120.0, 120.0, 100.0, 100.0, 100.0, 100.0)
-SPEED_HEADROOM = 0.8
-JOINT_RATED_DEG_S = tuple(math.floor(math.degrees(SPEED_HEADROOM * v / g) * 10) / 10
-                          for v, g in zip(SERVO_SPEED_LIMITS, GEAR_RATIOS))
+# the joints faster, at 2.0, 2.0, 2.1 and 3.0 rad/s, which these servos can't do.) The numbers live in planner.py,
+# which plans programs' moves with the same caps.
+SERVO_SPEED_LIMITS = plannermod.SERVO_SPEED_LIMITS
+GEAR_RATIOS = plannermod.GEAR_RATIOS
+SPEED_HEADROOM = plannermod.SPEED_HEADROOM
+JOINT_RATED_DEG_S = plannermod.JOINT_RATED_DEG_S
 # A move reaches its speed in about RAMP_S, but never ramps more gently than the minimums below, nor harder than
 # the maximum acceleration configured in the controller (read when the panel starts).
 RAMP_S = 0.3
@@ -109,8 +115,15 @@ SYNC_TOLERANCE_DEG = 1.0
 
 # Planned moves send joints to absolute angles. Umbratek's URDF xacro limits J3 to +/-165 deg and lets the
 # others turn about +/-359 deg; plans stay within the faders' +/-180 deg.
-DRAG_LIMITS_DEG = ((-180.0, 180.0), (-180.0, 180.0), (-165.0, 165.0),
-                   (-180.0, 180.0), (-180.0, 180.0), (-180.0, 180.0))
+DRAG_LIMITS_DEG = plannermod.DRAG_LIMITS_DEG
+FREEDRIVE_MAX_S = 600.0  # freedrive ends on its own after this long
+FREEDRIVE_CONFIRM_S = 2.0  # how long the controller has to report a change of motion mode once asked
+# The teach sensitivity, in % as Umbratek's current SDK documents it (90 to 110, 100 its default). On the arm
+# (2026-10-21) 90 held where the hand let go; 100 and 110 made the shoulder and elbow lighter, but a raised elbow sank
+# back a few degrees. The controller boots at 0, which felt like 90; the pinned SDK's 1 to 5 was never tried.
+TEACH_SENSITIVITIES = (90, 100, 110)
+TEACH_SENSITIVITY_DEFAULT = 90
+MAX_BODY_BYTES = 262144  # programs can be long
 
 
 def wrap(angle):
@@ -120,6 +133,12 @@ def wrap(angle):
 
 def rounded(values, digits):
     return [round(v, digits) if math.isfinite(v) else None for v in values]
+
+
+def in_freedrive(frame):
+    """Whether a status frame shows the arm free to guide: mode 2, not stopped, no error. The real arm reports state 1
+    then; stopped in mode 2 it holds rigid, and with an error flagged it holds too (2026-10-21)."""
+    return frame["mode"] == 2 and frame["status"] != 4 and not frame["err"]
 
 
 def pick(value, allowed, name):
@@ -139,27 +158,13 @@ def blocked(hit):
     return f"Not moving: {hit['part']} would come within {utra_model.MARGIN_M * 1000:.0f} mm of {hit['other']}."
 
 
-def capped_joint_speed(speed, travel):
-    """The speed (deg/s) to send a joint move at, and the joint that limits it (or None).
-
-    A point-to-point move turns every joint in step, the one with the furthest to go at the move's speed and the
-    others proportionally slower; the move is slowed until no joint would exceed its rated speed.
-    """
-    longest = max(travel)
-    sent, limiting = speed, None
-    for i, t in enumerate(travel):
-        if t > 1e-6:
-            rated = JOINT_RATED_DEG_S[i] if i < len(JOINT_RATED_DEG_S) else min(JOINT_RATED_DEG_S)
-            cap = math.floor(rated * longest / t * 10) / 10
-            if cap < sent:
-                sent, limiting = cap, i
-    return sent, limiting
+capped_joint_speed = plannermod.capped_joint_speed
 
 
 class Panel:
     """Owns the arm connection, the live status and the commanded goal."""
 
-    def __init__(self, ip, model=None):
+    def __init__(self, ip, model=None, cell_dir=CELL_DIR):
         self.ip = ip
         self.model = model  # utra_model.ArmModel, or None when planned moves are off
         self.lock = threading.Lock()  # one SDK conversation at a time
@@ -176,6 +181,16 @@ class Panel:
         self.note, self.note_ok = "Connected to the controller.", True
         self.stop_alarm = False  # a stop we couldn't confirm; cleared once the arm is seen stopped
         self.closing = False
+        # The machine-tending featureset: the cell (tools, frames, targets, zones), programs and their runner.
+        self.cell = cellmod.Cell(cell_dir)
+        self.programs = runnermod.Programs(cell_dir)
+        self.executor = Executor(self)
+        self.runner = runnermod.Runner(self, self.programs, os.path.join(cell_dir, "logs"))
+        self._cell_model = (None, None)
+        self.pending_points = {}  # frame name -> {"parent", "tool", "origin", "x", "xy"} touched so far
+        self.pending_poses = {}  # tool name -> flange poses (4x4) touching one point
+        self.freedrive_since = None
+        self.teach_level = None  # the teach sensitivity this server last set for freedrive
         threading.Thread(target=self._read_reports, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
 
@@ -227,8 +242,34 @@ class Panel:
             time.sleep(0.05)
         return self.frame
 
+    def _live_joints(self):
+        """Measured joint angles [rad] from a frame of the panel's own status stream that arrived after this call: a
+        fresh measurement for Enable's checks without another status connection. The real controller serves only a
+        few, and holds a closed one open for a while, so opening more made Enable fail (2026-10-21)."""
+        asked = time.monotonic()
+        deadline = asked + STALL_WAIT_S
+        while self.frame is None or self.frame_at <= asked:
+            if time.monotonic() >= deadline or self.closing:
+                raise arm.ArmError("No live status from the controller to check the joints against; not moving.")
+            time.sleep(0.02)
+        joints = list(self.frame["joints"][:self.axis])
+        if len(joints) != self.axis or not arm.all_finite(joints):
+            raise arm.ArmError("The status report returned unusable joint angles; not moving.")
+        return joints
+
     def _busy(self, frame):
         return frame["status"] == 1 or frame["queued"] > 0 or time.monotonic() - self.sent_at < BUSY_AFTER_SEND_S
+
+    def _await_frame(self, since, test, timeout_s):
+        """The first status frame to arrive after `since` (monotonic) that passes `test`, or None after timeout_s."""
+        deadline = since + timeout_s
+        while True:
+            frame, at = self.frame, self.frame_at
+            if frame is not None and at > since and test(frame):
+                return frame
+            if time.monotonic() > deadline or self.closing:
+                return None
+            time.sleep(0.02)
 
     def _say(self, text, ok=True):
         self.note, self.note_ok = text, ok
@@ -262,6 +303,18 @@ class Panel:
                 out["goal"] = {"kind": kind, "values": rounded([math.degrees(g) for g in goal], 3)}
             else:
                 out["goal"] = {"kind": kind, "values": rounded(goal[:3], 2) + rounded([math.degrees(g) for g in goal[3:]], 3)}
+        current = self.executor.current
+        if current is not None:  # a program's move: the 3D view shows where it's heading
+            out["goal"] = {"kind": "joint", "values": rounded(current[0].goal, 3), "program": True}
+        run = self.runner.status()
+        out["run"] = {k: run[k] for k in ("state", "mode", "manual", "program", "path", "step", "reason", "override",
+                                          "halt", "hit")}
+        out["run"]["lastEvent"] = run["events"][-1] if run["events"] else None
+        out["freedrive"] = in_freedrive(frame)
+        out["teachSensitivity"] = self.teach_level  # what this server last set for freedrive (None before)
+        out["mode"] = frame["mode"]
+        out["cellRevision"] = self.cell.revision
+        out["tool"] = self.cell.data["active"]["tool"]
         return out
 
     # ---- commands --------------------------------------------------------------
@@ -279,11 +332,14 @@ class Panel:
                 if self.arm.reset_err() not in arm.OK_CODES:
                     raise arm.ArmError("The controller refused the error reset.")
                 time.sleep(1.5)  # let the controller re-check its E-stop and joints
-            start = arm.preflight(self.arm, self.ip, self.axis)
+            start = arm.preflight(self.arm, self.ip, self.axis, measured=self._live_joints)
 
             def switch_on():
                 arm.prepare_for_motion(self.arm, self.axis)
-                arm.verified_targets(self.arm, self.ip, self.axis, start)
+                arm.verified_targets(self.arm, self.ip, self.axis, start, measured=self._live_joints)
+                if self.frame["mode"] != 0:  # the frame _live_joints waited for, from after the switch-on
+                    raise arm.ArmError(f"After Enable the controller reports motion mode {self.frame['mode']}, not "
+                                       "position mode (0).")
 
             arm.guarded(self.ip, self.arm, switch_on, STOP_LOCK_WAIT_S)
             self.goal_kind = self.goal = None
@@ -298,11 +354,214 @@ class Panel:
         self.goal_kind = self.goal = None
         self.sent_at = 0.0
         self.stop_alarm = not confirmed
+        frame = self.frame
+        if frame is not None and frame["mode"] == 2:  # STOP also ends freedrive
+            if self.lock.acquire(timeout=STOP_LOCK_WAIT_S):
+                try:
+                    self.arm.set_motion_mode(0)
+                except Exception:
+                    pass
+                finally:
+                    self.lock.release()
+            self.freedrive_since = None
         if confirmed:
             said = f"Stopped because {cause}." if cause else "Stopped."
             return True, self._say(f"{said} The controller confirmed it. Hold Enable to carry on.")
         why = f" The stop was sent because {cause}." if cause else ""
         return False, self._say(f"STOP NOT CONFIRMED: press the hardware E-stop now.{why}", ok=False)
+
+    # ---- the cell, planning and the runner's needs -------------------------------------------------------------
+
+    def cell_model(self):
+        """The arm model with the active tool's shape and the cell's keep-out zones, rebuilt when the cell changes."""
+        key = (self.cell.revision, self.cell.data["active"]["tool"])
+        if self._cell_model[0] != key:
+            self._cell_model = (key, self.cell.collision_model(self.model))
+        return self._cell_model[1]
+
+    def planner(self):
+        if self.model is None:
+            raise arm.ArmError("The arm model didn't load, so planned moves are off.")
+        return plannermod.Planner(self.cell_model(), self.joint_acc_max, self.tool_acc_max)
+
+    def send_payload(self):
+        """Tell the controller the active tool's payload (mass kg, centre of gravity mm from the flange), as the SDK
+        asks whenever the payload changes; the controller's own tool offset stays zero (decision D14)."""
+        tool = self.cell.tool()
+        with self.lock:
+            ret = self.arm.set_tcp_load(float(tool["mass"]), [float(v) for v in tool["cog"]])
+        if ret not in arm.OK_CODES:
+            raise arm.ArmError(f"The controller refused the payload (code {ret}).")
+
+    def current_joints(self):
+        """The measured joints (deg), from fresh status."""
+        frame = self._fresh_frame()
+        q = [math.degrees(v) for v in frame["joints"][:self.axis]]
+        if not arm.all_finite(q):
+            raise arm.ArmError("The status report has unusable joint angles.")
+        return q
+
+    def tool_point(self, joints=None, tool=None):
+        """base <- the active (or named) tool's point (4x4), at `joints` or where the arm is."""
+        q = joints if joints is not None else self.current_joints()
+        return kin.mul(self.model.frames(q)[-1], self.cell.tool_matrix(tool))
+
+    def plan_move(self, step, start, speed, ori_speed=60.0):
+        """A Plan for a program's move step (a joint or straight move to a target, with an optional offset)."""
+        target = self.cell.target(step["target"])
+        p = self.planner()
+        if "joints" in target:
+            if step["kind"] != "joint":
+                raise plannermod.PlanError(f"{step['target']!r} is a joint target; a straight line needs a tool target.")
+            return p.joint(start, target["joints"], speed, step["target"])
+        active = self.cell.data["active"]["tool"]
+        if target["tool"] != active:
+            raise plannermod.PlanError(f"{step['target']!r} was taught with the tool {target['tool']!r}, but the active "
+                                       f"tool is {active!r}.")
+        if target.get("unreachable"):
+            raise plannermod.PlanError(f"{step['target']!r} became unreachable when its frame was recalibrated; "
+                                       "teach it again.")
+        pose = self.cell.target_matrix(step["target"], step.get("offset"))
+        tool = self.cell.tool_matrix()
+        label = step["target"] + (" (offset)" if step.get("offset") else "")
+        if step["kind"] == "joint":
+            return p.joint_to_pose(start, pose, tool, speed, seed=target.get("seed"), label=label)
+        return p.line(start, pose, tool, speed, ori_speed, label=label)
+
+    def check_can_run(self, dry=False):
+        """Refuses (ArmError) unless a run or a planned move may start now."""
+        frame = self._fresh_frame()
+        if self.model is None:
+            raise arm.ArmError("The arm model didn't load, so programs can't be planned.")
+        if dry:
+            return
+        if self.stop_alarm:
+            raise arm.ArmError("A stop wasn't confirmed. Press the hardware E-stop, release it, then hold Enable.")
+        if frame["err"]:
+            raise arm.ArmError(f"The controller reports error {arm.error_text(frame['err'])}. Fix it, then hold Enable.")
+        if frame["mode"] == 2:
+            raise arm.ArmError("The arm is in freedrive. Leave freedrive first.")
+        if frame["enable"] & self.mask != self.mask:
+            raise arm.ArmError("The motors are off. Hold Enable first.")
+        if frame["status"] not in (0, 2) or self._busy(frame):
+            raise arm.ArmError("The arm isn't ready and still. Wait for it, or hold Enable.")
+        self.sent_at = 0.0
+        self.goal_kind = self.goal = None
+
+    def rearm(self):
+        """After a pause's STOP: make the arm ready again (Enable's checks and sequence), if it's stopped, then wait
+        for a status frame from after it, so what the runner plans from includes the enable shift (about 0.5 mm)."""
+        frame = self._fresh_frame()
+        if frame["status"] == 4 or frame["enable"] & self.mask != self.mask:
+            self.enable()
+            armed = time.monotonic()
+            deadline = armed + STALL_WAIT_S
+            while self.frame_at <= armed + 0.02 and time.monotonic() < deadline:
+                time.sleep(0.02)
+
+    def read_input(self, line, bit):
+        """A digital input: line "tool" or "controller", bit 0-15."""
+        with self.lock:
+            st, values = (self.arm.get_tgpio_in if line == "tool" else self.arm.get_cgpio_in)()
+        if not isinstance(values, list) or len(values) < 2:
+            raise MoveFailed(f"couldn't read the {line}'s inputs (code {st})")
+        return (int(values[1]) >> bit) & 1
+
+    def write_output(self, name, value):
+        line, bit = runnermod.io_name(name, "output")
+        word = (1 << (16 + bit)) | ((1 if value else 0) << bit)
+        with self.lock:
+            ret = (self.arm.set_tgpio_digit_out if line == "tool" else self.arm.set_cgpio_digit_out)(word)
+        if ret not in arm.OK_CODES:
+            raise MoveFailed(f"the controller refused to set {name} (code {ret})")
+
+    def io_state(self):
+        out = {}
+        for line in ("tool", "controller"):
+            with self.lock:
+                st_i, ins = (self.arm.get_tgpio_in if line == "tool" else self.arm.get_cgpio_in)()
+                st_o, outs = (self.arm.get_tgpio_out if line == "tool" else self.arm.get_cgpio_out)()
+            out[line] = {"inputs": int(ins[1]) if isinstance(ins, list) else None,
+                         "outputs": int(outs[1]) if isinstance(outs, list) else None}
+        return out
+
+    def freedrive(self, on, sensitivity=None, reenable=True):
+        """Enter freedrive (motion mode 2, joint teaching) at a teach sensitivity in TEACH_SENSITIVITIES, or leave it.
+
+        Umbratek's order (their SDK's readme, and the controller's own dashboard): the settings first, then the motors on
+        and the arm ready, then mode 2. What this arm did (2026-10-21, tools/capture/teach_probe.py): writing the teach
+        sensitivity stops it; mode 2 is ignored while it's stopped, and taken at once from ready, after which it reports
+        state 1; STOP holds it rigid, still in mode 2; leaving mode 2 switches the motors off onto their brakes (J3
+        settles about 0.45 deg). So entering may run Enable's checked sequence first, and leaving runs it again after,
+        unless `reenable` is False (freedrive timing out, with nobody at the arm)."""
+        if not on:
+            return self._leave_freedrive(reenable)
+        level = pick(TEACH_SENSITIVITY_DEFAULT if sensitivity is None else sensitivity, TEACH_SENSITIVITIES,
+                     "teach sensitivity")
+        if self.runner.busy:
+            raise arm.ArmError("A program is running. Stop it before freedrive.")
+        frame = self._fresh_frame()
+        if frame["err"] or self.stop_alarm:
+            raise arm.ArmError("Clear the fault first (hold Enable).")
+        if frame["mode"] == 2:
+            raise arm.ArmError("Already in freedrive: to change the sensitivity, leave freedrive first."
+                               if in_freedrive(frame) else "The arm is stopped in freedrive mode. Hold Enable first.")
+        if frame["enable"] & self.mask != self.mask:
+            raise arm.ArmError("The motors are off. Hold Enable first.")
+        if frame["status"] in (1, 3) or self._busy(frame):
+            raise arm.ArmError("The arm is moving. Wait for it to stop.")
+        with self.lock:
+            ret, current = self.arm.get_teach_sens()
+            written = None
+            if ret not in arm.OK_CODES or current != level:
+                written = time.monotonic()
+                if self.arm.set_teach_sens(int(level)) not in arm.OK_CODES:
+                    raise arm.ArmError("The controller refused the teach sensitivity.")
+        self.teach_level = int(level)
+        if written is not None:  # the write stops the arm: wait for that, then make it ready again
+            self._await_frame(written, lambda f: f["status"] == 4, 1.0)
+        if self._fresh_frame()["status"] == 4:
+            self.enable()  # Enable's checks (no jump) and sequence: ready in position mode
+        with self.lock:
+            frame = self._fresh_frame()
+            if frame["status"] not in (0, 2) or frame["mode"] != 0 or frame["err"]:
+                raise arm.ArmError(f"The arm isn't ready for freedrive (state {frame['status']}, mode {frame['mode']}, "
+                                   f"error {frame['err']}). Hold Enable, then try again.")
+            asked = time.monotonic()
+            ret = self.arm.set_motion_mode(2)
+        if ret not in arm.OK_CODES:
+            raise arm.ArmError(f"The controller refused freedrive (code {ret}); the arm holds, ready.")
+        frame = self._await_frame(asked, in_freedrive, FREEDRIVE_CONFIRM_S)
+        if frame is None:
+            self.stop("the controller didn't enter freedrive")  # and leaves mode 2 if it took it: motors off
+            last = self.frame or {}
+            raise arm.ArmError(f"The controller didn't enter freedrive (it reports state {last.get('status')}, mode "
+                               f"{last.get('mode')}, error {last.get('err')}); stopped. Hold Enable to carry on.")
+        self.freedrive_since = time.monotonic()
+        return self._say(f"Freedrive on (sensitivity {level}%): guide the arm by hand and record targets as you go. "
+                         "Leaving switches the motors off and on again.")
+
+    def _leave_freedrive(self, reenable):
+        frame = self._fresh_frame()
+        self.freedrive_since = None
+        if frame["mode"] != 2:
+            return self._say("Not in freedrive.")
+        with self.lock:
+            asked = time.monotonic()
+            ret = self.arm.set_motion_mode(0)
+        if ret not in arm.OK_CODES or self._await_frame(asked, lambda f: f["mode"] != 2, FREEDRIVE_CONFIRM_S) is None:
+            confirmed, _ = self.stop("the controller didn't confirm leaving freedrive")
+            if not confirmed:
+                raise arm.ArmError("STOP NOT CONFIRMED leaving freedrive: press the hardware E-stop now.")
+            raise arm.ArmError("The controller didn't confirm leaving freedrive; stopped. Hold Enable to carry on.")
+        if not reenable:
+            return self._say("Freedrive off: the motors are off and the arm rests on its brakes. Hold Enable to carry on.")
+        try:
+            self.enable()  # Enable's checks (no jump) and sequence: ready in position mode
+        except arm.ArmError as e:
+            raise arm.ArmError(f"Freedrive off; the motors are off and the arm rests on its brakes. {e}")
+        return self._say("Freedrive off: motors back on, ready to move. The arm settled onto its brakes first "
+                         "(about 0.5 mm); targets recorded in freedrive are unaffected.")
 
     def jog(self, body):
         """Move one step. Returns (moved, message)."""
@@ -333,6 +592,10 @@ class Panel:
             if frame["status"] not in (0, 1, 2):
                 state = arm.MOTION_STATES.get(frame["status"], "in an unknown state")
                 raise arm.ArmError(f"The arm is {state}. Hold Enable to make it ready.")
+            if self.runner.moving:
+                raise arm.ArmError("A program is running. Pause or stop it first.")
+            if frame["mode"] == 2:
+                raise arm.ArmError("The arm is in freedrive. Leave freedrive to jog.")
             busy = self._busy(frame)
             if self.goal is None or not busy:
                 self.goal, self.goal_kind = self._synced_goal(kind, frame), kind
@@ -347,7 +610,8 @@ class Panel:
                 if lead > MAX_LEAD_STEPS * step + 0.5:
                     return False, self._say("Holding: the arm is still catching up with earlier clicks.")
                 if self.model is not None:  # the step this click adds, from the goal before it
-                    hit = self.model.check_path([math.degrees(g) for g in self.goal], [math.degrees(g) for g in goal])
+                    hit = self.cell_model().check_path([math.degrees(g) for g in self.goal],
+                                                       [math.degrees(g) for g in goal])
                     if hit is not None:
                         raise arm.ArmError(blocked(hit))
                 sent, limiting = capped_joint_speed(speed, [step if i == index else 0.0 for i in range(self.axis)])
@@ -364,6 +628,8 @@ class Panel:
                 rot_lead = max(abs(math.degrees(wrap(g - m))) for g, m in zip(goal[3:], frame["pose"][3:6]))
                 if pos_lead > MAX_LEAD_STEPS * step + 1.0 or rot_lead > MAX_LEAD_STEPS * rot_step + 0.5:
                     return False, self._say("Holding: the arm is still catching up with earlier clicks.")
+                if self.model is not None:  # the line this click adds, planned and checked like a program's
+                    self._check_tool_step(frame, self.goal, goal, speed)
                 ret = self.arm.moveto_cartesian_line(goal, speed, self._tool_acc(speed), 0)
                 axis_name = ("X", "Y", "Z", "Roll", "Pitch", "Yaw")[index]
                 value = goal[index] if index < 3 else math.degrees(goal[index])
@@ -376,6 +642,20 @@ class Panel:
             self.goal, self.sent_at = goal, time.monotonic()
             self.heard_at = self.sent_at  # the page is waiting on this very request, so it isn't quiet
         return True, self._say(text)
+
+    def _check_tool_step(self, frame, before, after, speed):
+        """Plan a tool step as a straight line of the flange (the controller's own tool point is the flange), from
+        the goal before it to the new one, with the cell's tool and zones: refuses a step out of reach, through a
+        singularity or into anything."""
+        p = self.planner()
+        q = [math.degrees(v) for v in frame["joints"][:self.axis]]
+        start = p.kin.solve(q, kin.from_controller_pose(before), DRAG_LIMITS_DEG)
+        if not start["ok"]:
+            return  # the arm is between goals it hasn't reached; the controller has the earlier step in hand
+        try:
+            p.line(start["joints"], kin.from_controller_pose(after), kin.IDENTITY, speed, label="the step's end")
+        except plannermod.PlanError as e:
+            raise arm.ArmError(str(e))
 
     def move(self, body):
         """Move the arm to a plan: absolute angles for one or more joints, all sent as one joint move.
@@ -415,17 +695,21 @@ class Panel:
             if frame["status"] not in (0, 1, 2):
                 state = arm.MOTION_STATES.get(frame["status"], "in an unknown state")
                 raise arm.ArmError(f"The arm is {state}. Hold Enable to make it ready.")
+            if self.runner.moving:
+                raise arm.ArmError("A program is running. Pause or stop it first.")
             if self._busy(frame):
                 raise arm.ArmError("The arm is still moving. Wait for it to settle, or press STOP.")
+            if frame["mode"] == 2:
+                raise arm.ArmError("The arm is in freedrive. Leave freedrive first.")
             start = self._synced_goal("joint", frame)
             start_deg = [math.degrees(v) for v in start]
             moving = [i for i, angle in enumerate(targets) if angle is not None and abs(angle - start_deg[i]) >= 0.05]
             if not moving:
                 return False, self._say("The arm is already in that position.")
             goal_deg = [float(targets[i]) if i in moving else start_deg[i] for i in range(self.axis)]
-            # The whole path, not just the plan: never within the margin of the arm itself, the cart or the
-            # floor (or, for parts already that close, no closer than they are now).
-            hit = self.model.check_path(start_deg, goal_deg)
+            # The whole path, not just the plan: never within the margin of the arm itself, the cart, the floor, the
+            # tool or the cell's keep-out zones (or, for parts already that close, no closer than they are now).
+            hit = self.cell_model().check_path(start_deg, goal_deg)
             if hit is not None:
                 raise arm.ArmError(blocked(hit))
             # Joints not in the plan stay exactly at their current targets.
@@ -468,8 +752,16 @@ class Panel:
         while not self.closing:
             time.sleep(0.1)
             frame, sent_at = self.frame, self.sent_at
-            if frame is None or not sent_at:
-                continue
+            if self.freedrive_since is not None and time.monotonic() - self.freedrive_since > FREEDRIVE_MAX_S:
+                try:
+                    self.freedrive(False, reenable=False)  # nobody may be there: the motors stay off
+                    self._say(f"Freedrive ended on its own after {FREEDRIVE_MAX_S / 60:.0f} minutes; the motors are "
+                              "off. Hold Enable to carry on.")
+                except arm.ArmError:
+                    pass
+                self.freedrive_since = None
+            if frame is None or not sent_at or self.runner.moving:
+                continue  # nothing of the page's under way (a program's moves have their own supervision)
             now = time.monotonic()
             if not (frame["status"] == 1 or frame["queued"] > 0 or now - sent_at < BUSY_AFTER_SEND_S):
                 continue
@@ -590,6 +882,14 @@ def make_handler(panel, token, page, port, three):
             if path == "/api/status":
                 panel.heard()
                 return self._send(200, panel.status())
+            if path.startswith("/api/"):
+                query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
+                try:
+                    reply = api_get(panel, path, query)
+                except (arm.ArmError, cellmod.CellError, runnermod.ProgramError, plannermod.PlanError, MoveFailed) as e:
+                    reply = {"ok": False, "message": str(e)}
+                if reply is not None:
+                    return self._send(200, reply)
             if path.startswith(THREE_URL):  # only the checked copy, and only its scripts
                 data = three.get(path[len(THREE_URL):]) if path.endswith(".js") else None
                 if data is not None:
@@ -609,7 +909,7 @@ def make_handler(panel, token, page, port, three):
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
-            if not 0 <= length <= 4096:
+            if not 0 <= length <= MAX_BODY_BYTES:
                 return self._send(400, {"ok": False, "message": "Bad request."})
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -620,9 +920,12 @@ def make_handler(panel, token, page, port, three):
             panel.heard()
             try:
                 if self.path == "/api/stop":
+                    panel.runner.stop("STOP was pressed")
                     confirmed, text = panel.stop()
                     return self._send(200, {"ok": confirmed, "message": text})
                 if self.path == "/api/enable":
+                    if panel.runner.moving:
+                        raise arm.ArmError("A program is running. Pause or stop it first.")
                     return self._send(200, {"ok": True, "message": panel.enable()})
                 if self.path == "/api/jog":
                     moved, text = panel.jog(body)
@@ -630,11 +933,251 @@ def make_handler(panel, token, page, port, three):
                 if self.path == "/api/move":
                     moved, text = panel.move(body)
                     return self._send(200, {"ok": True, "moved": moved, "message": text})
-            except arm.ArmError as e:
+                reply = api_post(panel, self.path, body)
+                if reply is not None:
+                    return self._send(200, reply)
+            except (arm.ArmError, cellmod.CellError, runnermod.ProgramError, plannermod.PlanError, MoveFailed) as e:
                 return self._send(200, {"ok": False, "message": panel._say(str(e), ok=False)})
             return self._send(404, {"ok": False, "message": "Not found."})
 
     return Handler
+
+
+# ---- the featureset's API ----------------------------------------------------------------------------------------
+
+def cell_view(panel):
+    """The cell, with every frame and target placed in the base frame and the collision model the page should
+    check against (with the active tool's shape and the zones)."""
+    cell = panel.cell
+    data = cell.snapshot()
+    frames = {}
+    for name in data["frames"]:
+        frames[name] = kin.matrix_to_pose(cell.frame_matrix(name), 3)
+    targets = {}
+    for name, t in data["targets"].items():
+        if "joints" in t:
+            targets[name] = None
+        else:
+            try:
+                targets[name] = kin.matrix_to_pose(cell.target_matrix(name), 3)
+            except cellmod.CellError:
+                targets[name] = None
+    out = {"ok": True, "cell": data, "framesInBase": frames, "targetsInBase": targets,
+           "pending": {"frames": panel.pending_points, "tools": {k: len(v) for k, v in panel.pending_poses.items()}}}
+    scene = {"zones": [], "frames": [], "targets": []}  # what the 3D view draws (metres, base frame)
+    for o, (name, zone) in zip(cell.zone_obstacles(), data["zones"].items()):
+        scene["zones"].append({"name": name, "centre": o.centre, "axes": o.axes, "half": o.half})
+    for name in data["frames"]:
+        t = cell.frame_matrix(name)
+        scene["frames"].append({"name": name, "origin": [t[i][3] for i in range(3)], "x": [t[i][0] for i in range(3)],
+                                "y": [t[i][1] for i in range(3)]})
+    for name, pose in targets.items():
+        if pose is not None:
+            scene["targets"].append({"name": name, "p": [v / 1000.0 for v in pose["xyz"]]})
+    out["scene"] = scene
+    if panel.model is not None:
+        out["collision"] = panel.cell_model().collision_config()
+    return out
+
+
+def api_get(panel, path, query):
+    if path == "/api/cell":
+        return cell_view(panel)
+    if path == "/api/programs":
+        return {"ok": True, "programs": panel.programs.names()}
+    if path == "/api/program":
+        return {"ok": True, "program": panel.programs.load(query.get("name"))}
+    if path == "/api/run":
+        return {"ok": True, "run": panel.runner.status()}
+    if path == "/api/io":
+        return {"ok": True, "io": panel.io_state()}
+    return None
+
+
+def _idle_for_setup(panel):
+    if panel.runner.moving:
+        raise arm.ArmError("A program is running. Pause or stop it first.")
+
+
+def api_post(panel, path, body):
+    cell, runner = panel.cell, panel.runner
+    rev = body.get("revision")
+    if path == "/api/cell/tool":
+        _idle_for_setup(panel)
+        cell.set_tool(body.get("name"), body.get("tcp"), body.get("mass", 0.0), body.get("cog", [0, 0, 0]),
+                      body.get("capsules"), rev)
+        if body.get("name") == cell.data["active"]["tool"]:
+            panel.send_payload()
+        return dict(cell_view(panel), message=f"Tool {body.get('name')} saved.")
+    if path == "/api/cell/tool/delete":
+        cell.delete_tool(body.get("name"), rev)
+        return dict(cell_view(panel), message=f"Tool {body.get('name')} deleted.")
+    if path == "/api/cell/tool/activate":
+        _idle_for_setup(panel)
+        cell.activate_tool(body.get("name"), rev)
+        panel.send_payload()
+        return dict(cell_view(panel), message=f"Tool {body.get('name')} in use; its payload sent to the controller.")
+    if path == "/api/cell/tool/touch":
+        name = cellmod.check_name(body.get("name"), "tool")
+        poses = panel.pending_poses.setdefault(name, [])
+        poses.append(panel.model.frames(panel.current_joints())[-1])
+        return dict(cell_view(panel), message=f"Touch {len(poses)} recorded for {name}'s tool point"
+                                              + (" (4 or more are needed)." if len(poses) < 4 else "."))
+    if path == "/api/cell/tool/calibrate":
+        name = cellmod.check_name(body.get("name"), "tool")
+        point, fixed, rms = cellmod.tool_from_flange_poses(panel.pending_poses.get(name, []))
+        old = cell.data["tools"].get(name)
+        tcp = {"xyz": [round(v, 3) for v in point], "rpy": old["tcp"]["rpy"] if old else [0.0, 0.0, 0.0]}
+        calibration = {"method": "4-point", "touches": len(panel.pending_poses[name]), "rmsMm": round(rms, 3),
+                       "fixedPointMm": [round(v, 2) for v in fixed], "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        cell.set_tool(name, tcp, old["mass"] if old else 0.0, old["cog"] if old else [0, 0, 0],
+                      old["capsules"] if old else [], rev, calibration)
+        panel.pending_poses.pop(name, None)
+        return dict(cell_view(panel), message=f"Tool {name}'s point is {tcp['xyz']} mm from the flange "
+                                              f"(fit within {rms:.2f} mm RMS).")
+    if path == "/api/cell/tool/touch/clear":
+        panel.pending_poses.pop(body.get("name"), None)
+        return cell_view(panel)
+    if path == "/api/cell/frame":
+        report = cell.set_frame(body.get("name"), body.get("parent", cellmod.BASE), body.get("pose"), rev,
+                                model=panel.model)
+        return dict(cell_view(panel), remapped=report, message=f"Frame {body.get('name')} saved"
+                    + (f"; {len(report)} target(s) moved with it." if report else "."))
+    if path == "/api/cell/frame/delete":
+        cell.delete_frame(body.get("name"), rev)
+        return dict(cell_view(panel), message=f"Frame {body.get('name')} deleted.")
+    if path == "/api/cell/frame/touch":
+        name = cellmod.check_name(body.get("name"), "frame")
+        which, parent = body.get("which"), body.get("parent", cellmod.BASE)
+        if which not in ("origin", "x", "xy"):
+            raise cellmod.CellError("Touch the origin, a point along +x, or a point in the xy plane (+y side).")
+        point = kin.position(kin.mul(kin.invert(cell.frame_matrix(parent)), panel.tool_point()))
+        pending = panel.pending_points.setdefault(name, {"parent": parent})
+        if pending.get("parent") != parent:
+            pending.clear()
+            pending["parent"] = parent
+        pending[which] = [round(v, 3) for v in point]
+        pending["tool"] = cell.data["active"]["tool"]
+        return dict(cell_view(panel), message=f"{which} of {name} recorded at {pending[which]} mm in {parent}.")
+    if path == "/api/cell/frame/calibrate":
+        name = cellmod.check_name(body.get("name"), "frame")
+        pending = panel.pending_points.get(name, {})
+        points = body.get("points") or {k: pending.get(k) for k in ("origin", "x", "xy")}
+        if any(points.get(k) is None for k in ("origin", "x", "xy")):
+            missing = [k for k in ("origin", "x", "xy") if points.get(k) is None]
+            raise cellmod.CellError(f"Touch {', '.join(missing)} first.")
+        parent = body.get("parent", pending.get("parent", cellmod.BASE))
+        report = cell.calibrate_frame(name, parent, points, rev, panel.model, pending.get("tool"))
+        panel.pending_points.pop(name, None)
+        moved = [r for r in report if r["movedMm"] > 0.0005 or r["turnedDeg"] > 0.0005]
+        lost = [r["target"] for r in report if r.get("unreachable")]
+        flipped = [r["target"] for r in report if r.get("configurationChanged")]
+        text = f"Frame {name} calibrated; {len(moved)} target(s) moved with it."
+        if lost:
+            text += f" Now out of reach: {', '.join(lost)}."
+        if flipped:
+            text += f" Now in another configuration: {', '.join(flipped)}."
+        return dict(cell_view(panel), remapped=report, message=text)
+    if path == "/api/cell/target":
+        return teach_target(panel, body)
+    if path == "/api/cell/target/delete":
+        users = runnermod.programs_using(panel.programs, body.get("name"))
+        if users:
+            raise cellmod.CellError(f"Target {body.get('name')!r} is used by {', '.join(users)}; take it out of "
+                                    f"{'them' if len(users) > 1 else 'it'} first.")
+        cell.delete_target(body.get("name"), rev)
+        return dict(cell_view(panel), message=f"Target {body.get('name')} deleted.")
+    if path == "/api/cell/zone":
+        cell.set_zone(body.get("name"), body.get("frame", cellmod.BASE), body.get("pose"), body.get("size"), rev)
+        return dict(cell_view(panel), message=f"Zone {body.get('name')} saved.")
+    if path == "/api/cell/zone/delete":
+        cell.delete_zone(body.get("name"), rev)
+        return dict(cell_view(panel), message=f"Zone {body.get('name')} deleted.")
+    if path == "/api/program":
+        saved = panel.programs.save(body.get("program"), cell, rev)
+        return {"ok": True, "program": saved, "message": f"Program {saved['name']} saved."}
+    if path == "/api/program/delete":
+        panel.programs.delete(body.get("name"))
+        return {"ok": True, "message": f"Program {body.get('name')} deleted."}
+    if path == "/api/run/start":
+        runner.start(body.get("name"), body.get("mode", "run"), body.get("from"))
+        return {"ok": True, "run": runner.status(), "message": f"Running {body.get('name')}"
+                + {"run": ".", "step": ", one step at a time.", "dry": " dry: planning only, nothing moves."}[
+                    body.get("mode", "run")]}
+    if path in ("/api/run/pause", "/api/run/resume", "/api/run/step", "/api/run/reset"):
+        getattr(runner, path.rsplit("/", 1)[1])()
+        return {"ok": True, "run": runner.status()}
+    if path == "/api/run/stop":
+        stopped = runner.stop("Stop run was pressed")
+        return {"ok": True, "run": runner.status(), "message": "Stopping the run." if stopped else "No run to stop."}
+    if path == "/api/run/override":
+        runner.set_override(body.get("percent"))
+        return {"ok": True, "run": runner.status(), "message": f"Speed override {runner.override}%."}
+    if path in ("/api/moveto", "/api/plan"):
+        step = {"type": "move", "kind": body.get("kind", "joint"), "target": body.get("target")}
+        if body.get("offset"):
+            step["offset"] = body["offset"]
+        if body.get("speed") is not None:
+            step["speed"] = body["speed"]
+        program = {"name": "manual", "steps": [step], "speed": body.get("defaults") or {}}
+        if path == "/api/plan":
+            checked = runnermod.check_program(program, cell)
+            s = checked["steps"][0]
+            speed = s.get("speed", checked["speed"]["tcp" if s["kind"] == "line" else "joint"])
+            plan = panel.plan_move(s, panel.current_joints(), speed, checked["speed"]["ori"])
+            return {"ok": True, "plan": plan.summary(), "message": plan.text}
+        runner.start(program=program, manual=True)
+        return {"ok": True, "run": runner.status(), "message": f"Moving to {body.get('target')}."}
+    if path == "/api/io/set":
+        _idle_for_setup(panel)
+        if runner.busy:
+            raise arm.ArmError("A program is under way; its outputs are its own.")
+        panel.write_output(body.get("output"), 1 if body.get("value") else 0)
+        return {"ok": True, "io": panel.io_state(), "message": f"{body.get('output')} set to {1 if body.get('value') else 0}."}
+    if path == "/api/freedrive":
+        return {"ok": True, "message": panel.freedrive(bool(body.get("on")), body.get("sensitivity"))}
+    return None
+
+
+def teach_target(panel, body):
+    """Save a target: given ({"pose"} or {"joints"}), or where the arm is ({"here": true}), optionally adding a move
+    to it into a program ({"program", "at": step path to insert after, "move": "joint" | "line"})."""
+    cell, rev = panel.cell, body.get("revision")
+    name, frame = body.get("name"), body.get("frame", cellmod.BASE)
+    taught = None
+    if body.get("here"):
+        if panel.runner.moving:
+            raise arm.ArmError("A program is running. Pause or stop it first.")
+        q = panel.current_joints()
+        taught = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "how": "freedrive" if panel.frame["mode"] == 2 else "here",
+                  "joints": [round(v, 4) for v in q]}
+        if body.get("kind") == "joint":
+            entry = cell.set_target(name, joints=[round(v, 4) for v in q], revision=rev, taught=taught)
+        else:
+            pose = kin.mul(kin.invert(cell.frame_matrix(frame)), panel.tool_point(q))
+            entry = cell.set_target(name, frame, kin.matrix_to_pose(pose, 4), seed=[round(v, 4) for v in q],
+                                    revision=rev, taught=taught)
+    elif body.get("joints") is not None:
+        entry = cell.set_target(name, joints=body["joints"], revision=rev)
+    else:
+        entry = cell.set_target(name, frame, body.get("pose"), body.get("tool"), body.get("seed"), revision=rev)
+    message = f"Target {name} saved" + (" where the arm is." if taught else ".")
+    if body.get("program"):
+        program = panel.programs.load(body["program"])
+        move = body.get("move") or ("joint" if "joints" in entry else "line")
+        step = {"type": "move", "kind": move, "target": name}
+        steps, at = program["steps"], body.get("at")
+        if at:  # insert after this step (a path of 0-based indexes)
+            container = steps
+            for i in at[:-1]:
+                node = container[i]
+                container = node.get("steps") or node.get("then") or []
+            container.insert(at[-1] + 1, step)
+        else:
+            steps.append(step)
+        saved = panel.programs.save(program, cell, program.get("revision"))
+        message += f" Added a {'straight' if move == 'line' else 'joint'} move to it in {saved['name']}."
+    return dict(cell_view(panel), message=message, target=entry)
 
 
 def main(argv=None):
@@ -643,6 +1186,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Serve a jog panel for the UTRA arm at http://127.0.0.1:PORT.")
     parser.add_argument("ip", help="controller address, e.g. 192.168.2.1")
     parser.add_argument("--port", type=int, default=8765, help="local port (default 8765)")
+    parser.add_argument("--cell", default=CELL_DIR, help="folder for the cell, programs and run logs (default cell/)")
     args = parser.parse_args(argv)
     if not 1024 <= args.port <= 65535:
         parser.error("--port must be between 1024 and 65535")
@@ -653,8 +1197,8 @@ def main(argv=None):
         print(f"Warning: couldn't load the arm model ({e}). The 3D view and planned moves are off.", file=sys.stderr)
         model = None
     try:
-        panel = Panel(args.ip, model)
-    except arm.ArmError as e:
+        panel = Panel(args.ip, model, args.cell)
+    except (arm.ArmError, cellmod.CellError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     if model is not None and len(model.joints) != panel.axis:
@@ -697,7 +1241,10 @@ def main(argv=None):
     finally:
         panel.closing = True
         frame = panel.frame
-        if panel.sent_at and frame is not None and (frame["status"] == 1 or frame["queued"] > 0):
+        if panel.runner.busy:
+            panel.runner.stop("the jog panel was closed")
+            panel.stop("the jog panel was closed during a program")
+        elif panel.sent_at and frame is not None and (frame["status"] == 1 or frame["queued"] > 0):
             panel.stop("the jog panel was closed")
         server.server_close()
     print("Jog panel closed.")

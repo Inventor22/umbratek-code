@@ -632,8 +632,10 @@ def servo_problem(arm, axis):
     return None
 
 
-def preflight(arm, ip, axis):
-    """Read-only checks before asking to move; returns the measured joint angles [rad]."""
+def preflight(arm, ip, axis, measured=None):
+    """Read-only checks before asking to move; returns the measured joint angles [rad]. `measured`, if given, returns
+    them from a status stream the caller already holds, instead of a new connection: the real controller serves only a
+    few status connections and doesn't free a closed one at once (2026-10-21)."""
     ensure_idle(arm, ip)
     ret, enabled = arm.get_motion_enable()
     if ret not in OK_CODES:
@@ -645,7 +647,7 @@ def preflight(arm, ip, axis):
             if ret_e in OK_CODES and codes[0] == 1:
                 raise ArmError("Not moving: " + ESTOP_HINT.format(ip=ip))
             raise ArmError(f"Not moving: {problem} Then run: python scripts/arm.py reset {ip}")
-    measured = measure(ip, axis)
+    measured = measured() if measured else measure(ip, axis)
     joint, diff = worst_diff(target_joints(arm), measured)
     if diff > MAX_JOINT_MISMATCH_DEG:
         raise ArmError(f"Not moving: the controller's target for joint {joint} is {diff:.1f} deg from its measured "
@@ -692,10 +694,11 @@ def prepare_for_motion(arm, axis):
         time.sleep(0.1)
 
 
-def verified_targets(arm, ip, axis, confirmed):
-    """The controller's joint targets after enabling, checked against a fresh measurement and the confirmed pose."""
+def verified_targets(arm, ip, axis, confirmed, measured=None):
+    """The controller's joint targets after enabling, checked against a fresh measurement and the confirmed pose.
+    `measured`, if given, returns the fresh measurement (as for preflight)."""
     targets = target_joints(arm)
-    for label, reference in (("measured", measure(ip, axis)), ("confirmed", confirmed)):
+    for label, reference in (("measured", measured() if measured else measure(ip, axis)), ("confirmed", confirmed)):
         joint, diff = worst_diff(targets, reference)
         if diff > MAX_JOINT_MISMATCH_DEG:
             raise ArmError(f"Not moving: joint {joint}'s target is {diff:.1f} deg from its {label} angle. "

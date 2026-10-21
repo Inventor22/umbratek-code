@@ -206,7 +206,8 @@ export function createChecker(config) {
     return {gap: distance(...points) - capsules[c].radius - capsules[o].radius, points};
   }
 
-  const names = ([c, o, fixed]) => [labels[capsules[c].body], fixed ? obstacles[o].label : labels[capsules[o].body]];
+  const names = ([c, o, fixed]) => [capsules[c].label || labels[capsules[c].body],
+    fixed ? obstacles[o].label : capsules[o].label || labels[capsules[o].body]];
 
   // Where a straight joint-space move first brings two things closer than the margin, or null; see
   // ArmModel.check_path for how the continuous check works.

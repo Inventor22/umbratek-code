@@ -337,13 +337,13 @@ The panel rejects Umbratek Studio's grey round buttons floating over a 3D viewpo
 A charcoal desk lit by three signal colours, with six strips of coloured tape for joint identity, and red, green and blue naming the tool gizmo's axes.
 
 ### Primary
-- **Backlight Amber** (#f2aa3c): held keys and motion. A key while it is held down; a joint or axis travelling to its commanded value (the hollow goal frame, the lit lead lights, the "→ target" line, the readout itself, the ring round the tape's activity dot); a move's destination in the 3D monitor (the shadow arm, the sweep arc on a dragged ring, the dragged gizmo arrow, a turned gizmo ring's wedge and arc, the tool path, the floating readout's border and target); the lamp along the plan bar's Move key; the state window, lit solid, while the arm is MOVING; messages about a hold or move still in progress; and the matching samples in the legends. Never the focus ring.
+- **Backlight Amber** (#f2aa3c): held keys and motion. A key while it is held down; a joint or axis travelling to its commanded value (the hollow goal frame, the lit lead lights, the "→ target" line, the readout itself, the ring round the tape's activity dot); a move's destination in the 3D monitor (the shadow arm, the sweep arc on a dragged ring, the dragged gizmo arrow, a turned gizmo ring's wedge and arc, the tool path, the floating readout's border and target); the lamp along the plan bar's Move key and along RUN; the state window and the run window, lit solid, while the arm is MOVING, RUNNING, STEPPING or in FREEDRIVE; the lamp of the step a run is moving through, and a hollow amber ring on the step it waits at (paused, halted or stepped), with that step's number; the freedrive key's charge bar, and its lamp and legend while freedrive is on; messages about a hold or move still in progress; and the matching samples in the legends. Never the focus ring.
 - **Amber Key Ink** (#1d1304): text on amber: a held key's legend and the words in the MOVING window.
 
 ### Secondary
 - **Motors-On Green** (#5ec683): live and powered. The link lamp while fresh status is arriving, Enable's charge bar, and Enable's lamp once the motors are on.
 - **STOP Red** (#d63a2f): the face of the STOP key, and nothing else.
-- **Alarm Red** (#ff8073): stopped, faulted, unreachable, refused or blocked, as light rather than fill. The dead link lamp; the rim of the alarm state window; the STOPPED and PAUSED state words; the 2px ring and legend on a refused key; the tick above a meter marker past ±180°; failure messages; and every mark of a blocked move: the shadow arm, sweep arc, tool path and floating readout, the contact mark and the overlay on the part it would hit, the plan bar's note, and the fader's goal frame and target line. Also the speed faders' redline, at the owner's request: the rule and ticks past it, the redline's figure and the top figure, the value while the cap sits past it, the message that says why, and the plan bar's note when a staged move would pass it.
+- **Alarm Red** (#ff8073): stopped, faulted, unreachable, refused or blocked, as light rather than fill. The dead link lamp; the rim of the alarm state window; the STOPPED and PAUSED state words, and the run window's STOPPED, PAUSED, HALTED and FAULTED; the lamp and number of the step a run faulted at; a failed run's lines in the run log; a step's or target's "no such target" and "out of reach" cue; a delete key's "Sure?" while it waits for its second press; the 2px ring and legend on a refused key; the tick above a meter marker past ±180°; failure messages; and every mark of a blocked move: the shadow arm, sweep arc, tool path and floating readout, the contact mark and the overlay on the part it would hit (also for a program step that faulted on a collision), the plan bar's note, and the fader's goal frame and target line. Also the speed faders' redline, at the owner's request: the rule and ticks past it, the redline's figure and the top figure, the value while the cap sits past it, the message that says why, and the plan bar's note when a staged move would pass it.
 
 ### Tertiary
 - **Scribble tapes**, one per joint in order: Masking Yellow (#e3ba4f) for J1 Base, Sky Tape (#7fb3d9) for J2 Shoulder, Sage Tape (#92cc8a) for J3 Elbow, Apricot Tape (#e19769) for J4 Wrist 1, Lilac Tape (#baa2dd) for J5 Wrist 2, Paper Tape (#dad5c9) for J6 Flange. Each fills its joint's scribble strip, colours its ring in the 3D monitor and, mixed at 55% with transparency, its meter's lit column.
@@ -353,8 +353,8 @@ A charcoal desk lit by three signal colours, with six strips of coloured tape fo
 ### Neutral
 - **Desk Charcoal** (#18191b): the page ground, and (at 95%) the plan bar docked over the 3D screen.
 - **Well Black** (#0e0f10): recessed displays: the state window at rest, the 3D screen (its scene background and fog too), the meters, the lead ladders and the message line; at 94% behind the floating readout.
-- **Channel Charcoal** (#1b1d20): channel strips and tool axis rows.
-- **Panel Grey** (#222427): the meter bridge and the three desk sections.
+- **Channel Charcoal** (#1b1d20): channel strips, tool axis rows, and the rows in the program, cell and log wells.
+- **Panel Grey** (#222427): the meter bridge and the desk's sections.
 - **Seam** (#33363b): every 1px border and divider, and the meter's zero line.
 - **Key Cap** (#34383d), **Cap Highlight** (#3f444a) and **Cap Rim** (#50565d): a key cap is a vertical gradient from highlight to cap inside a 1px rim.
 - **Legend Ink** (#ece8df): text, readouts and key legends; the keyboard focus ring.
@@ -364,9 +364,9 @@ A charcoal desk lit by three signal colours, with six strips of coloured tape fo
 ### Named Rules
 **The Backlight Rule.** Keys are charcoal at rest. Colour on the desk is light that reports state: amber for held keys and motion, green for live and motors on, red for stop, fault, no signal and refusal, and for speeds past the redline. Focus is drawn in Legend Ink, and nothing is coloured for decoration: besides the state colours, only the tapes, which name joints, and the gizmo's axis colours, which name axes, carry hue.
 
-**The Brightness Ladder Rule.** The state window's tones differ in brightness, not just hue. From brightest to darkest: MOVING lit solid amber, an alarm in solid red, READY lit green, STOPPED or PAUSED in a dark red tint, MOTORS OFF or CONNECTING in a plain dark well. Stale status drops any lit tone except alarm to that dark well and keeps the word.
+**The Brightness Ladder Rule.** The state window's tones differ in brightness, not just hue. From brightest to darkest: MOVING (and RUNNING or FREEDRIVE) lit solid amber, an alarm in solid red, READY lit green, STOPPED or PAUSED in a dark red tint, MOTORS OFF or CONNECTING in a plain dark well. Stale status drops any lit tone except alarm to that dark well and keeps the word. The run window climbs the same ladder without its solid red rung: RUNNING, STEPPING, PAUSING and STOPPING lit amber; DONE and ARRIVED lit green; PAUSED, HALTED, STOPPED and FAULTED in the dark red tint; NO RUN, DRY RUN and PLANNED in the plain well.
 
-**The One Red Key Rule.** STOP is the only key with a red face, and the alarm state window is the only other solid red. Elsewhere red is a lamp, a word, a rim, a 2px ring, a tick or a printed rule, and it marks a refused or blocked move, or a speed past the redline: the red shadow arm, arc, path and readout border, the red contact mark and the red overlay on the part it would hit, the red goal frame on a fader, and the red zone on a speed fader.
+**The One Red Key Rule.** STOP is the only key with a red face, and the alarm state window is the only other solid red (a faulted run takes the dark red tint, never solid red). Elsewhere red is a lamp, a word, a rim, a 2px ring, a tick or a printed rule, and it marks a refused or blocked move, a speed past the redline, a failed step, or a delete waiting for its second press: the red shadow arm, arc, path and readout border, the red contact mark and the red overlay on the part it would hit, the red goal frame on a fader, the red zone on a speed fader, a failed step's lamp, and the "Sure?" legend on an armed delete key.
 
 **The Tape Rule.** Each joint keeps its tape colour, in joint order, on its scribble strip, its meter's lit column and its ring in the 3D monitor, and nowhere else (the legend's ring sample borrows tape 2). Tape names a joint; its hue never reports state.
 
@@ -408,8 +408,8 @@ The page is three bands filling the viewport: the meter bridge, the desk and the
 **First viewport:** in the owner's app side panel (about 1018px wide) the desk is stacked, with the monitor above the faders. Side by side applies only at 1241px and wider; the breakpoint is 1240px. Stacked, the screen is clamp(300px, 36vh, 500px) tall and the fader meters are clamp(170px, 22vh, 280px), so the fader readouts land in the first screenful.
 
 - **Meter bridge:** one row of four zones: name and link lamp (at least 170px, 1fr), the state window (at least 280px, 2fr), Enable, then STOP at the right end. 14px gutters, 12px by 16px padding. It casts a shadow onto the desk.
-- **Desk at 1241px and wider:** "monitor | joints" over "monitor | tool". The monitor column is at least 400px and takes the spare width; the joint and tool sections share a column of up to 780px. 14px gutters inside a 14px by 16px margin. The monitor is pinned (sticky, 110px from the top) and sized to fill the space between the bridge and the message line (at least 460px tall) while the right column scrolls.
-- **Desk at 1240px and narrower:** everything stacks: monitor, joints, tool, with the screen clamp(300px, 36vh, 500px) tall.
+- **Desk at 1241px and wider:** the monitor at the left, beside a column of the joint, tool, program, teach and cell sections. The monitor column is at least 400px and takes the spare width; the right column is up to 780px. 14px gutters inside a 14px by 16px margin. The monitor is pinned (sticky, 110px from the top) and sized to fill the space between the bridge and the message line (at least 460px tall) while the right column scrolls.
+- **Desk at 1240px and narrower:** everything stacks: monitor, joints, tool, program, teach, cell, with the screen clamp(300px, 36vh, 500px) tall.
 - **Sections:** each opens with a bank row: its title, then (for the monitor) the legend and the Reset view key, (for joints) the step and speed faders and the meter legend (actual, commanded, planned, steps ahead), or (for the tool) its step, turn and speed faders. Faders share their bank row in equal widths (at least 150px, at most 320px, about 200px before they wrap), 24px apart with a seam between them, with the title baseline-aligned to their legends; the meter legend shares the row when it fits and takes its own row, flush right, when it doesn't.
 - **Joint strips:** six equal strips (at least 96px) in joint order, 8px apart, packed to the top. Top to bottom: tape, + key (46px), the meters (clamp(170px, 22vh, 280px)), − key (46px), readout, target line. The meters are the ±180° meter, taking the remaining width, and its 30px lead ladder, 4px apart.
 - **Tool rows:** two columns, POSITION (X, Y, Z) beside ORIENTATION (Roll, Pitch, Yaw), each a printed legend over three rows 8px apart. Each row: name (58px), − key (50px), reading, + key (50px).
@@ -504,7 +504,7 @@ Short faders in the joint and tool banks, one per setting: joint step (0.1–15�
 
 ### STOP key
 - **Style:** a STOP Red face, a 2px rim, 6px corners and at least 232px wide: the 36px STOP legend over an 11px sub-line naming its shortcuts (Space or Esc). The build sets that sub-line at 92% opacity (about 4.2:1); at full Lit White it measures 4.7:1.
-- **Behaviour:** fires on press, not release, and from Space anywhere on the page. Esc stops too, except that while the arm is still it first backs out one level: a drag in progress, then a staged plan. It is never disabled.
+- **Behaviour:** fires on press, not release, and from Space anywhere on the page, except in a text field, where Space types a space (STOP and Esc still stop there). Esc stops too, except that while the arm is still it first backs out one level: a drag in progress, then a staged plan. It is never disabled. It also ends a program run and freedrive.
 - **Hover / Pressed:** a lighter red on hover; a deep red with the cap down 3px when pressed.
 
 ### State window
@@ -587,14 +587,62 @@ The same channel ground laid flat: the axis name, a − key, the reading (19px, 
 9px circles: unlit grey while connecting, Motors-On Green when live, Alarm Red when dead. When the status is more than 1s old the lamp turns slow: plain grey (#8f8b83), with no ring, and the link text reads "Live · <address> · status 1.4 s old".
 
 ### Message line
-A well pinned to the bottom of the viewport (`position: sticky`): the latest message at 13px, coloured by tone (Legend Ink when done, Backlight Amber while a hold or move is pending, semibold Alarm Red on failure), with a Printed Grey hint at the right.
+A well pinned to the bottom of the viewport (`position: sticky`): the latest message at 13px, coloured by tone (Legend Ink when done, Backlight Amber while a hold or move is pending, semibold Alarm Red on failure), with a Printed Grey hint at the right. It also reports a program run's changes as they happen: halted (with the halt's message), paused, faulted, stopped or finished.
+
+### Program, Teach and Cell sections
+Three more desk sections below Tool (stacked under the monitor at 1240px and narrower), built only from the desk's existing parts. Each opens with a bank row (its title, then its main controls) and is otherwise flat Panel Grey with groups split by 1px seams.
+- **PROGRAM:** the bank holds a program select, Delete, a New name field with Create, and the Override fader. Below it, the run window beside the run keys, the step list, the add-step row and the run log.
+- **TEACH:** the bank holds the freedrive key and the Sensitivity fader. Below it, the record row (name, Record as [Tool pose | Joints], In frame, Record here) and the add row (Then add [No move | Straight move | Joint move], with a cue naming the program and where the move goes).
+- **CELL:** a Printed Grey summary line (counts, the tool in use, the file and its revision), then four groups: Tools (list, form, touch-fit row), Frames (list, three-point touch row), Targets (list) and Keep-out zones (list, form).
+
+### Run window
+The state window's smaller twin, at the left of the program's run panel: an 18px uppercase word over the 13px sentence, sharing the state window's tones (see the Brightness Ladder Rule). The word says what the run is doing (NO RUN, RUNNING, STEPPING, DRY RUN, PAUSING, PAUSED, HALTED, STOPPING, STOPPED, FAULTED, DONE, PLANNED, MOVING, ARRIVED) and the sentence where (program, step number and the step), why it stopped, and what to do next ("Resume re-plans from where the arm is.", "Move the target or the zone, or change the step, then press Reset."). While no run can start, it adds why ("The motors are off: hold Enable."). The bridge's state window says RUNNING (lit amber) while a program moves the arm, FREEDRIVE (lit amber) in freedrive, and names a paused or halted run in its READY sentence.
+
+### Run keys
+Six keys in a 3 by 2 grid beside the run window, 36px tall with 13px semibold legends: RUN, Step, Dry run over Pause (Resume while paused), Stop run, Reset. RUN is printed uppercase in Backlight Amber with Move's amber lamp along its lower edge while a run can start. RUN, Step and Dry run behave like Move: when they can't start they stay pressable but unlit (Printed Grey legend, no lamp), and a press is refused, with the refusal ring and the reason on the message line. Pause, Stop run and Reset are disabled when they don't apply.
+
+### Step list
+A well (Well Black, 1px seam, 3px corners, the meter-well shadow, at most 300px tall, scrolling) of rows, one per step: a 9px lamp, a flat full-width button with the step's number (Printed Grey, 12px) and its sentence ("Straight move to vise_part at 20 mm/s"), then its mini keys. Rows are Channel Charcoal with a 1px seam and 3px corners, at least 34px tall, and grow with their text.
+- **Lamps:** unlit grey; Backlight Amber while the run moves through the step; a hollow 2px amber ring while the run waits at it (paused, halted or stepped), with its number in amber; Alarm Red, with its number, where a run faulted; plain grey during a dry run. The list scrolls itself (never the page) to keep that step in sight.
+- **Selecting:** clicking a row's sentence selects it (aria-pressed), lifting the row to a Key Cap face with a Cap Rim edge. New steps and recorded moves go after the selected step; the add key and the record cue say so ("Add after 3", "after step 3").
+- **Nesting:** a repeat's steps, and an if's branches, are indented 14px per level (an "Else" label row separates the branches). The page edits the top level and repeats; ifs, calls and branches are edited in the program's JSON.
+- **Comments** are printed in Printed Grey. A move to a deleted or now-unreachable target carries an Alarm Red cue ("no such target").
+- **Empty:** the well prints how to add steps.
+
+### Mini keys and two-press deletes
+Row keys are mini keys: 22px tall, at least 26px wide, 3px corners, 12px semibold Printed Grey legends, printed with their action ("Run from", "Plan", "Re-touch", "Use", "Edit") or the panel's glyphs (↑, ↓, ×), each with an aria-label naming its row. A delete (×, or a program's Delete) takes two presses: the first arms it for 3 seconds, its legend turning to "Sure?" in Alarm Red, and the message line says to press again.
+
+### Fields
+Text and number fields and selects are sunk like a fader slot: Well Black, a 1px seam, 3px corners, the slot-well shadow, 30px tall, 13px Legend Ink in the page's one family with tabular figures; numbers 64px wide, names 132px. Focus is the 2px Legend Ink ring, tight (no offset). Selects are used only for open-ended lists (programs, step types, targets, frames). In a text field Space types a space; everywhere else on the page it is still STOP.
+
+### Mode keys in forms
+Two- and three-way choices use the 3D monitor's joined mode keys: interlocked 30px keys, the chosen one pressed in (aria-pressed) with its legend in Legend Ink, the others standing up in Printed Grey: Record as [Tool pose | Joints], Then add [No move | Straight move | Joint move], an input or output on the [Tool | Controller], and a value [On | Off]. A choice that can't apply is disabled (a joint target can't take a straight move).
+
+### Run log
+A well like the step list, at most 190px tall, of 12px Printed Grey lines: the time (HH:MM:SS, in Scale ink #8f8b83) then a sentence ("5: Straight line to vise_part, 50.0 mm, at 20 mm/s, about 2.6 s"; "Paused: the operator pressed Pause"). Faults, stops and interruptions are Alarm Red. It follows the newest line unless scrolled back. Every run is also written to cell/logs.
+
+### Freedrive key
+A hold-to-commit key like Enable, at least 170px wide: a lamp and a 15px label over an 11px sub-line.
+- **Hold:** holding fills a 5px Backlight Amber bar along the bottom edge over 700ms; letting go early drains it and the message line says to keep holding.
+- **On:** the cap stays charcoal (keys light amber only while held), its lamp and its legend ("Freedrive on") lit amber, its sub-line "Press to leave"; one press leaves freedrive. The bridge's FREEDRIVE window carries the solid amber.
+- **Disabled:** its sub-line says why ("Locked: motors off", "Locked: a program is under way").
+
+### Override and sensitivity faders
+Detented faders like the step and speed faders, built the same way: Override (10 to 100% in 10s, its unity mark at 100) in the program's bank, following the server's value; Sensitivity (the controller's teach sensitivity, 1 to 5, its mark at 1) in the teach bank, following the level the server set while freedrive is on.
+
+### Cell rows
+The tools, frames, targets and zones are rows in wells like the step list: the name in 650 weight, then its details in Legend Ink ("in vise · (0.0, 0.0, 80.0) mm · (83.2, -62.5, 117.5)°"), then a Printed Grey cue ("in use", "touched 2026-10-22 04:12") or an Alarm Red one ("out of reach since its frame moved"), then mini keys: tools Use, Edit, ×; frames Re-touch, ×; targets Plan, ×; zones ×. A target's Plan stages a joint move to it as the panel's plan (the shadow arm, path check and plan bar), and Move sends it; nothing moves from a row. Touch keys (Touch, Origin, +X, XY) and Fit are small keys; the cue under each touch row counts the touches taken and what's left.
+
+### Cell and faults in the 3D monitor
+- **The cell** is drawn in neutral tones, never the axis colours: each keep-out zone as a box with a 7% Printed Grey fill and Scale-ink (#8f8b83) edges; each frame as a 70mm Legend Ink line along its x axis and a 45mm Scale-ink line along y, with its name printed small and uppercase in Printed Grey over a Well Black outline; each target as a small light dot with a Well Black rim. The active tool's shape and the zones join the 3D view's collision check, as on the server.
+- **A faulted step** that would have collided is drawn as a blocked plan: the Alarm Red shadow arm at the pose where it would have come too close, the contact mark, and the red overlay on the zone or part it would hit. Reset, or a new run, clears it.
 
 ### Named Rules
 **The Biggest Key Rule.** No key is bigger or louder than STOP: the only red face, the largest legend on the page, the full height of the bridge, with its shortcuts printed on it.
 
-**The Hold-to-Commit Rule.** Switching the motors on is a hold, not a click: the green bar must fill the key's lower edge before anything happens.
+**The Hold-to-Commit Rule.** Switching the motors on is a hold, not a click: the green bar must fill the key's lower edge before anything happens. Freedrive is held on the same way, with an amber bar.
 
-**The Stage-then-Move Rule.** Dragging a ring, a gizmo handle or a joint's fader cap only stages: the shadow arm, arc, path and readout show the plan, and nothing moves until Move sends every staged joint as one move. Esc backs out a drag, then the plan; a blocked plan can't be sent, and the server checks every plan again.
+**The Stage-then-Move Rule.** Dragging a ring, a gizmo handle or a joint's fader cap, or pressing Plan on a target, only stages: the shadow arm, arc, path and readout show the plan, and nothing moves until Move sends every staged joint as one move. Esc backs out a drag, then the plan; a blocked plan can't be sent, and the server checks every plan again. Program runs are the deliberate exception: RUN, Step and Run from start the server's runner, which plans and checks each move itself before sending it, and Dry run shows the whole program's plan without moving.
 
 **The Dash Rule.** An unknown value is an em dash (—) with an empty meter and dark lead lights, never a zero and never the last known number.
 
@@ -628,3 +676,5 @@ A well pinned to the bottom of the viewport (`position: sticky`): the latest mes
 - **Don't** show a zero or the last known number when a value is unknown; show an em dash and an empty meter.
 - **Don't** add a second type family or proportional figures.
 - **Don't** put shadows on sections or strips; shadows belong to keys, fader caps, wells, the sticky bridge, the floating readout and the plan bar.
+- **Don't** mark a list row's state with a coloured stripe; a step's state is its lamp, as a channel's is.
+- **Don't** use native checkboxes or two-option selects for a choice; use joined mode keys.
