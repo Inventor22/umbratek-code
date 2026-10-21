@@ -18,7 +18,9 @@ import kinematics as kin
 PATH_TOLERANCE_DEG = 1.0
 PATH_TOLERANCE_MM = 2.0
 ARRIVAL_DEG = 0.1
-ARRIVAL_MM, ARRIVAL_TURN_DEG = 0.2, 0.1
+# The real arm settles within 0.05 deg per joint, which leaves the tool up to 0.47 mm and 0.13 deg from where a line
+# was sent (capture 2026-10-21: median 0.21 mm over 24 lines; joint moves up to 0.44 mm and 0.10 deg). About twice that.
+ARRIVAL_MM, ARRIVAL_TURN_DEG = 1.0, 0.3
 START_TOLERANCE_DEG = 0.5  # the arm must be this close to where the plan starts
 FRESH_S = 1.0
 LOST_S = 4.5

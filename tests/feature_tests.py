@@ -717,10 +717,38 @@ def scenario_model():
         rig.close()
 
 
+def scenario_status_slots():
+    print("== the controller serves few status clients: Enable works with every other slot taken")
+    rig = Rig("slots", sim_args=("--report-clients", "2"))
+    held = None
+    try:
+        rig.wait(lambda s: s.get("live"))
+        held = socket.create_connection((HOST, 30001), timeout=3)  # the second slot (the server's reader has the first)
+        held.settimeout(3)
+        got = held.recv(4096)
+        extra = socket.create_connection((HOST, 30001), timeout=3)
+        extra.settimeout(3)
+        try:
+            refused = extra.recv(4096) == b""
+        except OSError:
+            refused = True
+        extra.close()
+        check("with two status clients connected, the simulator closes a third at once, as the arm did", got and refused,
+              (len(got), refused))
+        r = rig.post("/api/enable")
+        s = rig.wait(lambda s: s.get("enabled") and s.get("state") in (0, 2), 10)
+        check("Enable still works: its checks use the server's own status stream, not a new connection",
+              r["ok"] and s.get("enabled") and s.get("state") in (0, 2), r)
+    finally:
+        if held is not None:
+            held.close()
+        rig.close()
+
+
 def main():
     print(f"server runs on {PY}; the test on {sys.executable}")
     for fn in (scenario_cell_api, scenario_calibration, scenario_moves, scenario_runner, scenario_controls,
-               scenario_faults, scenario_page, scenario_teach, scenario_model):
+               scenario_faults, scenario_page, scenario_teach, scenario_model, scenario_status_slots):
         try:
             fn()
         except Exception as e:  # report and carry on

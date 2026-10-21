@@ -230,6 +230,21 @@ class Panel:
             time.sleep(0.05)
         return self.frame
 
+    def _live_joints(self):
+        """Measured joint angles [rad] from a frame of the panel's own status stream that arrived after this call: a
+        fresh measurement for Enable's checks without another status connection. The real controller serves only a
+        few, and holds a closed one open for a while, so opening more made Enable fail (2026-10-21)."""
+        asked = time.monotonic()
+        deadline = asked + STALL_WAIT_S
+        while self.frame is None or self.frame_at <= asked:
+            if time.monotonic() >= deadline or self.closing:
+                raise arm.ArmError("No live status from the controller to check the joints against; not moving.")
+            time.sleep(0.02)
+        joints = list(self.frame["joints"][:self.axis])
+        if len(joints) != self.axis or not arm.all_finite(joints):
+            raise arm.ArmError("The status report returned unusable joint angles; not moving.")
+        return joints
+
     def _busy(self, frame):
         return frame["status"] == 1 or frame["queued"] > 0 or time.monotonic() - self.sent_at < BUSY_AFTER_SEND_S
 
@@ -294,11 +309,11 @@ class Panel:
                 if self.arm.reset_err() not in arm.OK_CODES:
                     raise arm.ArmError("The controller refused the error reset.")
                 time.sleep(1.5)  # let the controller re-check its E-stop and joints
-            start = arm.preflight(self.arm, self.ip, self.axis)
+            start = arm.preflight(self.arm, self.ip, self.axis, measured=self._live_joints)
 
             def switch_on():
                 arm.prepare_for_motion(self.arm, self.axis)
-                arm.verified_targets(self.arm, self.ip, self.axis, start)
+                arm.verified_targets(self.arm, self.ip, self.axis, start, measured=self._live_joints)
 
             arm.guarded(self.ip, self.arm, switch_on, STOP_LOCK_WAIT_S)
             self.goal_kind = self.goal = None

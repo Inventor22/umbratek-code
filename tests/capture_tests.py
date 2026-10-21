@@ -107,6 +107,25 @@ def main():
           abs(math.degrees(c[5]) - 200.0) < 1e-3 and c[1] == 200.0 and settings["get_tcp_maxacc"][1] == 200.0, (c[5], c[1]))
     check("gravity points down the base's z axis", list(c[17:20]) == [0.0, 0.0, -1.0])
 
+    # Where the arm came to rest after each straight-line click, against the goal the panel reported for it: the
+    # program runner's arrival tolerance for lines must cover it, or real lines would never "arrive".
+    import executor
+    errors, goal = [], None
+    with open(os.path.join(CAPTURE_DIR, "panel_status.jsonl"), encoding="utf-8") as f:
+        for line in f:
+            s = json.loads(line)["status"]
+            g = s.get("goal")
+            if g and g.get("kind") == "tool":
+                goal = g["values"]
+            elif goal is not None and s.get("live") and s.get("state") in (0, 2) and not g:
+                errors.append((math.dist(s["pose"][:3], goal[:3]), max(abs(angle_diff(a, b)) for a, b in zip(s["pose"][3:], goal[3:]))))
+                goal = None
+    worst_mm, worst_deg = max(e[0] for e in errors), max(e[1] for e in errors)
+    check(f"{len(errors)} straight lines came to rest within {worst_mm:.2f} mm and {worst_deg:.2f} deg of their goals, "
+          f"inside the runner's arrival tolerance ({executor.ARRIVAL_MM} mm, {executor.ARRIVAL_TURN_DEG} deg) with room "
+          "to spare", len(errors) == 24 and worst_mm < executor.ARRIVAL_MM / 1.5 and worst_deg < executor.ARRIVAL_TURN_DEG / 1.5,
+          (len(errors), worst_mm, worst_deg))
+
     failed = [n for n, ok in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} passed")
     return 1 if failed else 0

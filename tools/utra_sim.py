@@ -872,13 +872,14 @@ def serve_control(conn, arm):
             pass
 
 
-def listen(host, port, handler, arm, single=False):
+def listen(host, port, handler, arm, single=False, limit=0):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # Exclusive on Windows, where SO_REUSEADDR would let a second simulator share the port and steal connections.
     srv.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR), 1)
     srv.bind((host, port))
     srv.listen(8)
     serving = None
+    clients = []
     while True:
         conn, _ = srv.accept()
         if single and serving is not None and serving.is_alive():
@@ -888,8 +889,15 @@ def listen(host, port, handler, arm, single=False):
             log(f"closed a second connection on :{port}")
             conn.close()
             continue
+        clients = [t for t in clients if t.is_alive()]
+        if limit and len(clients) >= limit:
+            # Like the real controller's status port, which serves only a few clients (2026-10-21).
+            log(f"closed connection {len(clients) + 1} on :{port} (serving {limit} at most)")
+            conn.close()
+            continue
         serving = threading.Thread(target=handler, args=(conn, arm), daemon=True)
         serving.start()
+        clients.append(serving)
 
 
 def main():
@@ -906,6 +914,8 @@ def main():
     p.add_argument("--multi-client", action="store_true",
                    help="serve several command connections at once (the real controller serves one)")
     p.add_argument("--no-report", action="store_true", help="do not serve port 30001")
+    p.add_argument("--report-clients", type=int, default=0,
+                   help="serve at most this many status (30001) clients at once and close any more (0: no limit)")
     faults = p.add_argument_group("faults to inject")
     faults.add_argument("--error", type=int, default=0, help="initial controller error code")
     faults.add_argument("--sticky-error", action="store_true", help="RESET_ERR does not clear the error")
@@ -929,7 +939,7 @@ def main():
     arm = Arm(a)
     threading.Thread(target=listen, args=(a.host, 502, serve_cmd, arm, not a.multi_client), daemon=True).start()
     if not a.no_report:
-        threading.Thread(target=listen, args=(a.host, 30001, serve_report, arm), daemon=True).start()
+        threading.Thread(target=listen, args=(a.host, 30001, serve_report, arm, False, a.report_clients), daemon=True).start()
     threading.Thread(target=listen, args=(a.host, 30003, serve_config, arm), daemon=True).start()
     threading.Thread(target=listen, args=(a.host, CONTROL_PORT, serve_control, arm), daemon=True).start()
     log(f"listening on {a.host}:502{'' if a.no_report else ', :30001'}, :30003 and control :{CONTROL_PORT} ({vars(a)})")
