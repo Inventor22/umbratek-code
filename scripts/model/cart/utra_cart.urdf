@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The aluminium-extrusion cart the UTRA 6-1000 stands on, from the SolidWorks assembly
+     "UTRA 1000 Aluminum Extrusion Assembly" (see SOURCE.txt). Everything is in the arm's base_link
+     frame: z up, origin at the centre of the base's mounting face; attach this link to base_link with
+     a fixed joint at the identity. Collision: one box per part (the round mounting plate is a
+     cylinder), and the floor as a thin box under the casters. Collision names label the parts. -->
+<robot name="utra_cart">
+  <link name="cart">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/frame.STL"/></geometry>
+      <material name="Anodised"><color rgba="0.62 0.64 0.67 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/casters.STL"/></geometry>
+      <material name="Rubber"><color rgba="0.16 0.17 0.18 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/controller.STL"/></geometry>
+      <material name="Enclosure"><color rgba="0.24 0.25 0.27 1"/></material>
+    </visual>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-1 -->
+      <origin xyz="0.05715 0.00044 -0.03175" rpy="-3.141593 -0.000000 1.578158"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-2 -->
+      <origin xyz="-0.00042 0.05717 -0.03175" rpy="3.141593 -0.000000 -3.134231"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-3 -->
+      <origin xyz="0.00042 -0.05713 -0.03175" rpy="3.141593 0.000000 0.007362"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-4 -->
+      <origin xyz="-0.05715 -0.00040 -0.03175" rpy="3.141593 0.000000 -1.563435"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-5 -->
+      <origin xyz="0.00042 -0.05713 -0.60325" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner bracket">  <!-- 15 Series 4 Hole - Wide Inside Corner Bracket-6 -->
+      <origin xyz="-0.00042 0.05717 -0.60325" rpy="1.570796 -0.000000 -3.134231"/>
+      <geometry><box size="0.07137 0.03810 0.03810"/></geometry>
+    </collision>
+    <collision name="a corner gusset">  <!-- 15 Series 4 Hole Inside Corner Gusset 4336-1 -->
+      <origin xyz="0.07564 0.07678 -0.64135" rpy="0.000000 1.570796 0.007362"/>
+      <geometry><box size="0.03332 0.07620 0.07620"/></geometry>
+    </collision>
+    <collision name="a corner gusset">  <!-- 15 Series 4 Hole Inside Corner Gusset 4336-2 -->
+      <origin xyz="-0.07564 -0.07674 -0.64135" rpy="0.000000 -1.570796 1.578158"/>
+      <geometry><box size="0.03332 0.07620 0.07620"/></geometry>
+    </collision>
+    <collision name="a corner gusset">  <!-- 15 Series 4 Hole Inside Corner Gusset 4336-3 -->
+      <origin xyz="-0.07676 0.07566 -0.64135" rpy="0.000000 1.570796 1.578158"/>
+      <geometry><box size="0.03332 0.07620 0.07620"/></geometry>
+    </collision>
+    <collision name="a corner gusset">  <!-- 15 Series 4 Hole Inside Corner Gusset 4336-4 -->
+      <origin xyz="0.07676 -0.07561 -0.64135" rpy="0.000000 1.570796 -1.563435"/>
+      <geometry><box size="0.03332 0.07620 0.07620"/></geometry>
+    </collision>
+    <collision name="a cart base bar">  <!-- 15x30 Aluminum Extrusion Base Half-1 -->
+      <origin xyz="0.26034 0.00194 -0.64135" rpy="0.000000 -1.570796 -3.134231"/>
+      <geometry><box size="0.03810 0.07620 0.44450"/></geometry>
+    </collision>
+    <collision name="a cart base bar">  <!-- 15x30 Aluminum Extrusion Base Half-2 -->
+      <origin xyz="-0.26034 -0.00189 -0.64135" rpy="0.000000 1.570796 -3.134231"/>
+      <geometry><box size="0.03810 0.07620 0.44450"/></geometry>
+    </collision>
+    <collision name="a cart base bar">  <!-- 15x30 Aluminum Extrusion Base-1 -->
+      <origin xyz="-0.00000 0.00002 -0.64135" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.07620 0.03810 0.96520"/></geometry>
+    </collision>
+    <collision name="a cart brace">  <!-- 15x30 Aluminum Extrusion Support-1 -->
+      <origin xyz="0.18627 0.00139 -0.47413" rpy="-0.000000 0.785398 -3.134231"/>
+      <geometry><box size="0.03810 0.07620 0.45720"/></geometry>
+    </collision>
+    <collision name="a cart brace">  <!-- 15x30 Aluminum Extrusion Support-2 -->
+      <origin xyz="-0.00137 0.18629 -0.47413" rpy="-0.000000 0.785398 -1.563435"/>
+      <geometry><box size="0.03810 0.07620 0.45720"/></geometry>
+    </collision>
+    <collision name="a cart brace">  <!-- 15x30 Aluminum Extrusion Support-3 -->
+      <origin xyz="0.00137 -0.18625 -0.47413" rpy="-3.141593 0.785398 1.578158"/>
+      <geometry><box size="0.03810 0.07620 0.45720"/></geometry>
+    </collision>
+    <collision name="a cart brace">  <!-- 15x30 Aluminum Extrusion Support-4 -->
+      <origin xyz="-0.18627 -0.00135 -0.47413" rpy="-3.141593 0.785398 0.007362"/>
+      <geometry><box size="0.03810 0.07620 0.45720"/></geometry>
+    </collision>
+    <collision name="the cart's column">  <!-- 30x30 Aluminum Extrusion Vertical Support-1 -->
+      <origin xyz="-0.00000 0.00002 -0.31750" rpy="0.000000 -0.000000 0.007362"/>
+      <geometry><box size="0.07620 0.07620 0.60960"/></geometry>
+    </collision>
+    <collision name="a cap screw">  <!-- 5-16x18 x 0p687in Flanged Button Head Socket Cap Screw-1 -->
+      <origin xyz="0.01863 0.05731 -0.01235" rpy="0.000000 -1.570796 0.719551"/>
+      <geometry><box size="0.02153 0.01695 0.01702"/></geometry>
+    </collision>
+    <collision name="a cap screw">  <!-- 5-16x18 x 0p687in Flanged Button Head Socket Cap Screw-2 -->
+      <origin xyz="0.01877 0.03791 -0.03175" rpy="-0.465512 -0.000000 -1.563435"/>
+      <geometry><box size="0.02153 0.01695 0.01702"/></geometry>
+    </collision>
+    <collision name="a caster">  <!-- 50mm Swivel Caster with Lock-1 -->
+      <origin xyz="0.01414 0.45274 -0.69517" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.09494 0.06954 0.06000"/></geometry>
+    </collision>
+    <collision name="a caster">  <!-- 50mm Swivel Caster with Lock-2 -->
+      <origin xyz="0.47006 0.00348 -0.69517" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.09494 0.06954 0.06000"/></geometry>
+    </collision>
+    <collision name="a caster">  <!-- 50mm Swivel Caster with Lock-3 -->
+      <origin xyz="0.02080 -0.45244 -0.69517" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.09494 0.06954 0.06000"/></geometry>
+    </collision>
+    <collision name="a caster">  <!-- 50mm Swivel Caster with Lock-4 -->
+      <origin xyz="-0.43512 -0.00318 -0.69517" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.09494 0.06954 0.06000"/></geometry>
+    </collision>
+    <collision name="the mounting plate">  <!-- Mounting Plate D170mm-1 -->
+      <origin xyz="-0.00000 0.00002 -0.00635" rpy="0.000000 0.000000 0.007362"/>
+      <geometry><cylinder radius="0.08500" length="0.01270"/></geometry>
+    </collision>
+    <collision name="the controller's plank">  <!-- NTRO Controller Mounting Plank-1 -->
+      <origin xyz="-0.12810 -0.00092 -0.61278" rpy="1.570796 0.000000 -1.563435"/>
+      <geometry><box size="0.37500 0.01905 0.18000"/></geometry>
+    </collision>
+    <collision name="the NTRO controller">  <!-- NTRO_350-750_3D_Model_V0.1.step-1 -->
+      <origin xyz="-0.12017 0.00946 -0.52414" rpy="1.570796 0.000000 0.007362"/>
+      <geometry><box size="0.19042 0.15822 0.39585"/></geometry>
+    </collision>
+    <collision name="the floor">
+      <origin xyz="0 0 -0.73494" rpy="0 0 0"/>
+      <geometry><box size="6 6 0.01"/></geometry>
+    </collision>
+  </link>
+</robot>

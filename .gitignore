@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# three.js for the jog panel's 3D view: scripts/jog_server.py downloads it on its first run
+scripts/vendor/

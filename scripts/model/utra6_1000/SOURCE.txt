@@ -1,0 +1,22 @@
+UTRA 6-1000 robot description from Umbratek's ut_arm_ros repository (BSD 2-Clause, see LICENSE):
+https://github.com/UmbraTek/ut_arm_ros at commit f81de89f7613a3ed472ecb80a89e93af25b51f51
+  arm_description/ikfast/utra6_1000_robot.urdf          -> utra6_1000_robot.urdf (unchanged)
+  arm_description/meshes/utra6_1000/visual/*.STL       -> meshes/*.STL (unchanged)
+Joint limits used by the jog panel come from arm_description/urdf/utra6_1000.urdf.xacro
+(J3 +/-2.8811 rad; the others +/-(2*pi - 0.02) rad), capped at +/-180 deg for planned moves. The same file
+rates the joint speeds at 2.0, 2.0, 2.1, 3.0, 3.0, 3.0 rad/s, faster than this arm's servos allow, so the panel
+caps joint moves from the servos' own limits instead (see JOINT_RATED_DEG_S in scripts/jog_server.py).
+The URDF's forward kinematics match the controller's reported TCP pose to 0.1 mm / 0.1 deg.
+
+collision.json is ours, fitted to those meshes for the jog panel's collision checks:
+  - Each moving link is covered by 1-5 capsules along its joint axes and tube. Every mesh vertex, plus
+    surface samples about 0.7 mm apart, lies inside one; each capsule is the smallest-volume one around its
+    line that covers its points. The tubes are split where their radius changes, so the upper arm's
+    capsule is 52.5 mm against the tube's 52 mm, the forearm's 43.5 mm against 43 mm. Housings are
+    looser: a capsule's round ends bulge past a motor housing's flat face by up to about 45 mm.
+  - The base is the cylinder around its mesh (78.6 mm radius, 56 mm tall).
+  - skip lists the link pairs that are within 10 mm of each other at every pose, by design: the base and
+    upper arm (always about 3 mm apart), the forearm and wrist 2 (their capsules always overlap), wrist 1
+    and the flange (always about 1 mm). Checked over 3000 random poses, as MoveIt's setup assistant does.
+    Neighbouring links aren't checked against each other either.
+The tool flange is modelled, but not anything mounted on it.

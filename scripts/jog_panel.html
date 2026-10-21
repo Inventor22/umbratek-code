@@ -1,0 +1,1954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jog panel · UTRA arm</title>
+<!-- three.js, for the 3D view: the server downloads it on its first run, checks it and serves it from this PC. -->
+<script type="importmap">{"imports": {"three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/"}}</script>
+<!--
+THESIS: A six-channel mixing desk for a robot arm. Each joint is a channel strip whose meter shows where the joint is and where it was sent; it refuses Studio's grey round buttons floating over a 3D viewport.
+OWN-WORLD: Matte charcoal anodised desk, printed uppercase legends, square backlit keys (amber held or moving, green motors on, red stop or fault), scribble-tape colour per joint, tabular readouts.
+STORY: The maker sees at a glance whether the arm is live, nudges a joint or the tool by exact steps, watches the amber lead lights count the steps still to go and drain as the joint catches up, stages a pose by dragging joints and sends it with Move once the shadow arm shows it clear of the cart, and stops everything with one key.
+FIRST VIEWPORT: Meter bridge across the top (link, state, hold-to-enable, oversized STOP at right); the 3D monitor of the arm standing on its cart, with a coloured ring at each joint and a plan bar docked along its bottom while a pose is staged, at left beside the six joint faders and master tool section on wide screens, and stacked above them below 1240 px (the app side panel); message line pinned along the bottom.
+FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (hold) for Enable; seed 86aed4aa.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    --desk: #18191b;
+    --panel: #222427;
+    --seam: #33363b;
+    --well: #0e0f10;
+    --ink: #ece8df;
+    --ink-2: #aaa69d;
+    --cap: #34383d;
+    --cap-top: #3f444a;
+    --cap-edge: #50565d;
+    --amber: #f2aa3c;
+    --amber-ink: #1d1304;
+    --green: #5ec683;
+    --red: #d63a2f;
+    --red-deep: #9f2219;
+    --alarm: #ff8073;
+    --tape-1: #e3ba4f;
+    --tape-2: #7fb3d9;
+    --tape-3: #92cc8a;
+    --tape-4: #e19769;
+    --tape-5: #baa2dd;
+    --tape-6: #dad5c9;
+    --axis-x: #ff3352;
+    --axis-y: #8bdc00;
+    --axis-z: #2890ff;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+    background: var(--desk);
+    color: var(--ink);
+    font: 400 14px/1.4 var(--font);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, p { margin: 0; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* Printed panel legends. */
+  .legend, .axis-group {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  /* Keys: square caps lit from above; amber backlight only while held. */
+  .key {
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--cap-edge);
+    border-radius: 4px;
+    background: linear-gradient(var(--cap-top), var(--cap));
+    box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35);
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+    transition: background-color 120ms var(--ease), box-shadow 120ms var(--ease), transform 120ms var(--ease);
+  }
+  .key:hover:not(:disabled) { background: linear-gradient(#4a5057, var(--cap-top)); }
+  .key.held, .key:active:not(:disabled) {
+    background: var(--amber);
+    color: var(--amber-ink);
+    box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3);
+    transform: translateY(2px);
+  }
+  .key.refused, .key.refused:hover:not(:disabled) {
+    background: linear-gradient(#4a2a27, #3a2220);
+    box-shadow: inset 0 0 0 2px var(--alarm);
+    color: var(--alarm);
+  }
+  .key:disabled { opacity: 0.38; cursor: not-allowed; box-shadow: none; }
+
+  /* ---- Meter bridge: always on screen ---- */
+  .bridge {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) minmax(280px, 2fr) auto auto;
+    grid-template-areas: "ident state enable stop";
+    gap: 14px;
+    align-items: stretch;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--seam);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+  }
+  .ident { grid-area: ident; display: grid; align-content: center; gap: 6px; }
+  .ident h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+  .link { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; }
+  .led { width: 9px; height: 9px; border-radius: 50%; background: #55595f; flex: none; }
+  .led[data-on="live"] { background: var(--green); }
+  .led[data-on="slow"] { background: #8f8b83; }
+  .led[data-on="dead"] { background: var(--alarm); }
+
+  .readout-window {
+    grid-area: state;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 8px 14px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.5);
+    transition: background-color 160ms var(--ease), border-color 160ms var(--ease);
+  }
+  .state-name { font-size: 26px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.1; }
+  .state-detail { color: var(--ink-2); font-size: 13px; }
+  /* Lit state window. Each rung differs in brightness, not just hue:
+     moving (lit amber) > alarm (solid red) > ready (lit green) > stopped (red tint) > motors off (dark). */
+  .readout-window[data-tone="moving"] { background: var(--amber); border-color: #ffd08a; }
+  .readout-window[data-tone="moving"] :is(.state-name, .state-detail) { color: var(--amber-ink); }
+  .readout-window[data-tone="alarm"] { background: #c62f25; border-color: #ff8073; }
+  .readout-window[data-tone="alarm"] :is(.state-name, .state-detail) { color: #fff; }
+  .readout-window[data-tone="ready"] { background: #1a4a2d; border-color: #4f9c6b; }
+  .readout-window[data-tone="ready"] .state-name { color: #a6efbf; }
+  .readout-window[data-tone="ready"] .state-detail { color: #d3eedc; }
+  .readout-window[data-tone="stopped"] { background: #2b100d; border-color: #8c2f26; }
+  .readout-window[data-tone="stopped"] .state-name { color: var(--alarm); }
+  .readout-window[data-tone="stopped"] .state-detail { color: #f3c3bd; }
+
+  .enable {
+    grid-area: enable;
+    position: relative;
+    overflow: hidden;
+    min-width: 150px;
+    padding: 10px 14px;
+    align-content: center;
+    gap: 2px;
+  }
+  .enable .fill {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 5px;
+    background: var(--green);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 160ms var(--ease);
+  }
+  .enable.charging .fill { transform: scaleX(1); transition: transform 700ms linear; }
+  .enable .label { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+  .enable .sub { font-size: 11px; color: var(--ink-2); letter-spacing: 0.02em; }
+  .enable.on, .enable.on:hover:not(:disabled) { background: linear-gradient(#27452f, #1d3425); border-color: #3f8a5a; }
+  .enable.on .label { color: #d9f5e2; }
+  .enable.on .label .led { background: var(--green); }
+  .enable.on .sub { color: #a9d8b8; }
+  .enable.busy { cursor: progress; }
+
+  .stop {
+    grid-area: stop;
+    min-width: 232px;
+    padding: 8px 26px;
+    border: 2px solid #ef5d50;
+    border-radius: 6px;
+    background: var(--red);
+    color: #fff;
+    box-shadow: 0 3px 0 #5f130d, 0 6px 14px rgb(0 0 0 / 0.45);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    touch-action: none;
+    transition: background-color 100ms var(--ease), transform 100ms var(--ease), box-shadow 100ms var(--ease);
+  }
+  .stop:hover { background: #e2453a; }
+  .stop.fired, .stop:active { background: var(--red-deep); transform: translateY(3px); box-shadow: 0 0 0 #5f130d, inset 0 3px 6px rgb(0 0 0 / 0.35); }
+  .stop .big { font-size: 36px; font-weight: 800; letter-spacing: 0.08em; line-height: 1; }
+  .stop .sub { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; opacity: 0.92; }
+
+  /* ---- Desk: the 3D monitor beside the joint faders and the tool section ---- */
+  .desk {
+    display: grid;
+    grid-template-columns: minmax(400px, 1fr) minmax(0, 780px);
+    grid-template-areas: "monitor joints" "monitor tool";
+    grid-template-rows: auto 1fr;
+    gap: 14px;
+    padding: 14px 16px;
+    align-items: stretch;
+  }
+  .monitor { grid-area: monitor; }
+  .joints { grid-area: joints; }
+  .tool { grid-area: tool; }
+  .section {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    align-content: start;
+    gap: 12px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--seam);
+    border-radius: 6px;
+  }
+  .bank { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+  .bank h2 { font-size: 14px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; margin-right: 4px; }
+  .latch {
+    min-width: 46px;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  /* Step and speed: short faders whose caps snap to the detents the server accepts. Each is a small channel:
+     legend and value above a slot as wide as the channel, the range printed under its ends. The slot, cap and
+     ticks follow the joint faders. Channels on one row are split by a seam; the clip hides the seam of a
+     channel that wraps to the start of a row. */
+  .joints .bank, .tool .bank { align-items: baseline; column-gap: 24px; clip-path: inset(-24px -3px); }
+  .detent + .detent::before { content: ""; position: absolute; left: -12.5px; top: 0; bottom: 0; width: 1px; background: var(--seam); }
+  .detent {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "legend value" "track track";
+    align-items: baseline;
+    row-gap: 1px;
+    flex: 1 1 200px;
+    min-width: 150px;
+    max-width: 320px;
+  }
+  .detent .legend { grid-area: legend; line-height: 15px; }
+  .detent-value { grid-area: value; justify-self: end; color: var(--ink); font-size: 13px; font-weight: 650; line-height: 15px; white-space: nowrap; }
+  .detent-track { grid-area: track; position: relative; height: 30px; }
+  .detent-track input {
+    position: absolute;
+    inset: 0 0 auto;
+    width: 100%;
+    height: 18px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .detent-track input::-webkit-slider-runnable-track {
+    height: 6px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6);
+  }
+  .detent-track input::-moz-range-track {
+    height: 6px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6);
+  }
+  .detent-track input::-webkit-slider-thumb {
+    width: 11px;
+    height: 18px;
+    margin-top: -6px;
+    border: 0;
+    border-radius: 2px;
+    background: var(--detent-groove), linear-gradient(#f6f3ec, #cfcac0);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .detent-track input::-moz-range-thumb {
+    width: 11px;
+    height: 18px;
+    border: 0;
+    border-radius: 2px;
+    background: var(--detent-groove), linear-gradient(#f6f3ec, #cfcac0);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+  }
+  .detent-track { --detent-groove: linear-gradient(90deg, transparent 5px, rgb(0 0 0 / 0.45) 5px 6px, transparent 6px); }
+  .detent-track input:is(:hover, :active)::-webkit-slider-thumb { background: var(--detent-groove), linear-gradient(#ffffff, #e4dfd5); }
+  .detent-track input:is(:hover, :active)::-moz-range-thumb { background: var(--detent-groove), linear-gradient(#ffffff, #e4dfd5); }
+  /* Focus rings the slot itself, clear of the value above and the figures below; the cap rides over it. The
+     transparent outline shows in the system colour in Windows High Contrast, which drops the ring's shadow. */
+  .detent-track input:focus-visible { outline: 2px solid transparent; outline-offset: 0; }
+  .detent-track input:focus-visible::-webkit-slider-runnable-track { box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6), 0 0 0 2px var(--ink); }
+  .detent-track input:focus-visible::-moz-range-track { box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6), 0 0 0 2px var(--ink); }
+  .detent-ticks { position: absolute; left: 5.5px; right: 5.5px; top: 14px; height: 4px; pointer-events: none; }
+  .detent-ticks i { position: absolute; top: 0; width: 1px; height: 4px; margin-left: -0.5px; background: #7a7f87; }
+  /* The slow default the speeds start from each time the panel opens, printed like a desk's unity mark. */
+  .detent-ticks i.home { height: 6px; background: #8f8b83; }
+  .detent-ends {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 18px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: #8f8b83;
+    font-size: 10px;
+    line-height: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .detent-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* The redline: speeds that could move the tool faster than 250 mm/s, printed like a speedometer's red zone. A
+     2px rule runs along the ticks' feet from the line to the top of the scale, clear of the focus ring; the ticks
+     past it, the line's own figure and the top figure are red, and so is the value while the cap sits past it. */
+  .detent-red { position: absolute; top: 2px; right: 0; height: 2px; background: var(--alarm); }
+  .detent-ticks i.over { background: var(--alarm); }
+  .detent-value.over, .detent-ends .over, .detent-line { color: var(--alarm); }
+  .detent-line { position: absolute; top: 0; transform: translateX(-50%); }
+  /* Windows High Contrast drops gradients and shadows, so the caps, ticks and seams take system colours there. */
+  @media (forced-colors: active) {
+    .detent-track input::-webkit-slider-thumb,
+    .detent-track input:is(:hover, :active)::-webkit-slider-thumb { forced-color-adjust: none; background: ButtonText; }
+    .detent-track input::-moz-range-thumb,
+    .detent-track input:is(:hover, :active)::-moz-range-thumb { forced-color-adjust: none; background: ButtonText; }
+    .detent-ticks i, .detent + .detent::before { forced-color-adjust: none; background: GrayText; }
+    .detent-ticks i.home { background: CanvasText; }
+    .detent-red, .detent-ticks i.over { forced-color-adjust: none; background: Highlight; }
+    .detent-value.over, .detent-ends .over, .detent-line { forced-color-adjust: none; color: Highlight; }
+  }
+  /* Legends: each swatch keeps its label; on a narrow bank the items wrap whole, flush right. */
+  .meter-key { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 14px; margin-left: auto; color: var(--ink-2); font-size: 12px; }
+  .meter-key .item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .swatch { display: inline-block; width: 18px; height: 6px; border-radius: 1px; }
+  .swatch.now { background: var(--ink); }
+  .swatch.goal { border: 2px solid var(--amber); height: 8px; }
+  .swatch.goal.planned { border-style: dashed; }
+  .swatch.lead { width: 7px; height: 12px; background: var(--amber); }
+  .swatch.ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--tape-2); }
+  /* The tool gizmo's sample: a 2px ring in its three axis colours, kept in Windows High Contrast, like the 3D view. */
+  .swatch.gizmo {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: conic-gradient(var(--axis-x) 0 120deg, var(--axis-y) 0 240deg, var(--axis-z) 0);
+    -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px);
+    mask: radial-gradient(circle, transparent 3.5px, #000 4px);
+    forced-color-adjust: none;
+  }
+  .swatch.shadow, .swatch.blocked { width: 14px; height: 10px; }
+  .swatch.shadow { background: rgb(242 170 60 / 0.45); border: 1px solid var(--amber); }
+  .swatch.blocked { background: rgb(255 128 115 / 0.4); border: 1px solid var(--alarm); }
+
+  /* ---- 3D monitor: a sunk screen in the desk ---- */
+  .monitor { grid-template-rows: auto 1fr; align-content: stretch; }
+  .view-reset { margin-left: 4px; }
+  /* What dragging in the 3D view moves: two interlocked keys, like a desk's source selector. The one in use stays
+     pressed in with its legend in Legend Ink; the other stands up, printed grey. */
+  .mode-keys { display: inline-flex; }
+  .mode-key { min-width: 58px; }
+  .mode-key:first-child { border-radius: 4px 0 0 4px; }
+  .mode-key:last-child { border-left-width: 0; border-radius: 0 4px 4px 0; }
+  /* Pressed in: the face sinks inside a rim that stays put, so the joined block keeps a straight outline. */
+  .mode-key[aria-pressed="true"], .mode-key[aria-pressed="true"]:hover:not(:disabled) {
+    background: linear-gradient(#25282c, #2d3136);
+    box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.5);
+    color: var(--ink);
+    padding-top: 4px;
+  }
+  .screen {
+    position: relative;
+    min-height: 420px;
+    overflow: hidden;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.5);
+  }
+  .screen-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .screen-note {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--ink-2);
+    font-size: 14px;
+    text-align: center;
+  }
+  .screen-help {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 9px;
+    color: #9a968d;
+    font-size: 12px;
+    pointer-events: none;
+  }
+  /* Readout that follows a drag, set outward from the ring so it never covers the ring or its arc. */
+  .screen-tag {
+    position: absolute;
+    z-index: 4;
+    padding: 6px 9px;
+    background: rgb(14 15 16 / 0.94);
+    border: 1px solid var(--amber);
+    border-radius: 3px;
+    box-shadow: 0 4px 10px rgb(0 0 0 / 0.45);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.35;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .screen-tag .to { color: var(--amber); font-weight: 650; }
+  .screen-tag .how { display: block; color: var(--ink-2); font-size: 11px; }
+  .screen-tag[data-tone="blocked"] { border-color: var(--alarm); }
+  .screen-tag[data-tone="blocked"] :is(.to, .how) { color: var(--alarm); }
+
+  /* Plan bar: the staged pose, docked along the bottom of the screen until it's sent or cleared. The chips
+     and note wrap in the middle; Clear and Move stay together at the right. */
+  .plan {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 10px;
+    background: rgb(24 25 27 / 0.95);
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.45);
+  }
+  .plan-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+  .plan-keys { display: flex; align-items: center; gap: 8px; }
+  .plan-joints { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .plan-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 3px 4px 3px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .plan-chip .tag {
+    padding: 1px 5px;
+    background: var(--tape);
+    color: #15161a;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  /* The × that takes a joint out of the plan is a small key cap like any other. */
+  .plan-chip .unstage { width: 24px; height: 22px; padding: 0; border-radius: 3px; color: var(--ink-2); font-size: 15px; line-height: 1; }
+  .plan-chip .unstage:hover { color: var(--ink); }
+  .plan-note { flex: 1 1 180px; color: var(--ink-2); font-size: 12px; }
+  .plan.blocked .plan-note { color: var(--alarm); font-weight: 600; }
+  .plan.over .plan-note { color: var(--alarm); }
+  .plan .latch { height: 36px; }
+  /* Move: an amber lamp along its lower edge says a plan is ready to go. When it can't go, it stays pressable
+     but unlit, and a press is refused with the reason on the message line. */
+  .plan-move {
+    min-width: 104px;
+    height: 40px;
+    padding: 0 18px;
+    color: var(--amber);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-color: #8a6420;
+    box-shadow: inset 0 -3px 0 var(--amber), 0 2px 0 #0b0c0d;
+  }
+  .plan-move[aria-disabled="true"] { color: var(--ink-2); border-color: var(--cap-edge); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); }
+  .plan-move[aria-disabled="true"]:active {
+    background: linear-gradient(var(--cap-top), var(--cap));
+    color: var(--ink-2);
+    box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3);
+  }
+  .plan-move:disabled { color: var(--ink-2); border-color: var(--cap-edge); box-shadow: none; }
+  .plan-move.refused { color: var(--alarm); border-color: var(--cap-edge); box-shadow: inset 0 0 0 2px var(--alarm); }
+  /* On a wide, short screen (the stacked side panel) the 3D view frames the arm in the full height and leaves
+     a column at the right (arm_view.js sets data-shape): the plan bar and help line dock there. */
+  .screen[data-shape="wide"] .plan { left: auto; width: 248px; grid-template-columns: minmax(0, 1fr); }
+  .screen[data-shape="wide"] .plan-keys { justify-content: flex-end; }
+  .screen[data-shape="wide"] .screen-help { left: auto; width: 248px; }
+
+  .strips { display: grid; grid-template-columns: repeat(6, minmax(96px, 1fr)); gap: 8px; }
+  .strip {
+    --tape: var(--tape-1);
+    display: grid;
+    grid-template-rows: auto 46px clamp(170px, 22vh, 280px) 46px auto auto;
+    align-content: start;
+    gap: 8px;
+    padding: 8px;
+    background: #1b1d20;
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+  }
+  /* Scribble strip: a length of coloured tape across the top of the channel. */
+  .scribble {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 7px;
+    background: var(--tape);
+    color: #15161a;
+    border-radius: 2px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .scribble .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .scribble .act { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; flex: none; background: rgb(21 22 26 / 0.35); }
+  .strip.moving .scribble .act { background: #15161a; box-shadow: 0 0 0 2px var(--amber); }
+  .strip .key { font-size: 24px; font-weight: 500; }
+  .meters { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 4px; min-height: 0; }
+
+  .meter {
+    position: relative;
+    background:
+      linear-gradient(var(--seam), var(--seam)) 50% 50% / 100% 1px no-repeat,
+      repeating-linear-gradient(to bottom, #2a2d31 0 1px, transparent 1px calc(100% / 12)) 0 0 / 22% 100% no-repeat,
+      repeating-linear-gradient(to bottom, #2a2d31 0 1px, transparent 1px calc(100% / 12)) 100% 0 / 22% 100% no-repeat,
+      var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45);
+    overflow: hidden;
+    touch-action: none;
+  }
+  /* The fader cap can be grabbed and dragged to a new angle. */
+  .meter.near-cap { cursor: grab; }
+  .strip.dragging .meter { cursor: grabbing; }
+  .meter.near-cap .mark.now, .strip.dragging .mark.now { background: linear-gradient(#ffffff, #e4dfd5); }
+  /* A staged angle isn't commanded yet: a dashed frame and a grey target line until Move sends it. */
+  .mark.goal.planned { border-style: dashed; }
+  .strip .toward.planned { color: var(--ink-2); }
+  .mark.goal.blocked { border-color: var(--alarm); }
+  .strip .toward.blocked { color: var(--alarm); }
+  .meter .scale {
+    position: absolute;
+    left: 4px;
+    font-size: 10px;
+    color: #8f8b83;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+  /* Lit column from 0 deg to the joint's actual angle, revealed with clip-path. */
+  .meter .lit {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 42%;
+    right: 42%;
+    background: color-mix(in srgb, var(--tape) 55%, transparent);
+    clip-path: inset(50% 0 50% 0);
+    transition: clip-path 140ms var(--ease);
+  }
+  .mark {
+    position: absolute;
+    left: 24%;
+    right: 24%;
+    transform: translateY(-50%);
+    transition: top 140ms var(--ease);
+  }
+  /* Fader-cap marker for the actual angle, with a centre groove. */
+  .mark.now {
+    height: 9px;
+    border-radius: 2px;
+    background: linear-gradient(#f6f3ec, #cfcac0);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+  }
+  .mark.now::after { content: ""; position: absolute; left: 3px; right: 3px; top: 4px; height: 1px; background: rgb(0 0 0 / 0.45); }
+  .mark.goal { height: 13px; border: 2px solid var(--amber); border-radius: 2px; }
+  .mark.over::before { content: ""; position: absolute; inset: -5px 30% auto; border-top: 2px solid var(--alarm); }
+
+  /* Lead lights: an LED ladder counting how far the commanded goal is ahead of the joint,
+     four lights per step, lit outward from the centre line (up for +, down for -). */
+  .lead {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 5px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45);
+  }
+  .lead .half, .lead .step { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .lead .half { gap: 5px; }
+  .lead .step { gap: 2px; }
+  .lead i { flex: 1; min-height: 2px; border-radius: 1px; background: #25282c; transition: background-color 80ms linear; }
+  .lead i.on { background: var(--amber); }
+  .lead .zero { flex: none; height: 2px; margin: 4px -5px; background: var(--ink-2); }
+
+  .value { font-size: 20px; font-weight: 650; text-align: center; letter-spacing: -0.01em; }
+  .strip.moving .value { color: var(--amber); }
+  .strip .toward { min-height: 20px; margin-top: -6px; font-size: 15px; font-weight: 650; color: var(--amber); text-align: center; }
+
+  .axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); grid-auto-flow: column; gap: 8px; align-content: start; }
+  .axis-group { margin: 4px 0 -2px; }
+  .axis {
+    display: grid;
+    grid-template-columns: 58px 50px minmax(0, 1fr) 50px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    background: #1b1d20;
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+  }
+  .axis .key { height: 44px; font-size: 22px; }
+  .axis .reading { position: relative; display: grid; justify-items: center; }
+  .axis .reading .value { font-size: 19px; }
+  .axis .reading .toward { position: absolute; top: 100%; left: 0; right: 0; text-align: center; font-size: 11px; line-height: 1.1; color: var(--amber); }
+  .axis .reading .toward.planned { color: var(--ink-2); }
+  .axis.moving .reading .value { color: var(--amber); }
+  .axis .axis-name { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  /* ---- Console line ---- */
+  .console-line {
+    position: sticky;
+    bottom: 0;
+    z-index: 9;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 16px;
+    padding: 9px 16px;
+    background: var(--well);
+    border-top: 1px solid var(--seam);
+    font-size: 13px;
+  }
+  #note[data-tone="ok"] { color: var(--ink); }
+  #note[data-tone="wait"] { color: var(--amber); }
+  #note[data-tone="bad"] { color: var(--alarm); font-weight: 600; }
+  .hint { color: var(--ink-2); }
+
+  @media (max-width: 1240px) {
+    .desk { grid-template-columns: minmax(0, 1fr); grid-template-areas: "monitor" "joints" "tool"; grid-template-rows: none; }
+    /* Short enough that the fader readouts still land in the first screenful of an app side panel. */
+    .screen { min-height: 0; height: clamp(300px, 36vh, 500px); }
+  }
+  /* Side by side, the monitor stays in view between the bridge and the message line while the right column scrolls. */
+  @media (min-width: 1241px) {
+    .monitor { position: sticky; top: 110px; align-self: start; height: max(460px, calc(100vh - 166px)); }
+  }
+  @media (max-width: 860px) {
+    .bridge { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "ident enable stop" "state state state"; }
+    .strips { grid-template-columns: repeat(3, minmax(92px, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .axes { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
+    .joints .bank h2, .tool .bank h2, .detent { flex-basis: 100%; max-width: none; }
+    /* Tall enough that the tool gizmo fits above a staged plan's bar, short enough that the bar's Move key stays
+       above the message line on a phone. */
+    .screen { height: clamp(360px, 50vh, 500px); }
+    .bridge { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "state stop" "ident enable"; gap: 8px; padding: 8px; }
+    .stop { min-width: 112px; padding: 6px 10px; }
+    .stop .big { font-size: 26px; }
+    .enable { min-width: 0; }
+    .state-name { font-size: 20px; }
+    .meters { grid-template-columns: minmax(0, 1fr) 22px; gap: 3px; }
+    .lead { padding: 3px; }
+    .lead .zero { margin: 3px -3px; }
+  }
+  /* Two-line scribble tape whenever the fader bank is too narrow for the full joint names on one line. */
+  .strips { container-type: inline-size; }
+  @container (max-width: 760px) {
+    .scribble { flex-wrap: wrap; row-gap: 1px; font-size: 11px; letter-spacing: 0.02em; }
+    .scribble .name { order: 3; flex-basis: 100%; }
+  }
+  /* On a narrow screen the plan drops its title and each chip's from-angle (the strips still show it), its
+     joints take the full width, and the note sits beside the keys, so the bar stays low over the arm. */
+  .screen { container-type: inline-size; }
+  @container (max-width: 520px) {
+    .plan { grid-template-columns: minmax(0, 1fr) auto; }
+    .plan-title { display: none; }
+    .plan-body { display: contents; }
+    .plan-joints { grid-column: 1 / -1; }
+    .plan-chip .from { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<header class="bridge">
+  <div class="ident">
+    <h1>Jog panel</h1>
+    <p class="link"><span class="led" id="linkLed"></span><span id="linkText">Connecting…</span></p>
+  </div>
+  <div class="readout-window" id="stateWindow" data-tone="idle" aria-live="polite">
+    <p class="state-name" id="stateName">CONNECTING</p>
+    <p class="state-detail" id="stateDetail">Waiting for the jog panel server.</p>
+  </div>
+  <button class="key enable" id="enableKey" type="button" disabled
+          aria-label="Hold to switch the motors on" aria-describedby="enableSub">
+    <span class="label"><span class="led"></span><span id="enableLabel">Hold to enable</span></span>
+    <span class="sub" id="enableSub">Hold for 0.7 s</span>
+    <span class="fill"></span>
+  </button>
+  <button class="stop" id="stopKey" type="button" aria-keyshortcuts="Space Escape">
+    <span class="big">STOP</span>
+    <span class="sub">Space or Esc</span>
+  </button>
+</header>
+
+<main class="desk">
+  <section class="section monitor" aria-labelledby="armTitle">
+    <div class="bank">
+      <h2 id="armTitle">Arm</h2>
+      <div class="mode-keys" role="group" aria-label="Dragging in the 3D view moves">
+        <button class="key latch mode-key" id="modeJoints" type="button" aria-pressed="true">Joints</button>
+        <button class="key latch mode-key" id="modeTool" type="button" aria-pressed="false">Tool</button>
+      </div>
+      <p class="meter-key"><span class="item"><span class="swatch ring" id="dragSwatch"></span><span id="dragLegend">drag a ring</span></span> <span class="item"><span class="swatch shadow"></span>plan</span> <span class="item"><span class="swatch blocked"></span>blocked</span></p>
+      <button class="key latch view-reset" id="viewReset" type="button">Reset view</button>
+    </div>
+    <div class="screen" id="screen">
+      <p class="screen-note" id="screenNote">Loading the arm model…</p>
+      <p class="screen-tag" id="screenTag" hidden></p>
+      <p class="screen-help" id="screenHelp" hidden></p>
+      <div class="plan" id="plan" role="group" aria-label="Plan" hidden>
+        <p class="legend plan-title">Plan</p>
+        <div class="plan-body">
+          <ul class="plan-joints" id="planJoints" aria-label="Planned joints"></ul>
+          <p class="plan-note" id="planNote" role="status"></p>
+        </div>
+        <div class="plan-keys">
+          <button class="key latch" id="planClear" type="button">Clear</button>
+          <button class="key plan-move" id="planMove" type="button">Move</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section joints" aria-labelledby="jointsTitle">
+    <div class="bank">
+      <h2 id="jointsTitle">Joints</h2>
+      <div class="detent" data-setting="jointStep" data-label="Step" data-unit="°" data-name="Joint step"></div>
+      <div class="detent" data-setting="jointSpeed" data-label="Speed" data-unit="°/s" data-name="Joint speed"></div>
+      <p class="meter-key"><span class="item"><span class="swatch now"></span>actual</span> <span class="item"><span class="swatch goal"></span>commanded</span> <span class="item"><span class="swatch goal planned"></span>planned</span> <span class="item"><span class="swatch lead"></span>steps ahead</span></p>
+    </div>
+    <div class="strips" id="strips"></div>
+  </section>
+
+  <section class="section tool" aria-labelledby="toolTitle">
+    <div class="bank">
+      <h2 id="toolTitle">Tool</h2>
+      <div class="detent" data-setting="toolStep" data-label="Step" data-unit=" mm" data-name="Tool step"></div>
+      <div class="detent" data-setting="rotStep" data-label="Turn" data-unit="°" data-name="Tool turn step"></div>
+      <div class="detent" data-setting="toolSpeed" data-label="Speed" data-unit=" mm/s" data-name="Tool speed"></div>
+    </div>
+    <div class="axes" id="axes"></div>
+  </section>
+</main>
+
+<footer class="console-line">
+  <span id="note" data-tone="ok" role="status">Starting…</span>
+  <span class="hint" id="hint"></span>
+</footer>
+
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+const CONFIG = __CONFIG__;
+const JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist 1", "Wrist 2", "Flange"];
+const TOOL_AXES = [
+  {name: "X", unit: "mm"}, {name: "Y", unit: "mm"}, {name: "Z", unit: "mm"},
+  {name: "Roll", unit: "°"}, {name: "Pitch", unit: "°"}, {name: "Yaw", unit: "°"},
+];
+const CHOICES = {
+  jointStep: CONFIG.jointSteps, jointSpeed: CONFIG.jointSpeeds,
+  toolStep: CONFIG.toolSteps, rotStep: CONFIG.rotSteps, toolSpeed: CONFIG.toolSpeeds,
+};
+// Steps are remembered on this PC; the speeds start slow every time the panel opens.
+const REMEMBERED = ["jointStep", "toolStep", "rotStep"];
+const HOLD_TO_ENABLE_MS = 700;
+const REPEAT_DELAY_MS = 400;
+const REPEAT_EVERY_MS = 250;
+const POLL_MS = 150;
+const MAX_WAITING_PRESSES = 2;
+const LEDS_PER_STEP = 4;
+
+const $ = (id) => document.getElementById(id);
+const settings = loadSettings();
+const releases = [];
+const strips = [];
+const axes = [];
+let status = null;
+let canJog = false;
+let lastServerNote = null;
+let localStopAlarm = false;
+let settled = false;  // false until the first status arrives or polling has clearly failed
+let view = null;  // the 3D monitor, once it has loaded
+let fader = null;  // a fader-cap drag in progress
+let preview = null;  // {joint, to, clear} from a ring or fader drag, or {pose, clear} from a gizmo drag
+let plan = null;  // staged targets per joint (deg, or null to stay with the real arm), built by dragging
+let planCheck = {clear: true, hit: null};  // whether the move from the arm to the plan stays clear, else what it hits
+let planSending = false;
+let planSentAt = 0;  // when the plan was sent; it stays on screen until the status shows it as the goal
+let kinematics = null;  // ik.js's forward kinematics, for the tool rows' planned pose
+let dragMode = "joints";  // what dragging in the 3D view moves: "joints" (a ring each) or "tool" (the gizmo)
+try { if (localStorage.getItem("jogPanelDrag") === "tool") dragMode = "tool"; } catch (e) { /* private mode */ }
+const DRAG_SNAP_DEG = 0.5;
+const DRAG_MIN_DEG = 0.25;  // a shorter drag is a click, not a change to the plan
+const CAP_GRAB_PX = 14;
+
+function loadSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("jogPanel") || "{}") || {}; } catch (e) { saved = {}; }
+  const out = {};
+  for (const key of Object.keys(CHOICES)) {
+    out[key] = REMEMBERED.includes(key) && CHOICES[key].includes(saved[key]) ? saved[key] : CONFIG.defaults[key];
+  }
+  return out;
+}
+
+function saveSettings() {
+  const kept = Object.fromEntries(REMEMBERED.map((key) => [key, settings[key]]));
+  try { localStorage.setItem("jogPanel", JSON.stringify(kept)); } catch (e) { /* private mode */ }
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function say(text, tone) {
+  const note = $("note");
+  note.textContent = text;
+  note.dataset.tone = tone;
+}
+
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
+async function post(path, body = {}) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Panel-Token": TOKEN},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---- Step and speed faders: each cap snaps to the detents the server accepts ----
+const UNIT_WORDS = {
+  "\u00b0": ["degree", "degrees"], "\u00b0/s": ["degree per second", "degrees per second"],
+  " mm": ["millimetre", "millimetres"], " mm/s": ["millimetre per second", "millimetres per second"],
+};
+
+// The joints whose top speed is below a joint speed, grouped by top speed: printed "J1–2 max 84, J3 114.5" and
+// spoken "limited to 84 for J1 and J2, 114.5 for J3". Empty when every joint can reach it.
+function ratedLimits(speed) {
+  const groups = [];
+  CONFIG.jointRated.forEach((rated, i) => {
+    if (rated >= speed) return;
+    const last = groups[groups.length - 1];
+    if (last && last.rated === rated && last.to === i - 1) last.to = i;
+    else groups.push({from: i, to: i, rated});
+  });
+  if (!groups.length) return {printed: "", spoken: ""};
+  const printed = groups.map((g, n) => {
+    const name = g.from === g.to ? `J${g.from + 1}` : `J${g.from + 1}\u2013${g.to + 1}`;
+    return `${name} ${n === 0 ? "max " : ""}${g.rated}`;
+  });
+  const spoken = groups.map((g) => {
+    const names = [];
+    for (let i = g.from; i <= g.to; i += 1) names.push(`J${i + 1}`);
+    const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    return `${g.rated} for ${who}`;
+  });
+  return {printed: printed.join(", "), spoken: `limited to ${spoken.join(", ")}`};
+}
+
+// Where `line` falls along a fader's slot (0 to 1, the detents evenly spaced), or null past the top detent.
+function slotAt(values, line) {
+  if (line === null || !(line < values[values.length - 1])) return null;
+  if (line <= values[0]) return 0;
+  let i = 0;
+  while (values[i + 1] <= line) i += 1;
+  return (i + (line - values[i]) / (values[i + 1] - values[i])) / (values.length - 1);
+}
+
+const roundUp10 = (mmS) => Math.ceil(mmS / 10) * 10;
+const dragging = () => Boolean(fader) || Boolean(view && view.isDragging());
+
+// The joint speed fader's redline: the slowest joint speed at which the flange could pass the tool redline.
+// With a plan staged, along that plan's path, where every joint turns in step with the lead joint within its
+// rated speed; otherwise turning one joint alone from the arm's pose now; and until the pose is known, as if
+// the arm were at full reach. Returns {line (deg/s, or null when nothing can), source, and what it came from}.
+function jointRedline(s, planned) {
+  const limit = CONFIG.toolRedline;
+  if (planned) {
+    const cap = cappedSpeed(Infinity, planned.travel).speed;
+    const at = limit / planned.flangePerDeg;
+    return {line: at < cap ? at : null, source: "plan", perDeg: planned.flangePerDeg, cap};
+  }
+  const known = Boolean(s && s.live && s.toolRadii);
+  const radii = known ? s.toolRadii : CONFIG.jointRated.map(() => CONFIG.armReach);
+  let line = null;
+  radii.forEach((r, i) => {
+    const at = r > 0 ? ((limit / r) * 180) / Math.PI : Infinity;
+    if (at < (CONFIG.jointRated[i] ?? Infinity) && (line === null || at < line)) line = at;
+  });
+  return {line, source: known ? "pose" : "reach", radii};
+}
+let jointRed = jointRedline(null, null);
+let planRed = null;  // a staged plan's own redline, for the plan bar's note
+
+// How fast a joint speed would carry the flange (mm/s), and for a single joint, which one.
+function flangeSpeed(red, speed) {
+  if (red.source === "plan") return {mmS: Math.min(speed, red.cap) * red.perDeg, joint: null};
+  let fastest = {mmS: 0, joint: 0};
+  red.radii.forEach((r, i) => {
+    const mmS = ((Math.min(speed, CONFIG.jointRated[i] ?? speed) * Math.PI) / 180) * r;
+    if (mmS > fastest.mmS) fastest = {mmS, joint: i};
+  });
+  return fastest;
+}
+
+// The message line's account of a speed fader against its redline, in the red or out of it.
+function redlineMessage(key, over) {
+  const limit = CONFIG.toolRedline;
+  if (key === "toolSpeed") {
+    const v = settings.toolSpeed;
+    return over ? `${v} mm/s is in the red: faster than the ${limit} mm/s limit for jogging by hand.`
+      : `${v} mm/s is out of the red, within the ${limit} mm/s limit for jogging by hand.`;
+  }
+  const v = settings.jointSpeed;
+  if (jointRed.source === "reach") {
+    return over ? `${v}\u00b0/s is in the red: with the arm at full reach it could swing the flange past ${limit} mm/s, `
+      + "the limit for jogging by hand." : `${v}\u00b0/s is out of the red.`;
+  }
+  const where = jointRed.source === "plan" ? "for this plan" : "here";
+  if (!over) return `${v}\u00b0/s is out of the red ${where}: the flange stays under ${limit} mm/s.`;
+  const fast = flangeSpeed(jointRed, v);
+  const who = jointRed.source === "plan" ? "the move would carry the flange" : `J${fast.joint + 1} would swing the flange`;
+  return `${v}\u00b0/s is in the red ${where}: ${who} at about ${roundUp10(fast.mmS)} mm/s, past the ${limit} mm/s `
+    + "limit for jogging by hand.";
+}
+
+// Recolours a speed fader's value against its redline, and says so on the message line when the cap moves into
+// or within the red, when the line moves past a resting cap (with the pose or a staged plan), when what the line
+// measures changes under a cap in the red (a plan staged or cleared), and when it leaves the red. Not during a
+// drag, when the plan bar says it. While a move is under way only the cap's own moves are reported, so the
+// move's messages aren't overwritten as the line slides with the arm; a crossing made during the move is
+// reported once the arm settles.
+function checkRedline(f, moved) {
+  const over = f.line !== null && settings[f.key] > f.line;
+  const context = f.key === "jointSpeed" ? jointRed.source : "tool";
+  f.show();
+  const [was, wasContext] = [f.over, f.context];
+  f.context = context;
+  const s = status;
+  const busy = !moved && (planSending || planSentAt || (s && s.live && (s.state === 1 || s.queued > 0)));
+  if (was !== undefined && busy) return;
+  f.over = over;
+  if (was === undefined || dragging()) return;
+  if (over && (moved || !was || context !== wasContext)) say(redlineMessage(f.key, true), "bad");
+  else if (!over && was) say(redlineMessage(f.key, false), "ok");
+}
+
+// Hides a redline figure that would touch the scale's end figures or the rated-limits note.
+function placeFigure(f) {
+  const key = `${f.figure.textContent}|${f.figure.style.left}|${f.note ? f.note.textContent : ""}`;
+  if (key === f.placedKey) return;
+  f.placedKey = key;
+  f.figure.style.visibility = "";
+  if (!f.figure.textContent) return;
+  const box = f.figure.getBoundingClientRect();
+  const clash = [f.bottom, f.top, f.note].some((other) => {
+    if (!other || !other.textContent) return false;
+    const r = other.getBoundingClientRect();
+    return box.left < r.right + 4 && r.left < box.right + 4;
+  });
+  if (clash) f.figure.style.visibility = "hidden";
+}
+
+// Moves a speed fader's red zone to `line` (deg/s or mm/s; null clears it): the rule, the ticks past it, the
+// line's own figure in red at its start and the top figure, then the value.
+function setRedline(f, line) {
+  f.line = line;
+  const at = slotAt(f.values, line);
+  f.zone.hidden = at === null;
+  const left = at === null ? "" : `${(at * 100).toFixed(1)}%`;
+  if (f.zone.style.left !== left) f.zone.style.left = left;
+  f.values.forEach((value, i) => f.ticks[i].classList.toggle("over", line !== null && value > line));
+  f.top.classList.toggle("over", at !== null);
+  setText(f.figure, at === null ? "" : line >= 10 ? String(Math.round(line)) : line.toFixed(1));
+  const figureLeft = at === null ? "" : `calc(5.5px + (100% - 11px) * ${at.toFixed(3)})`;
+  if (f.figure.style.left !== figureLeft) f.figure.style.left = figureLeft;
+  checkRedline(f, false);
+  placeFigure(f);
+}
+
+const faders = {};
+for (const group of document.querySelectorAll(".detent")) {
+  const key = group.dataset.setting;
+  const unit = group.dataset.unit;
+  const values = CHOICES[key];
+  const input = el("input");
+  Object.assign(input, {type: "range", id: `${key}Fader`, min: "0", max: String(values.length - 1), step: "1"});
+  input.value = String(Math.max(0, values.indexOf(settings[key])));
+  input.setAttribute("aria-label", group.dataset.name);
+  const label = el("label", "legend", group.dataset.label);
+  label.htmlFor = input.id;
+  const ticks = el("span", "detent-ticks");
+  const zone = el("span", "detent-red");
+  zone.hidden = true;
+  ticks.append(zone);
+  const tickMarks = values.map((value, i) => {
+    const tick = el("i", !REMEMBERED.includes(key) && value === CONFIG.defaults[key] ? "home" : "");
+    tick.style.left = `${(i / (values.length - 1)) * 100}%`;
+    ticks.append(tick);
+    return tick;
+  });
+  const ends = el("span", "detent-ends");
+  const bottom = el("span", "", String(values[0]));
+  const top = el("span", "", String(values[values.length - 1]));
+  const limitNote = key === "jointSpeed" ? el("span", "detent-note") : null;
+  const figure = el("span", "detent-line");
+  ends.append(bottom, ...(limitNote ? [limitNote] : []), top, figure);
+  ticks.setAttribute("aria-hidden", "true");
+  ends.setAttribute("aria-hidden", "true");
+  const track = el("span", "detent-track");
+  track.append(ticks, ends, input);
+  const readout = el("output", "detent-value");
+  readout.setAttribute("for", input.id);
+  const f = {key, values, input, zone, ticks: tickMarks, bottom, top, note: limitNote, figure, line: null};
+  f.show = () => {
+    const value = values[Number(input.value)];
+    const over = f.line !== null && value > f.line;
+    setText(readout, `${value}${unit}`);
+    readout.classList.toggle("over", over);
+    const words = UNIT_WORDS[unit] ? UNIT_WORDS[unit][value === 1 ? 0 : 1] : unit.trim();
+    let spoken = `${value} ${words}`;
+    if (limitNote) {
+      const limits = ratedLimits(value);
+      setText(limitNote, limits.printed);
+      if (limits.spoken) spoken += `, ${limits.spoken}`;
+    }
+    if (over) {
+      spoken += key === "toolSpeed"
+        ? `, in the red: faster than the ${CONFIG.toolRedline} millimetres per second limit for jogging by hand`
+        : `, in the red: the flange could pass ${CONFIG.toolRedline} millimetres per second`;
+    }
+    if (input.getAttribute("aria-valuetext") !== spoken) input.setAttribute("aria-valuetext", spoken);
+  };
+  input.addEventListener("input", () => {
+    settings[key] = values[Number(input.value)];
+    saveSettings();
+    checkRedline(f, true);
+    placeFigure(f);
+    render();
+  });
+  new ResizeObserver(() => {
+    f.placedKey = null;
+    placeFigure(f);
+  }).observe(track);
+  f.show();
+  faders[key] = f;
+  group.append(label, readout, track);
+}
+setRedline(faders.toolSpeed, CONFIG.toolRedline);
+setRedline(faders.jointSpeed, jointRed.line);
+
+// The speed a joint move runs at: the one chosen, unless that would turn a joint faster than its rated speed.
+// A move turns every joint in step, the one with the furthest to go at the move's speed. The server applies
+// the same cap. Returns {speed, joint}: the joint that limits it, or null.
+function cappedSpeed(speed, travel) {
+  const longest = Math.max(...travel);
+  let sent = speed;
+  let joint = null;
+  travel.forEach((t, i) => {
+    if (t <= 1e-6) return;
+    const rated = CONFIG.jointRated[i] ?? Math.min(...CONFIG.jointRated);
+    const cap = Math.floor(((rated * longest) / t) * 10) / 10;
+    if (cap < sent) {
+      sent = cap;
+      joint = i;
+    }
+  });
+  return {speed: sent, joint};
+}
+
+// ---- Jog keys: every press is sent, in order; refusals show on the key ----
+const waiting = [];
+let sending = false;
+
+function refuse(key) {
+  key.classList.remove("refused");
+  void key.offsetWidth;  // restart the flash
+  key.classList.add("refused");
+  clearTimeout(key.refuseTimer);
+  key.refuseTimer = setTimeout(() => key.classList.remove("refused"), 450);
+}
+
+function press(request, key, repeat) {
+  if (!canJog) { refuse(key); return; }
+  if (waiting.length >= MAX_WAITING_PRESSES) {
+    if (!repeat) {
+      refuse(key);
+      say("Held back: earlier presses are still on their way to the arm.", "wait");
+    }
+    return;
+  }
+  waiting.push({request, key, repeat});
+  pump();
+}
+
+async function pump() {
+  if (sending) return;
+  sending = true;
+  while (waiting.length) {
+    const {request, key, repeat} = waiting.shift();
+    try {
+      const reply = await post("/api/jog", request);
+      say(reply.message, reply.ok ? (reply.moved ? "ok" : "wait") : "bad");
+      if (!reply.ok || (!reply.moved && !repeat)) refuse(key);
+    } catch (e) {
+      say("The jog panel server isn't answering. Is jog_server.py still running?", "bad");
+      refuse(key);
+      waiting.length = 0;
+    }
+  }
+  sending = false;
+}
+
+function bindJog(button, request) {
+  let delay = 0;
+  let repeat = 0;
+  const release = () => {
+    clearTimeout(delay);
+    clearInterval(repeat);
+    delay = repeat = 0;
+    button.classList.remove("held");
+  };
+  button.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || button.disabled) return;
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    button.classList.add("held");
+    press(request(), button, false);
+    delay = setTimeout(() => {
+      repeat = setInterval(() => press(request(), button, true), REPEAT_EVERY_MS);
+    }, REPEAT_DELAY_MS);
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(type, release);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.repeat) press(request(), button, false);
+  });
+  releases.push(release);
+}
+const releaseAll = () => releases.forEach((release) => release());
+window.addEventListener("blur", releaseAll);
+document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll(); });
+
+// ---- Joint strips ----
+for (let i = 0; i < CONFIG.axis; i += 1) {
+  const strip = el("article", "strip");
+  strip.style.setProperty("--tape", `var(--tape-${i + 1})`);
+  const scribble = el("header", "scribble");
+  const act = el("span", "act");
+  act.setAttribute("aria-hidden", "true");
+  scribble.append(el("span", "", `J${i + 1}`), el("span", "name", JOINT_NAMES[i] || ""), act);
+  const up = el("button", "key", "+");
+  const down = el("button", "key", "\u2212");
+  up.type = down.type = "button";
+  up.setAttribute("aria-label", `Joint ${i + 1} plus one step`);
+  down.setAttribute("aria-label", `Joint ${i + 1} minus one step`);
+  const meter = el("div", "meter");
+  meter.setAttribute("aria-hidden", "true");
+  for (const [deg, text] of [[180, "180"], [90, "90"], [0, "0"], [-90, "\u221290"], [-180, "\u2212180"]]) {
+    const scale = el("span", "scale", text);
+    scale.style.top = `${((180 - deg) / 360) * 100}%`;
+    if (deg === 180) scale.style.transform = "none";
+    if (deg === -180) scale.style.transform = "translateY(-100%)";
+    meter.append(scale);
+  }
+  const lit = el("span", "lit");
+  const goal = el("span", "mark goal");
+  const now = el("span", "mark now");
+  lit.hidden = goal.hidden = now.hidden = true;
+  meter.append(lit, goal, now);
+  const lead = el("div", "lead");
+  lead.setAttribute("aria-hidden", "true");
+  const plusHalf = el("div", "half");
+  const minusHalf = el("div", "half");
+  for (let k = 0; k < CONFIG.maxLeadSteps; k += 1) {
+    const plusStep = el("div", "step");
+    const minusStep = el("div", "step");
+    for (let j = 0; j < LEDS_PER_STEP; j += 1) {
+      plusStep.append(el("i"));
+      minusStep.append(el("i"));
+    }
+    plusHalf.append(plusStep);
+    minusHalf.append(minusStep);
+  }
+  lead.append(plusHalf, el("div", "zero"), minusHalf);
+  const meters = el("div", "meters");
+  meters.append(meter, lead);
+  const value = el("output", "value", "—");
+  value.setAttribute("aria-label", `Joint ${i + 1} angle`);
+  const toward = el("p", "toward", "");
+  strip.append(scribble, up, meters, down, value, toward);
+  $("strips").append(strip);
+  bindJog(up, () => ({kind: "joint", index: i, dir: 1, step: settings.jointStep, speed: settings.jointSpeed}));
+  bindJog(down, () => ({kind: "joint", index: i, dir: -1, step: settings.jointStep, speed: settings.jointSpeed}));
+  meter.addEventListener("pointerdown", (event) => startFader(i, meter, event));
+  meter.addEventListener("pointermove", (event) => moveFader(i, meter, event));
+  meter.addEventListener("pointerleave", () => meter.classList.remove("near-cap"));
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    meter.addEventListener(type, (event) => endFader(i, event, type !== "pointerup"));
+  }
+  strips.push({
+    strip, meter, value, toward, lit, now, goal, keys: [up, down], leadShown: 0,
+    plusLeds: [...plusHalf.querySelectorAll("i")].reverse(),  // nearest the centre line first
+    minusLeds: [...minusHalf.querySelectorAll("i")],
+  });
+}
+
+// ---- Planning: drag rings in the 3D view or joint fader caps to stage a pose; nothing moves until Move ----
+function dragAllowed() {
+  const s = status;
+  return Boolean(CONFIG.model && canJog && s && !s.goal && s.state !== 1 && !s.queued && !planSending && !planSentAt
+    && !(s.age > CONFIG.freshS));  // no new drag on a stale picture of the arm
+}
+
+function canMove() {
+  return Boolean(plan && planCheck.clear && dragAllowed() && !fader && !(view && view.isDragging()));
+}
+
+function measuredPose() {
+  const s = status;
+  return s && s.live && s.joints.every(Number.isFinite) ? [...s.joints] : null;
+}
+
+const stagedJoints = (targets) => (targets ? targets.flatMap((q, i) => (Number.isFinite(q) ? [i] : [])) : []);
+
+// What blocks a move, as the server words it: "the forearm would come within 10 mm of a cart brace".
+const blockedBy = (hit) => (hit
+  ? `${hit.part} would come within ${Math.round(CONFIG.collision.margin * 1000)} mm of ${hit.other}` : "it would collide");
+
+// The plan with one joint staged at `angle`, or taken out when that's where the arm already is.
+function withJoint(base, joint, angle, actual) {
+  const next = base ? [...base] : Array(CONFIG.axis).fill(null);
+  next[joint] = angle === null || (actual !== undefined && Math.abs(angle - actual) < DRAG_MIN_DEG) ? null : angle;
+  return next.some(Number.isFinite) ? next : null;
+}
+
+// How close the pointer is to the fader cap (where the joint is) or, if staged, its frame (where it's planned).
+function grabDistance(i, meter, event) {
+  const pose = measuredPose();
+  if (!pose) return Infinity;
+  const rect = meter.getBoundingClientRect();
+  const gap = (deg) => Math.abs(event.clientY - (rect.top + (percentFor(deg) / 100) * rect.height));
+  return Math.min(gap(pose[i]), plan && Number.isFinite(plan[i]) ? gap(plan[i]) : Infinity);
+}
+
+function startFader(i, meter, event) {
+  if (event.button !== 0 || fader || (view && view.isDragging()) || grabDistance(i, meter, event) > CAP_GRAB_PX) return;
+  event.preventDefault();
+  if (!dragAllowed()) {
+    say(!CONFIG.model ? "Planning is off because the arm model didn't load. Use + and \u2212."
+      : canJog ? "Wait for the arm to settle, then drag." : "Hold Enable before dragging a fader.", "wait");
+    return;
+  }
+  meter.setPointerCapture(event.pointerId);
+  const start = measuredPose();
+  const planned = plan && Number.isFinite(plan[i]) ? plan[i] : start[i];
+  fader = {joint: i, pointerId: event.pointerId, start, from: start[i], was: planned, to: planned, base: plan, plan};
+  strips[i].strip.classList.add("dragging");
+  moveFader(i, meter, event);
+}
+
+function moveFader(i, meter, event) {
+  if (!fader) {
+    meter.classList.toggle("near-cap", dragAllowed() && grabDistance(i, meter, event) <= CAP_GRAB_PX);
+    return;
+  }
+  if (fader.joint !== i || event.pointerId !== fader.pointerId) return;
+  const rect = meter.getBoundingClientRect();
+  const snap = event.shiftKey ? 5 : DRAG_SNAP_DEG;
+  const [low, high] = CONFIG.dragLimits[i];
+  const raw = 180 - ((event.clientY - rect.top) / rect.height) * 360;
+  fader.to = Math.min(high, Math.max(low, Math.round(raw / snap) * snap));
+  fader.plan = withJoint(fader.base, i, fader.to);
+  preview = {joint: i, to: fader.to};
+  render();  // puts fader.plan on the shadow arm and checks it
+  if (view) {
+    const ring = view.labelPoint(i);  // the readout also shows in the monitor, beside that joint's ring
+    if (ring) showTag({...ring, joint: i, from: fader.from, to: fader.to, clear: planCheck.clear, hit: planCheck.hit});
+  }
+}
+
+function endFader(i, event, cancelled) {
+  if (!fader || fader.joint !== i || event.pointerId !== fader.pointerId) return;
+  const done = fader;
+  fader = null;
+  preview = null;
+  strips[i].strip.classList.remove("dragging");
+  showTag(null);
+  stageDrop({joint: i, from: done.from, to: done.to, cancelled,
+             changed: !cancelled && Math.abs(done.to - done.was) >= DRAG_MIN_DEG});
+}
+
+function cancelDrags() {
+  const ring = Boolean(view && view.cancelDrag());
+  const faderWas = fader;
+  if (faderWas) endFader(faderWas.joint, {pointerId: faderWas.pointerId}, true);
+  return ring || Boolean(faderWas);
+}
+
+// A drag ended: fold it into the plan. Nothing moves until Move.
+function stageDrop(d) {
+  if (d.cancelled) {
+    say("Drag cancelled. The plan is unchanged.", "wait");
+  } else if (d.kind === "tool") {
+    if (d.changed) stageTool(d);
+  } else if (d.changed) {
+    plan = withJoint(plan, d.joint, d.to, d.from);
+    const count = stagedJoints(plan).length;
+    say(plan && Number.isFinite(plan[d.joint])
+      ? `J${d.joint + 1} planned at ${d.to.toFixed(1)}\u00b0${count > 1 ? ` (${count} joints planned)` : ""}. `
+        + "Press Move to go there, or Esc to clear the plan."
+      : `J${d.joint + 1} is back where the arm is, so it's out of the plan.`, "ok");
+  }
+  render();
+}
+
+const signed = (x, digits) => `${x < 0 ? "\u2212" : "+"}${Math.abs(x).toFixed(digits)}`;
+
+// A gizmo drag ended: the joint angles solved for it become the plan, every joint that turns.
+function stageTool(d) {
+  const actual = measuredPose();
+  if (!actual) return;
+  const next = d.pose.map((q, i) => (Math.abs(q - actual[i]) < 0.01 ? null : q));
+  plan = next.some(Number.isFinite) ? next : null;
+  const how = d.type === "move" ? `${signed(d.amount, 0)} mm along ${d.name}`
+    : `${signed(d.amount, 1)}\u00b0 about ${d.name.slice(1).toUpperCase()}`;
+  const count = stagedJoints(plan).length;
+  say(plan ? `Tool planned ${how}, turning ${count} joint${count === 1 ? "" : "s"}. Press Move to go there, or Esc to clear the plan.`
+    : "The tool is back where the arm is, so there's no plan.", "ok");
+}
+
+function clearPlan(text) {
+  plan = null;
+  planSentAt = 0;
+  if (text) say(text, "wait");
+  render();
+}
+
+// What dragging in the 3D view moves: each joint's ring, or the gizmo at the tool. Remembered on this PC.
+function syncDragMode() {
+  const tool = dragMode === "tool";
+  $("modeJoints").setAttribute("aria-pressed", String(!tool));
+  $("modeTool").setAttribute("aria-pressed", String(tool));
+  $("dragSwatch").className = `swatch ${tool ? "gizmo" : "ring"}`;
+  setText($("dragLegend"), tool ? "drag an arrow or ring" : "drag a ring");
+}
+
+function setDragMode(next) {
+  if (next === dragMode) return;
+  cancelDrags();
+  dragMode = next;
+  try { localStorage.setItem("jogPanelDrag", next); } catch (e) { /* private mode */ }
+  syncDragMode();
+  if (view) view.setMode(next);
+  render();
+}
+
+// Why Move can't send the plan right now, for a refused press.
+function whyNotMove() {
+  const s = status;
+  if (!planCheck.clear) return `Not moving: ${blockedBy(planCheck.hit)}.`;
+  if (!s || !s.live) return "Not moving: there's no live status from the controller.";
+  if (!canJog) return "Not moving: the motors aren't ready. Hold Enable first.";
+  if (s.age > CONFIG.freshS) return "Not moving: waiting for fresh status from the controller.";
+  if (planSentAt || s.goal || s.state === 1 || s.queued) return "Not moving: wait for the arm to settle.";
+  return "Not moving: finish the drag first.";
+}
+
+// Send the whole plan as one move; it stays on screen until the status shows it as the goal.
+async function movePlan() {
+  if (!plan || planSending) return;
+  if (!canMove()) {
+    refuse($("planMove"));
+    say(whyNotMove(), "bad");
+    return;
+  }
+  planSending = true;
+  render();
+  try {
+    const reply = await post("/api/move", {targets: plan, speed: settings.jointSpeed});
+    say(reply.message, reply.ok ? "ok" : "bad");
+    if (!reply.ok) refuse($("planMove"));
+    if (reply.ok && reply.moved) planSentAt = performance.now();
+    else if (reply.ok) plan = null;  // the arm is already there
+  } catch (e) {
+    say("The jog panel server isn't answering. Is jog_server.py still running?", "bad");
+  } finally {
+    planSending = false;
+    render();
+  }
+}
+
+// The plan bar: each staged joint (removable), what Move will do, and the Clear and Move keys.
+let planKey = "";
+function renderPlan(live) {
+  const joints = stagedJoints(plan);
+  $("plan").hidden = !joints.length;
+  if (!joints.length) {
+    planKey = "";
+    return;
+  }
+  const s = status;
+  const now = (i) => (live && Number.isFinite(s.joints[i]) ? `${s.joints[i].toFixed(1)}\u00b0` : "?");
+  const key = joints.map((i) => `${i}:${plan[i].toFixed(1)}:${now(i)}`).join("|");
+  if (key !== planKey) {
+    planKey = key;
+    $("planJoints").replaceChildren(...joints.map((i) => {
+      const chip = el("li", "plan-chip");
+      chip.style.setProperty("--tape", `var(--tape-${i + 1})`);
+      const remove = el("button", "key unstage", "\u00d7");
+      remove.type = "button";
+      remove.dataset.joint = String(i);
+      remove.setAttribute("aria-label", `Take J${i + 1} out of the plan`);
+      const reading = el("span");
+      reading.append(el("span", "from", `${now(i)} `), `\u2192 ${plan[i].toFixed(1)}\u00b0`);
+      chip.append(el("span", "tag", `J${i + 1}`), reading, remove);
+      return chip;
+    }));
+  }
+  const names = joints.map((i) => `J${i + 1}`).join(", ");
+  const travel = plan.map((q, i) => (Number.isFinite(q) && live ? Math.abs(q - s.joints[i]) : 0));
+  const capped = cappedSpeed(settings.jointSpeed, travel);
+  const pace = `${capped.speed}\u00b0/s${capped.joint !== null ? `, J${capped.joint + 1}'s top speed` : ""}`;
+  const red = Boolean(planRed && planRed.line !== null) && settings.jointSpeed > planRed.line;
+  const flange = red ? `; the flange would reach about ${roundUp10(flangeSpeed(planRed, settings.jointSpeed).mmS)} mm/s, `
+    + `past the ${CONFIG.toolRedline} mm/s redline` : "";
+  setText($("planNote"), planSending ? "Sending the plan\u2026" : planSentAt ? "Moving to the plan\u2026"
+    : !planCheck.clear ? `Blocked: ${blockedBy(planCheck.hit)}.`
+    : joints.length > 1 ? `Moves ${names} together, at up to ${pace}${flange}.`
+    : `Moves ${names} at ${pace}${flange}.`);
+  $("plan").classList.toggle("blocked", !planCheck.clear);
+  $("plan").classList.toggle("over", red && planCheck.clear && !planSending && !planSentAt);
+  $("planMove").disabled = planSending;
+  $("planMove").setAttribute("aria-disabled", String(!canMove()));
+  $("planClear").disabled = planSending || Boolean(planSentAt);
+}
+$("planJoints").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-joint]");
+  if (!button || planSending || planSentAt) return;
+  const i = Number(button.dataset.joint);
+  plan = withJoint(plan, i, null);
+  say(`J${i + 1} taken out of the plan.`, "wait");
+  render();
+});
+$("planClear").addEventListener("click", () => clearPlan("Plan cleared. The arm didn't move."));
+$("planMove").addEventListener("click", movePlan);
+
+function showTag(p) {
+  const tag = $("screenTag");
+  if (!p) {
+    tag.hidden = true;
+    return;
+  }
+  tag.hidden = false;
+  tag.dataset.tone = p.clear ? "ok" : "blocked";
+  if (p.kind === "tool") {
+    const how = !p.clear ? `Blocked: ${blockedBy(p.hit)}`
+      : p.limited ? `${p.limited}, so it stops here` : "Release to plan \u00b7 Esc cancels";
+    if (p.type === "move") {
+      // In the controller's terms: the model's position plus how far the controller's reported pose sits from
+      // the model's for the arm as it is (nothing on this arm).
+      const s = status;
+      const offset = s && s.live && kinematics ? s.pose[p.axis] - kinematics.solver.pose(s.joints).p[p.axis] * 1000 : 0;
+      const from = p.from + offset;
+      tag.replaceChildren(`${p.name}  ${from.toFixed(1)} mm `, el("span", "to", `\u2192 ${(from + p.amount).toFixed(1)} mm`),
+        el("span", "how", how));
+    } else {
+      tag.replaceChildren(`${p.name}  `, el("span", "to", `${signed(p.amount, 1)}\u00b0`), el("span", "how", how));
+    }
+  } else {
+    const how = !p.clear ? `Blocked: ${blockedBy(p.hit)}`
+      : p.limited ? `J${p.joint + 1} stops at ${p.to.toFixed(0)}\u00b0` : "Release to plan \u00b7 Esc cancels";
+    tag.replaceChildren(`J${p.joint + 1}  ${p.from.toFixed(1)}\u00b0 `, el("span", "to", `\u2192 ${p.to.toFixed(1)}\u00b0`),
+      el("span", "how", how));
+  }
+  placeTag(tag, p);
+}
+
+// Sets the readout outward from the ring's or gizmo's centre (cx, cy), at or past (x, y), on the side it's
+// pushed toward, and keeps it on screen. For a gizmo, when that side has no room, it goes above or below
+// instead, clear of the gizmo, so it never covers the handle being dragged.
+function placeTag(tag, p) {
+  const rect = $("screen").getBoundingClientRect();
+  const width = tag.offsetWidth;
+  const height = tag.offsetHeight;
+  let dx = p.x - (p.cx ?? p.x - 1);
+  let dy = p.y - (p.cy ?? p.y);
+  const reach = Math.hypot(dx, dy) || 1;
+  dx /= reach;
+  dy /= reach;
+  const x = p.x - rect.left + dx * 34;
+  const y = p.y - rect.top + dy * 34;
+  const fits = {right: x + width <= rect.width - 8, left: x - width >= 8};
+  let side = dx < 0 ? "left" : "right";
+  if (!fits[side]) side = side === "right" ? "left" : "right";
+  let left = side === "right" ? x : x - width;
+  let top = y - height / 2;
+  if (p.kind === "tool" && !(fits.right && dx >= 0) && !(fits.left && dx < 0)) {
+    // No room beside the gizmo on the pointer's side: centre it above or below, past the letters.
+    const cx = p.cx - rect.left;
+    const cy = p.cy - rect.top;
+    const clearance = 120;
+    const below = cy + clearance + height <= rect.height - 8;
+    left = cx - width / 2;
+    top = (dy >= 0 && below) || cy - clearance - height < 8 ? cy + clearance : cy - clearance - height;
+  }
+  left = Math.min(rect.width - 8 - width, Math.max(8, left));
+  top = Math.min(rect.height - 8 - height, Math.max(8, top));
+  tag.style.left = `${left}px`;
+  tag.style.top = `${top}px`;
+}
+
+// ---- Tool axes ----
+TOOL_AXES.forEach((axis, i) => {
+  if (i === 0) $("axes").append(el("p", "axis-group", "Position"));
+  if (i === 3) $("axes").append(el("p", "axis-group", "Orientation"));
+  const row = el("div", "axis");
+  const minus = el("button", "key", "\u2212");
+  const plus = el("button", "key", "+");
+  minus.type = plus.type = "button";
+  minus.setAttribute("aria-label", `${axis.name} minus one step`);
+  plus.setAttribute("aria-label", `${axis.name} plus one step`);
+  const reading = el("div", "reading");
+  const value = el("output", "value", "—");
+  value.setAttribute("aria-label", `Tool ${axis.name}`);
+  const toward = el("span", "toward", "");
+  reading.append(value, toward);
+  row.append(el("span", "axis-name", axis.name), minus, reading, plus);
+  $("axes").append(row);
+  const request = (dir) => () => ({kind: "tool", index: i, dir, step: settings.toolStep,
+                                   rotStep: settings.rotStep, speed: settings.toolSpeed});
+  bindJog(minus, request(-1));
+  bindJog(plus, request(1));
+  axes.push({row, value, toward, unit: axis.unit, keys: [minus, plus]});
+});
+
+// ---- STOP: fires on press, from the key, Space or Esc ----
+async function stopArm() {
+  releaseAll();
+  cancelDrags();
+  plan = null;  // after a stop, plan again from where the arm ended up
+  planSentAt = 0;
+  waiting.length = 0;
+  const key = $("stopKey");
+  key.classList.add("fired");
+  say("Stopping…", "wait");
+  try {
+    const reply = await post("/api/stop");
+    say(reply.message, reply.ok ? "ok" : "bad");
+    localStopAlarm = !reply.ok;
+  } catch (e) {
+    say("Couldn't reach the jog panel server. Press the hardware E-stop.", "bad");
+    localStopAlarm = true;
+  } finally {
+    setTimeout(() => key.classList.remove("fired"), 250);
+    render();
+  }
+}
+$("stopKey").addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  stopArm();
+});
+$("stopKey").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (!event.repeat) stopArm();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== " " && event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.repeat) return;
+  // Space always stops. Esc backs out one level: a drag in progress, then the plan; with nothing to back
+  // out of, or with the arm moving, it stops too.
+  const s = status;
+  const moving = Boolean(s && (s.state === 1 || s.goal || s.queued));
+  const cancelled = cancelDrags();
+  if (event.key === " " || moving) {
+    stopArm();
+  } else if (!cancelled) {
+    if (plan && !planSending && !planSentAt) clearPlan("Plan cleared. The arm didn't move.");
+    else stopArm();
+  }
+}, true);
+window.addEventListener("blur", cancelDrags);
+document.addEventListener("visibilitychange", () => { if (document.hidden) cancelDrags(); });
+
+// ---- Enable: hold until the bar fills ----
+const enableKey = $("enableKey");
+let holdTimer = 0;
+function beginHold() {
+  if (enableKey.disabled || holdTimer) return;
+  enableKey.classList.add("charging");
+  holdTimer = setTimeout(async () => {
+    holdTimer = 0;
+    enableKey.classList.remove("charging");
+    enableKey.classList.add("busy");
+    say("Switching the motors on…", "wait");
+    try {
+      const reply = await post("/api/enable");
+      say(reply.message, reply.ok ? "ok" : "bad");
+    } catch (e) {
+      say("The jog panel server isn't answering. Is jog_server.py still running?", "bad");
+    } finally {
+      enableKey.classList.remove("busy");
+    }
+  }, HOLD_TO_ENABLE_MS);
+}
+function endHold() {
+  if (holdTimer) {
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    say("Keep holding Enable until the green bar fills.", "wait");
+  }
+  enableKey.classList.remove("charging");
+}
+enableKey.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  enableKey.setPointerCapture(event.pointerId);
+  beginHold();
+});
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) enableKey.addEventListener(type, endHold);
+enableKey.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (!event.repeat) beginHold();
+});
+enableKey.addEventListener("keyup", (event) => { if (event.key === "Enter") endHold(); });
+
+// ---- Rendering ----
+const percentFor = (deg) => ((180 - Math.max(-180, Math.min(180, deg))) / 360) * 100;
+
+function place(mark, deg) {
+  if (deg === null || deg === undefined) { mark.hidden = true; return; }
+  mark.hidden = false;
+  mark.style.top = `${percentFor(deg)}%`;
+  mark.classList.toggle("over", Math.abs(deg) > 180);
+}
+
+function fill(lit, deg) {
+  if (deg === null || deg === undefined) { lit.hidden = true; return; }
+  lit.hidden = false;
+  const a = percentFor(deg);
+  const zero = percentFor(0);
+  lit.style.clipPath = `inset(${Math.min(a, zero)}% 0 ${100 - Math.max(a, zero)}% 0)`;
+}
+
+// Light LEDS_PER_STEP lead lights per step of gap between the commanded goal and the joint.
+function showLead(st, gap) {
+  const count = gap === null ? 0 : Math.min(st.plusLeds.length,
+    Math.max(1, Math.ceil((Math.abs(gap) * LEDS_PER_STEP) / settings.jointStep - 1e-6)));
+  const shown = gap === null ? 0 : Math.sign(gap) * count;
+  if (shown === st.leadShown) return;
+  st.leadShown = shown;
+  st.plusLeds.forEach((led, n) => led.classList.toggle("on", shown > 0 && n < count));
+  st.minusLeds.forEach((led, n) => led.classList.toggle("on", shown < 0 && n < count));
+}
+
+function describe(s) {
+  if ((s && s.stopAlarm) || localStopAlarm) {
+    return ["STOP NOT CONFIRMED", "The controller didn't confirm the stop. Press the hardware E-stop now.", "alarm"];
+  }
+  if (!s && !settled) return ["CONNECTING", "Waiting for the jog panel server.", "idle"];
+  if (!s) return ["NO SIGNAL", `The jog panel server isn't answering. Start it with: python scripts/jog_server.py ${CONFIG.ip}`, "alarm"];
+  if (!s.live) return ["NO SIGNAL", `No status from the controller at ${s.ip}. Check the Wi-Fi link.`, "alarm"];
+  if (s.err === 1) return ["E-STOP", "An emergency stop is active. Release it, then hold Enable.", "alarm"];
+  if (s.err) return ["FAULT", `Error ${s.err} (${s.errName}). Fix the cause, then hold Enable.`, "alarm"];
+  if (!s.enabled) return ["MOTORS OFF", "Hold Enable to switch the motors on.", "idle"];
+  if (s.state === 4) return ["STOPPED", "The arm is stopped. Hold Enable to make it ready again.", "stopped"];
+  if (s.state === 3) return ["PAUSED", "Press STOP to clear the paused move, then hold Enable.", "stopped"];
+  if (s.state === 1 || s.goal) {
+    const queued = s.queued > 0 ? ` ${s.queued} more queued.` : "";
+    return ["MOVING", `Heading for the commanded position.${queued}`, "moving"];
+  }
+  // With a pose staged, the sentence follows the plan.
+  const joints = stagedJoints(fader ? fader.plan : plan);
+  if (joints.length && !planSentAt) {
+    if (!planCheck.clear) {
+      const by = planCheck.hit ? planCheck.hit.other : "something";
+      return ["READY", `The plan is blocked by ${by}. Change it, or press Esc to clear.`, "ready"];
+    }
+    const names = joints.map((i) => `J${i + 1}`).join(", ");
+    return ["READY", `${names} planned. Press Move to send ${joints.length > 1 ? "them" : "it"}, or Esc to clear.`, "ready"];
+  }
+  return ["READY", "Click a key for one step, or drag in the 3D view or a joint's fader cap to plan a pose, then press Move.", "ready"];
+}
+
+// The controller's status stream stalls now and then; say so rather than show a stale picture as current.
+function describeWithAge(s) {
+  const [name, detail, tone] = describe(s);
+  if (s && s.live && s.age > CONFIG.freshS && tone !== "alarm") {
+    return [name, `Status is ${s.age.toFixed(1)} s old (the Wi-Fi link stalls now and then). Moves wait for fresh status.`, tone];
+  }
+  return [name, detail, tone];
+}
+
+function render() {
+  const s = status;
+  const live = Boolean(s && s.live);
+  if (localStopAlarm && live && !s.stopAlarm && (s.state === 4 || !s.enabled || s.err)) localStopAlarm = false;
+  const slow = live && s.age > CONFIG.freshS;  // the controller's status stream stalls now and then
+  $("linkLed").dataset.on = live ? (slow ? "slow" : "live") : s || settled ? "dead" : "";
+  setText($("linkText"), live ? `Live · ${s.ip}${slow ? ` · status ${s.age.toFixed(1)} s old` : ""}`
+    : s ? `No status from ${s.ip}` : settled ? "Jog server not answering" : "Connecting…");
+
+  canJog = live && !s.err && s.enabled && [0, 1, 2].includes(s.state) && !s.stopAlarm && !localStopAlarm;
+  if (!canJog && (fader || (view && view.isDragging()))) cancelDrags();  // the arm can't take a move now
+  const goal = s && s.goal ? s.goal : null;
+  const jointGoal = goal && goal.kind === "joint" ? goal.values : null;
+  // A sent plan hands over to the goal once the status reports it (or after a moment, for a tiny move).
+  if (planSentAt && (jointGoal || performance.now() - planSentAt > 1500)) {
+    plan = null;
+    planSentAt = 0;
+  }
+  const shownPlan = fader ? fader.plan : plan;
+  if (view) {
+    if (live) view.setActual(s.joints);
+    view.setGoal(jointGoal);
+    planCheck = view.setPlan(shownPlan);
+  } else {
+    planCheck = {clear: true, hit: null};  // the server still checks every plan
+  }
+  // The joint speed redline: the lower of a staged plan's and the arm's pose's, since the ± keys still jog one
+  // joint at this speed while a plan waits.
+  const travel = shownPlan && live ? shownPlan.map((q, i) => (Number.isFinite(q) ? Math.abs(q - s.joints[i]) : 0)) : null;
+  const poseRed = jointRedline(s, null);
+  planRed = travel && planCheck.flangePerDeg > 0 ? jointRedline(s, {travel, flangePerDeg: planCheck.flangePerDeg}) : null;
+  jointRed = planRed && planRed.line !== null && (poseRed.line === null || planRed.line < poseRed.line) ? planRed : poseRed;
+  setRedline(faders.jointSpeed, jointRed.line);
+
+  // The state window, after the plan check: with a pose staged, its sentence follows the plan.
+  const [name, detail, tone] = describeWithAge(s);
+  setText($("stateName"), name);
+  setText($("stateDetail"), detail);
+  // A stale picture keeps its word but loses its light, so a glance doesn't read it as current.
+  $("stateWindow").dataset.tone = slow && tone !== "alarm" ? "idle" : tone;
+  const canDrag = dragAllowed();
+  if (view) view.setInteractive(canDrag && !fader);
+  const help = $("screenHelp");
+  help.hidden = !view || Boolean(plan);
+  const tool = dragMode === "tool";
+  setText(help, canDrag ? (tool
+    ? "Drag an arrow to slide the tool or a ring to turn it; the joints follow, and nothing moves until you press Move. Shift snaps to 10 mm or 5\u00b0."
+    : "Drag rings to plan a pose; nothing moves until you press Move. Shift snaps to 5\u00b0. Drag elsewhere to turn the view.")
+    : slow ? `Waiting for fresh status from the controller before ${tool ? "the gizmo unlocks" : "the rings unlock"}.`
+    : canJog ? `${tool ? "The gizmo unlocks" : "The rings unlock"} once the arm has settled.`
+    : `Hold Enable to use ${tool ? "the gizmo" : "the rings"}.`);
+
+  strips.forEach((st, i) => {
+    const deg = live ? s.joints[i] : null;
+    const target = jointGoal ? jointGoal[i] : null;
+    const moving = deg !== null && target !== null && Math.abs(target - deg) > 0.05;
+    // A ring or fader drag previews one joint; a gizmo drag previews them all.
+    const pv = preview && (preview.pose || preview.joint === i) ? preview : null;
+    const planned = shownPlan && Number.isFinite(shownPlan[i]) ? shownPlan[i] : null;
+    const clear = pv && pv.clear !== undefined ? pv.clear : planCheck.clear;
+    const previewed = pv && pv.pose ? (deg !== null && Math.abs(pv.pose[i] - deg) > 0.05 ? pv.pose[i] : null) : pv ? pv.to : null;
+    const aim = pv ? previewed : planned;  // where a drag or the plan has this joint going
+    setText(st.value, deg === null ? "—" : `${deg.toFixed(2)}°`);
+    if (aim !== null) {
+      setText(st.toward, clear ? `→ ${aim.toFixed(1)}°` : "Blocked");
+    } else {
+      setText(st.toward, moving ? `→ ${target.toFixed(2)}°` : "");
+    }
+    st.toward.classList.toggle("blocked", aim !== null && !clear);
+    st.goal.classList.toggle("blocked", aim !== null && !clear);
+    // Staged but not sent: dashed and grey. A drag in progress stays amber, like a held key.
+    st.toward.classList.toggle("planned", aim !== null && !pv);
+    st.goal.classList.toggle("planned", aim !== null && !pv);
+    fill(st.lit, deg);
+    place(st.now, deg);
+    place(st.goal, aim !== null ? aim : moving ? target : null);
+    showLead(st, aim === null && moving ? target - deg : null);
+    st.strip.classList.toggle("moving", moving);
+    if (!canDrag) st.meter.classList.remove("near-cap");
+    for (const key of st.keys) key.disabled = !canJog;
+  });
+  renderPlan(live);
+
+  // The tool's pose for the joints a drag or the plan has staged, in the controller's terms (mm and roll,
+  // pitch, yaw), so the tool rows show where a plan would put it, whichever way it was made. It's the model's
+  // change from the arm's pose now, applied to the pose the controller reports (on this arm the two agree).
+  let toolPlan = null;
+  if (live && kinematics) {
+    let staged = s.joints.map((q, i) => (shownPlan && Number.isFinite(shownPlan[i]) ? shownPlan[i] : q));
+    if (preview && preview.pose) staged = preview.pose;
+    else if (preview && Number.isFinite(preview.to)) staged[preview.joint] = preview.to;
+    if (staged.some((q, i) => Math.abs(q - s.joints[i]) > 1e-6)) {
+      const {solver, rpy, fromRpy, multiply} = kinematics;
+      const now = solver.pose(s.joints);
+      const then = solver.pose(staged);
+      const turn = multiply(then.R, now.R.map((_, i) => now.R.map((row) => row[i])));  // then.R * now.R^T
+      toolPlan = [...then.p.map((v, i) => s.pose[i] + (v - now.p[i]) * 1000),
+                  ...rpy(multiply(turn, fromRpy(s.pose[3], s.pose[4], s.pose[5])))];
+    }
+  }
+  const wrapDeg = (a) => ((a + 540) % 360) - 180;
+  axes.forEach((ax, i) => {
+    const value = live ? s.pose[i] : null;
+    const target = goal && goal.kind === "tool" ? goal.values[i] : null;
+    let gap = target !== null && value !== null ? target - value : 0;
+    if (ax.unit === "°") gap = wrapDeg(gap);
+    const moving = Math.abs(gap) > 0.05;
+    const unit = ax.unit === "°" ? "°" : " mm";
+    const planned = !moving && toolPlan && value !== null
+      && Math.abs(ax.unit === "°" ? wrapDeg(toolPlan[i] - value) : toolPlan[i] - value) > 0.05 ? toolPlan[i] : null;
+    setText(ax.value, value === null ? "—" : `${value.toFixed(1)}${unit}`);
+    setText(ax.toward, moving ? `→ ${target.toFixed(1)}${unit}` : planned !== null ? `→ ${planned.toFixed(1)}${unit}` : "");
+    ax.toward.classList.toggle("planned", planned !== null && !preview);  // amber while a drag is on
+    ax.row.classList.toggle("moving", moving);
+    for (const key of ax.keys) key.disabled = !canJog;
+  });
+
+  const alarm = Boolean((s && s.stopAlarm) || localStopAlarm);
+  enableKey.disabled = !live || alarm;
+  const ready = live && !alarm && s.enabled && !s.err && s.state !== 3 && s.state !== 4;
+  enableKey.classList.toggle("on", ready);
+  setText($("enableLabel"), ready ? "Motors on" : "Hold to enable");
+  setText($("enableSub"), alarm ? "Locked: use the E-stop" : ready ? "Hold again to reset" : "Hold for 0.7 s");
+
+  if (s && s.note !== lastServerNote) {
+    lastServerNote = s.note;
+    say(s.note, s.noteOk ? "ok" : "bad");
+  }
+}
+
+let failedPolls = 0;
+async function poll() {
+  try {
+    const res = await fetch("/api/status", {cache: "no-store"});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    status = await res.json();
+    failedPolls = 0;
+    settled = true;
+  } catch (e) {
+    failedPolls += 1;
+    if (failedPolls >= 3) {  // ride out a single dropped request
+      status = null;
+      settled = true;
+    }
+  }
+  render();
+  setTimeout(poll, POLL_MS);
+}
+
+setText($("hint"), `Click + or \u2212 for one step; holding repeats, up to ${CONFIG.maxLeadSteps} steps ahead. `
+  + "Drag in the 3D view or a joint's fader cap to plan a pose, then press Move.");
+
+// ---- 3D monitor ----
+$("viewReset").disabled = true;
+$("viewReset").addEventListener("click", () => { if (view) view.resetView(); });
+for (const key of [$("modeJoints"), $("modeTool")]) key.disabled = true;  // until the 3D view is up
+$("modeJoints").addEventListener("click", () => setDragMode("joints"));
+$("modeTool").addEventListener("click", () => setDragMode("tool"));
+if (CONFIG.model && CONFIG.three) {
+  const css = getComputedStyle(document.documentElement);
+  import("/web/arm_view.js")
+    .then(({createArmView}) => createArmView($("screen"), {
+      modelBase: CONFIG.model.base,
+      urdfFile: CONFIG.model.urdf,
+      tapes: strips.map((_, i) => css.getPropertyValue(`--tape-${i + 1}`).trim()),
+      limits: CONFIG.dragLimits,
+      collision: CONFIG.collision,
+      cart: CONFIG.cart,
+      floorZ: CONFIG.floorZ,
+      mode: dragMode,
+      onPreview(p) {
+        preview = p && (p.kind === "tool" ? {pose: p.pose, clear: p.clear} : {joint: p.joint, to: p.to, clear: p.clear});
+        showTag(p);
+        render();
+      },
+      onRelease: stageDrop,
+      onLost() {
+        $("screenNote").hidden = false;
+        setText($("screenNote"), "The 3D view stopped because the graphics driver reset. Reload the page to bring it back.");
+      },
+    }))
+    .then((created) => {
+      view = created;
+      $("screenNote").hidden = true;
+      $("viewReset").disabled = false;
+      for (const key of [$("modeJoints"), $("modeTool")]) key.disabled = false;
+      render();
+    })
+    .catch((error) => {
+      setText($("screenNote"), `The 3D view couldn't start (${error.message}). The keys and faders still work.`);
+    });
+} else if (CONFIG.model) {
+  setText($("screenNote"), "No 3D view: it needs three.js, which the jog panel server downloads the first time it runs, "
+    + "and the download failed (the server's window says why). Check this PC can reach the internet, then start the "
+    + "server again. The keys and faders still work.");
+} else {
+  setText($("screenNote"), "The arm model didn't load, so there's no 3D view and drag moves are off. The + and \u2212 keys still work.");
+}
+// The same kinematics, for the tool rows' planned pose; they work without the 3D view.
+if (CONFIG.model) {
+  import("/web/ik.js")
+    .then(({createSolver, rpy, fromRpy, multiply}) => {
+      kinematics = {solver: createSolver(CONFIG.collision), rpy, fromRpy, multiply};
+      render();
+    })
+    .catch(() => { /* the tool rows just won't show a planned pose */ });
+}
+
+syncDragMode();
+render();
+poll();
+</script>
+</body>
+</html>

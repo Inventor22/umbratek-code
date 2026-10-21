@@ -1,0 +1,843 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-21T08:55:00Z",
+  "title": "Design System: UTRA Jog Panel",
+  "extensions": {
+    "colorMeta": {
+      "amber": {
+        "role": "primary",
+        "displayName": "Backlight Amber",
+        "canonical": "#f2aa3c",
+        "tonalRamp": [
+          "#130900",
+          "#352000",
+          "#5b3a00",
+          "#845600",
+          "#b07400",
+          "#db951c",
+          "#ffba58",
+          "#ffebd2"
+        ]
+      },
+      "amber-ink": {
+        "role": "primary",
+        "displayName": "Amber Key Ink",
+        "canonical": "#1d1304",
+        "tonalRamp": [
+          "#120900",
+          "#2e2313",
+          "#4c402f",
+          "#6c5f4d",
+          "#8d806d",
+          "#b0a38f",
+          "#d5c7b2",
+          "#fbecd7"
+        ]
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Motors-On Green",
+        "canonical": "#5ec683",
+        "tonalRamp": [
+          "#001004",
+          "#002e14",
+          "#005028",
+          "#00753d",
+          "#2b9959",
+          "#55be7b",
+          "#7ce39e",
+          "#c6ffd6"
+        ]
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "STOP Red",
+        "canonical": "#d63a2f",
+        "tonalRamp": [
+          "#1f0000",
+          "#4d0001",
+          "#810002",
+          "#b6100e",
+          "#df4337",
+          "#ff7363",
+          "#ffb3a8",
+          "#ffe9e5"
+        ]
+      },
+      "alarm": {
+        "role": "secondary",
+        "displayName": "Alarm Red",
+        "canonical": "#ff8073",
+        "tonalRamp": [
+          "#1f0000",
+          "#4d0002",
+          "#810007",
+          "#a8312a",
+          "#d0554b",
+          "#f87a6d",
+          "#ffb3a9",
+          "#ffe9e5"
+        ]
+      },
+      "tape-1": {
+        "role": "tertiary",
+        "displayName": "Masking Yellow",
+        "canonical": "#e3ba4f",
+        "tonalRamp": [
+          "#110a00",
+          "#302300",
+          "#533f00",
+          "#795d00",
+          "#a17d00",
+          "#c89f2f",
+          "#edc45a",
+          "#ffedc2"
+        ]
+      },
+      "tape-2": {
+        "role": "tertiary",
+        "displayName": "Sky Tape",
+        "canonical": "#7fb3d9",
+        "tonalRamp": [
+          "#000d18",
+          "#002840",
+          "#114667",
+          "#346789",
+          "#5688ad",
+          "#78acd1",
+          "#9bd0f7",
+          "#dff1ff"
+        ]
+      },
+      "tape-3": {
+        "role": "tertiary",
+        "displayName": "Sage Tape",
+        "canonical": "#92cc8a",
+        "tonalRamp": [
+          "#011000",
+          "#032f00",
+          "#184f11",
+          "#3a7033",
+          "#5b9354",
+          "#7db676",
+          "#a1db99",
+          "#ccffc5"
+        ]
+      },
+      "tape-4": {
+        "role": "tertiary",
+        "displayName": "Apricot Tape",
+        "canonical": "#e19769",
+        "tonalRamp": [
+          "#170600",
+          "#3e1900",
+          "#693000",
+          "#904d1d",
+          "#b56e41",
+          "#db9163",
+          "#ffb68a",
+          "#ffeadd"
+        ]
+      },
+      "tape-5": {
+        "role": "tertiary",
+        "displayName": "Lilac Tape",
+        "canonical": "#baa2dd",
+        "tonalRamp": [
+          "#130025",
+          "#2e1747",
+          "#4b3568",
+          "#6b548a",
+          "#8d75ad",
+          "#b098d2",
+          "#d4bcf8",
+          "#f2eaff"
+        ]
+      },
+      "tape-6": {
+        "role": "tertiary",
+        "displayName": "Paper Tape",
+        "canonical": "#dad5c9",
+        "tonalRamp": [
+          "#0e0b04",
+          "#28251c",
+          "#464238",
+          "#656156",
+          "#878277",
+          "#a9a599",
+          "#cec9bd",
+          "#f3eee2"
+        ]
+      },
+      "tape-ink": {
+        "role": "tertiary",
+        "displayName": "Marker Black",
+        "canonical": "#15161a",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#242529",
+          "#414246",
+          "#606166",
+          "#818287",
+          "#a3a5aa",
+          "#c7c9cf",
+          "#edeef4"
+        ]
+      },
+      "axis-x": {
+        "role": "tertiary",
+        "displayName": "Axis Red",
+        "canonical": "#ff3352",
+        "tonalRamp": [
+          "#1f0003",
+          "#4c000e",
+          "#80001e",
+          "#b7002f",
+          "#ee1945",
+          "#ff7178",
+          "#ffb2b2",
+          "#ffe8e8"
+        ]
+      },
+      "axis-y": {
+        "role": "tertiary",
+        "displayName": "Axis Green",
+        "canonical": "#8bdc00",
+        "tonalRamp": [
+          "#050e00",
+          "#182c00",
+          "#2d4c00",
+          "#447000",
+          "#5d9500",
+          "#76bc00",
+          "#93e51e",
+          "#d3ffad"
+        ]
+      },
+      "axis-z": {
+        "role": "tertiary",
+        "displayName": "Axis Blue",
+        "canonical": "#2890ff",
+        "tonalRamp": [
+          "#000b1f",
+          "#00244c",
+          "#004180",
+          "#0060b7",
+          "#1081ef",
+          "#5fa8ff",
+          "#a4cdff",
+          "#e4f0ff"
+        ]
+      },
+      "desk": {
+        "role": "neutral",
+        "displayName": "Desk Charcoal",
+        "canonical": "#18191b",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#242527",
+          "#414244",
+          "#606164",
+          "#818285",
+          "#a4a5a8",
+          "#c8c9cc",
+          "#edeef1"
+        ]
+      },
+      "well": {
+        "role": "neutral",
+        "displayName": "Well Black",
+        "canonical": "#0e0f10",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#242526",
+          "#414243",
+          "#606163",
+          "#818284",
+          "#a4a5a7",
+          "#c8c9cb",
+          "#edeff0"
+        ]
+      },
+      "channel": {
+        "role": "neutral",
+        "displayName": "Channel Charcoal",
+        "canonical": "#1b1d20",
+        "tonalRamp": [
+          "#090b0e",
+          "#232528",
+          "#404246",
+          "#5f6165",
+          "#808286",
+          "#a2a5a9",
+          "#c6c9cd",
+          "#eceff3"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel Grey",
+        "canonical": "#222427",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#232528",
+          "#404245",
+          "#5f6165",
+          "#808286",
+          "#a3a5a9",
+          "#c7c9cd",
+          "#eceff3"
+        ]
+      },
+      "seam": {
+        "role": "neutral",
+        "displayName": "Seam",
+        "canonical": "#33363b",
+        "tonalRamp": [
+          "#090b0f",
+          "#22252a",
+          "#3f4247",
+          "#5e6167",
+          "#7f8288",
+          "#a2a5ab",
+          "#c5c9d0",
+          "#ebeff5"
+        ]
+      },
+      "cap": {
+        "role": "neutral",
+        "displayName": "Key Cap",
+        "canonical": "#34383d",
+        "tonalRamp": [
+          "#080b0f",
+          "#22252a",
+          "#3e4248",
+          "#5d6267",
+          "#7e8389",
+          "#a1a5ac",
+          "#c5cad0",
+          "#eaeff5"
+        ]
+      },
+      "cap-top": {
+        "role": "neutral",
+        "displayName": "Cap Highlight",
+        "canonical": "#3f444a",
+        "tonalRamp": [
+          "#080c10",
+          "#21262b",
+          "#3e4248",
+          "#5c6268",
+          "#7d838a",
+          "#a0a6ad",
+          "#c4cad1",
+          "#e9eff7"
+        ]
+      },
+      "cap-edge": {
+        "role": "neutral",
+        "displayName": "Cap Rim",
+        "canonical": "#50565d",
+        "tonalRamp": [
+          "#070c11",
+          "#20262c",
+          "#3d4349",
+          "#5c6269",
+          "#7d838b",
+          "#9fa6ae",
+          "#c3cad2",
+          "#e8eff8"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Legend Ink",
+        "canonical": "#ece8df",
+        "tonalRamp": [
+          "#0d0b06",
+          "#28251e",
+          "#45423a",
+          "#646159",
+          "#86827a",
+          "#a8a59c",
+          "#cdc9c0",
+          "#f2eee5"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Printed Grey",
+        "canonical": "#aaa69d",
+        "tonalRamp": [
+          "#0e0b05",
+          "#28251e",
+          "#45423a",
+          "#646159",
+          "#868279",
+          "#a9a59c",
+          "#cdc9bf",
+          "#f2eee4"
+        ]
+      },
+      "legend-lit": {
+        "role": "neutral",
+        "displayName": "Lit White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The STOP legend only; 26px under 560px."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The uppercase state word in the state window; 20px under 560px."
+      },
+      "key-glyph": {
+        "displayName": "Key glyph",
+        "purpose": "The + and − on joint keys; tool keys use 22px at weight 400."
+      },
+      "readout": {
+        "displayName": "Readout",
+        "purpose": "Joint angles with two decimals; tool values at 19px with one decimal."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "The panel name in the bridge."
+      },
+      "target": {
+        "displayName": "Target",
+        "purpose": "The amber → target line under each joint readout, and Enable's label; tool rows use 11px."
+      },
+      "bank-title": {
+        "displayName": "Bank title",
+        "purpose": "Uppercase section names: ARM, JOINTS, TOOL."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The base size."
+      },
+      "body-sm": {
+        "displayName": "Body small",
+        "purpose": "The link line, the state window's sentence, the message line, and the floating readout (line-height 1.35)."
+      },
+      "key-legend": {
+        "displayName": "Key legend",
+        "purpose": "The Reset view and Clear keys."
+      },
+      "channel-label": {
+        "displayName": "Channel label",
+        "purpose": "Uppercase tape legends (J1 BASE); 11px at 0.02em when the tape wraps (fader bank under 760px); tool axis names use 0.08em."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase printed legends: STEP, SPEED, POSITION, ORIENTATION."
+      },
+      "fader-value": {
+        "displayName": "Fader value",
+        "purpose": "The step and speed values above their faders, with units."
+      },
+      "scale": {
+        "displayName": "Scale",
+        "purpose": "The meters' scale labels and the faders' range ends, in #8f8b83."
+      }
+    },
+    "shadows": [
+      {
+        "name": "key-rest",
+        "value": "0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35)",
+        "purpose": "The hard 2px edge and soft drop under every key."
+      },
+      {
+        "name": "key-pressed",
+        "value": "0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3)",
+        "purpose": "A held key: the edge collapses as the cap drops 2px (transform: translateY(2px))."
+      },
+      {
+        "name": "stop-rest",
+        "value": "0 3px 0 #5f130d, 0 6px 14px rgb(0 0 0 / 0.45)",
+        "purpose": "STOP's deeper edge and drop."
+      },
+      {
+        "name": "stop-pressed",
+        "value": "0 0 0 #5f130d, inset 0 3px 6px rgb(0 0 0 / 0.35)",
+        "purpose": "STOP pressed: the cap drops 3px (transform: translateY(3px))."
+      },
+      {
+        "name": "screen-well",
+        "value": "inset 0 2px 6px rgb(0 0 0 / 0.5)",
+        "purpose": "The state window (in every tone) and the 3D screen."
+      },
+      {
+        "name": "meter-well",
+        "value": "inset 0 2px 5px rgb(0 0 0 / 0.45)",
+        "purpose": "Meters and lead ladders."
+      },
+      {
+        "name": "slot-well",
+        "value": "inset 0 1px 3px rgb(0 0 0 / 0.6)",
+        "purpose": "The step and speed faders' slots."
+      },
+      {
+        "name": "fader-cap",
+        "value": "0 1px 3px rgb(0 0 0 / 0.7)",
+        "purpose": "Every fader cap: the joint meters' and the step and speed faders'."
+      },
+      {
+        "name": "bridge",
+        "value": "0 4px 12px rgb(0 0 0 / 0.35)",
+        "purpose": "The sticky meter bridge over the scrolling desk."
+      },
+      {
+        "name": "floating-readout",
+        "value": "0 4px 10px rgb(0 0 0 / 0.45)",
+        "purpose": "The drag readout floating over the 3D screen."
+      },
+      {
+        "name": "plan-bar",
+        "value": "0 4px 12px rgb(0 0 0 / 0.45)",
+        "purpose": "The plan bar docked over the 3D screen."
+      },
+      {
+        "name": "refusal-ring",
+        "value": "inset 0 0 0 2px var(--alarm)",
+        "purpose": "A refused key, for 450ms."
+      },
+      {
+        "name": "activity-ring",
+        "value": "0 0 0 2px var(--amber)",
+        "purpose": "Round a moving channel's activity dot. Hard rings are the only coloured shadows; nothing glows."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.2, 0.8, 0.2, 1)",
+        "purpose": "The curve for state transitions: key travel, marker glide, tone changes."
+      },
+      {
+        "name": "key-travel",
+        "value": "120ms",
+        "purpose": "Key background, edge and 2px travel on press and release."
+      },
+      {
+        "name": "stop-travel",
+        "value": "100ms",
+        "purpose": "STOP's quicker press: deep red and 3px travel."
+      },
+      {
+        "name": "lead-light",
+        "value": "80ms linear",
+        "purpose": "Lead lights switching on and off as the gap to the goal changes."
+      },
+      {
+        "name": "arm-ease",
+        "value": "80ms exponential",
+        "purpose": "The solid 3D arm easing toward each new status frame."
+      },
+      {
+        "name": "marker-glide",
+        "value": "140ms",
+        "purpose": "Meter markers and lit column following the arm (status is polled every 150ms)."
+      },
+      {
+        "name": "tone-change",
+        "value": "160ms",
+        "purpose": "State window fill and rim; Enable's charge bar draining after an early release."
+      },
+      {
+        "name": "hold-to-enable",
+        "value": "700ms linear",
+        "purpose": "Enable's green bar filling while held; the motors switch on only when it completes."
+      },
+      {
+        "name": "refusal-flash",
+        "value": "450ms",
+        "purpose": "How long a refused key shows its red ring and legend."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition: none",
+        "purpose": "prefers-reduced-motion removes every CSS transition; states still change instantly."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "desk-stacks",
+        "value": "1240px"
+      },
+      {
+        "name": "bridge-splits",
+        "value": "860px"
+      },
+      {
+        "name": "narrow",
+        "value": "560px"
+      },
+      {
+        "name": "tape-wraps-container",
+        "value": "760px"
+      },
+      {
+        "name": "plan-bar-narrow-container",
+        "value": "520px"
+      },
+      {
+        "name": "plan-bar-docks-right-wide-screen",
+        "value": "640px wide and wider than 1.6:1"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Jog key",
+      "kind": "button",
+      "refersTo": "key-jog",
+      "description": "Square charcoal key with a hard 2px edge: amber and 2px down while held, a red ring when refused, dimmed when the arm can't jog.",
+      "html": "<div class=\"ds-jog-keys\"><button class=\"ds-jog-key\" type=\"button\" aria-label=\"Joint 1 plus one step\">+</button><button class=\"ds-jog-key ds-jog-key--held\" type=\"button\" aria-label=\"Joint 1 minus one step, held\">−</button><button class=\"ds-jog-key ds-jog-key--refused\" type=\"button\" aria-label=\"Joint 2 plus one step, refused\">+</button><button class=\"ds-jog-key\" type=\"button\" disabled aria-label=\"Joint 2 minus one step, disabled\">−</button></div>",
+      "css": ".ds-jog-keys { display: flex; gap: 8px; padding: 8px; background: #1b1d20; } .ds-jog-key { display: grid; place-items: center; box-sizing: border-box; width: 96px; height: 46px; padding: 0; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink, #ece8df); cursor: pointer; user-select: none; touch-action: none; transition: background-color 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); font: 500 24px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-jog-key:hover:not(:disabled) { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-jog-key--held, .ds-jog-key--held:hover:not(:disabled), .ds-jog-key:active:not(:disabled) { background: var(--amber, #f2aa3c); color: var(--amber-ink, #1d1304); box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-jog-key--refused, .ds-jog-key--refused:hover:not(:disabled) { background: linear-gradient(#4a2a27, #3a2220); box-shadow: inset 0 0 0 2px var(--alarm, #ff8073); color: var(--alarm, #ff8073); } .ds-jog-key:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-jog-key:disabled { opacity: 0.38; cursor: not-allowed; box-shadow: none; }"
+    },
+    {
+      "name": "Step and speed faders",
+      "kind": "control",
+      "refersTo": "detent-slot",
+      "description": "Short detented faders in the joint and tool banks: legend and value above a slot as wide as the channel, the range's ends printed under it. The detents are the values the server accepts (joint step 0.1-15 deg, speed 1-120 deg/s, each joint capped at 80% of its servo's own limit; tool step 0.1-50 mm, turn 0.1-15 deg, speed 1-1000 mm/s with a detent at 250), so the cap only rests where the arm will take it. Same cap, groove and fader-cap shadow as the joint meters; arrow keys step a detent; screen readers hear the value with its unit in words. Channels on a row stand 24px apart with a 1px seam between them. The speed faders mark their slow default (10 deg/s, 20 mm/s) with a longer tick and go back to it every time the panel opens; steps are remembered. Above a joint's top speed, the joint speed fader prints the joints it limits between its range ends (\"J1-2 max 84, J3 114.5, J4-6 119.1\"). Like a speedometer's red zone, each speed fader prints a redline where the flange could pass 250 mm/s (ISO 10218's limit for jogging by hand): a 2px Alarm Red rule along the ticks' feet, clear of the focus ring, from the line to the top of the scale; the ticks past it, the top figure and the line's own figure ('250', or '17' on joint speed, hidden where it would touch an end figure or the top-speed note) in Alarm Red; and the value in Alarm Red while the cap sits past it. The message line says why on every move into or within the red, with the flange's speed rounded up to 10 mm/s, and again when the cap leaves it or the line moves past a resting cap (not during drags or moves). Tool speed's redline is fixed at 250 mm/s, a detent of its own. Joint speed's follows the arm's pose (the slowest speed at which one joint alone would swing the flange past 250 mm/s) and any staged plan's path (joints turning in step add up; the plan note turns red with the figure), showing whichever is lower, since the jog keys still turn one joint at this speed; it assumes full reach until the pose is known, and a crossing made while the arm moves is reported once it settles. Keyboard focus rings the slot itself, with no offset. In Windows High Contrast the cap, ticks and seams take system colours and focus shows as a system-colour outline. Faders share a bank row in equal widths (150-320px) and take the full width each under 560px. The monitor's Reset view and the plan bar's Clear stay small 30px keys.",
+      "html": "<div class=\"ds-faders\"><div class=\"ds-fader\"><label class=\"ds-fader-legend\" for=\"ds-joint-step\">Step</label><output class=\"ds-fader-value\" for=\"ds-joint-step\">1°</output><span class=\"ds-fader-track\"><span class=\"ds-fader-ticks\" aria-hidden=\"true\"><i style=\"left: 0.0000%\"></i><i style=\"left: 14.2857%\"></i><i style=\"left: 28.5714%\"></i><i style=\"left: 42.8571%\"></i><i style=\"left: 57.1429%\"></i><i style=\"left: 71.4286%\"></i><i style=\"left: 85.7143%\"></i><i style=\"left: 100.0000%\"></i></span><span class=\"ds-fader-ends\" aria-hidden=\"true\"><span>0.1</span><span>15</span></span><input id=\"ds-joint-step\" type=\"range\" min=\"0\" max=\"7\" step=\"1\" value=\"3\" aria-label=\"Joint step\" aria-valuetext=\"1 degree\"></span></div><div class=\"ds-fader\"><label class=\"ds-fader-legend\" for=\"ds-joint-speed\">Speed</label><output class=\"ds-fader-value ds-fader-value--over\" for=\"ds-joint-speed\">120°/s</output><span class=\"ds-fader-track\"><span class=\"ds-fader-ticks\" aria-hidden=\"true\"><span class=\"ds-fader-red\" style=\"left: 43.2%\"></span><i style=\"left: 0.0000%\"></i><i style=\"left: 10.0000%\"></i><i style=\"left: 20.0000%\"></i><i class=\"ds-fader-home\" style=\"left: 30.0000%\"></i><i style=\"left: 40.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 50.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 60.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 70.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 80.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 90.0000%\"></i><i class=\"ds-fader-over\" style=\"left: 100.0000%\"></i></span><span class=\"ds-fader-ends\" aria-hidden=\"true\"><span>1</span><span class=\"ds-fader-note\">J1–2 max 84, J3 114.5, J4–6 119.1</span><span class=\"ds-fader-over\">120</span><span class=\"ds-fader-line\" style=\"left: calc(5.5px + (100% - 11px) * 0.432); visibility: hidden\">17</span></span><input id=\"ds-joint-speed\" type=\"range\" min=\"0\" max=\"10\" step=\"1\" value=\"10\" aria-label=\"Joint speed\" aria-valuetext=\"120 degrees per second, limited to 84 for J1 and J2, 114.5 for J3, 119.1 for J4, J5 and J6, in the red: the flange could pass 250 millimetres per second\"></span></div></div>",
+      "css": ".ds-faders { display: flex; gap: 24px; width: 560px; padding: 12px; background: var(--panel, #222427); border: 1px solid var(--seam, #33363b); border-radius: 6px; color: var(--ink, #ece8df); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-fader { display: grid; flex: 1 1 200px; grid-template-columns: auto 1fr; grid-template-areas: \"legend value\" \"track track\"; align-items: baseline; row-gap: 1px; min-width: 150px; max-width: 320px; position: relative; } .ds-fader + .ds-fader::before { content: \"\"; position: absolute; left: -12.5px; top: 0; bottom: 0; width: 1px; background: var(--seam, #33363b); } .ds-fader-legend { grid-area: legend; color: var(--ink-2, #aaa69d); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; line-height: 15px; text-transform: uppercase; } .ds-fader-value { grid-area: value; justify-self: end; color: var(--ink, #ece8df); font-size: 13px; font-weight: 650; line-height: 15px; white-space: nowrap; } .ds-fader-track { grid-area: track; position: relative; height: 30px; } .ds-fader-track input { position: absolute; inset: 0 0 auto; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; -webkit-appearance: none; appearance: none; } .ds-fader-track input::-webkit-slider-runnable-track { height: 6px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6); } .ds-fader-track input::-moz-range-track { height: 6px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6); } .ds-fader-track input::-webkit-slider-thumb { width: 11px; height: 18px; border: 0; border-radius: 2px; background: linear-gradient(90deg, transparent 5px, rgb(0 0 0 / 0.45) 5px 6px, transparent 6px), linear-gradient(#f6f3ec, #cfcac0); box-shadow: 0 1px 3px rgb(0 0 0 / 0.7); margin-top: -6px; -webkit-appearance: none; appearance: none; } .ds-fader-track input::-moz-range-thumb { width: 11px; height: 18px; border: 0; border-radius: 2px; background: linear-gradient(90deg, transparent 5px, rgb(0 0 0 / 0.45) 5px 6px, transparent 6px), linear-gradient(#f6f3ec, #cfcac0); box-shadow: 0 1px 3px rgb(0 0 0 / 0.7); } .ds-fader-track input:is(:hover, :active)::-webkit-slider-thumb { background: linear-gradient(90deg, transparent 5px, rgb(0 0 0 / 0.45) 5px 6px, transparent 6px), linear-gradient(#ffffff, #e4dfd5); } .ds-fader-track input:is(:hover, :active)::-moz-range-thumb { background: linear-gradient(90deg, transparent 5px, rgb(0 0 0 / 0.45) 5px 6px, transparent 6px), linear-gradient(#ffffff, #e4dfd5); } .ds-fader-track input:focus-visible { outline: 2px solid transparent; outline-offset: 0; } .ds-fader-track input:focus-visible::-webkit-slider-runnable-track { box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6), 0 0 0 2px var(--ink, #ece8df); } .ds-fader-track input:focus-visible::-moz-range-track { box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6), 0 0 0 2px var(--ink, #ece8df); } .ds-fader-ticks { position: absolute; left: 5.5px; right: 5.5px; top: 14px; height: 4px; pointer-events: none; } .ds-fader-ticks i { position: absolute; top: 0; width: 1px; height: 4px; margin-left: -0.5px; background: #7a7f87; } .ds-fader-ticks i.ds-fader-home { height: 6px; background: #8f8b83; } .ds-fader-ends { position: absolute; left: 0; right: 0; top: 18px; display: flex; justify-content: space-between; gap: 8px; color: #8f8b83; font-size: 10px; line-height: 12px; white-space: nowrap; pointer-events: none; } .ds-fader-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; } .ds-fader-red { position: absolute; top: 2px; right: 0; height: 2px; background: var(--alarm, #ff8073); } .ds-fader-ticks i.ds-fader-over { background: var(--alarm, #ff8073); } .ds-fader-value.ds-fader-value--over, .ds-fader-ends .ds-fader-over, .ds-fader-line { color: var(--alarm, #ff8073); } .ds-fader-line { position: absolute; top: 0; transform: translateX(-50%); } @media (forced-colors: active) { .ds-fader-track input::-webkit-slider-thumb, .ds-fader-track input:is(:hover, :active)::-webkit-slider-thumb { forced-color-adjust: none; background: ButtonText; } .ds-fader-track input::-moz-range-thumb, .ds-fader-track input:is(:hover, :active)::-moz-range-thumb { forced-color-adjust: none; background: ButtonText; } .ds-fader-ticks i, .ds-fader + .ds-fader::before { forced-color-adjust: none; background: GrayText; } .ds-fader-ticks i.ds-fader-home { background: CanvasText; } .ds-fader-red, .ds-fader-ticks i.ds-fader-over { forced-color-adjust: none; background: Highlight; } .ds-fader-value.ds-fader-value--over, .ds-fader-ends .ds-fader-over, .ds-fader-line { forced-color-adjust: none; color: Highlight; } }"
+    },
+    {
+      "name": "Hold-to-enable key",
+      "kind": "button",
+      "refersTo": "key-enable",
+      "description": "Hold until the green bar fills (700ms) to switch the motors on; dark green once on. The build's Printed Grey sub-line measures about 4.4:1 on the cap (not canonized).",
+      "html": "<div class=\"ds-enable-row\"><button class=\"ds-enable\" type=\"button\" aria-label=\"Hold to switch the motors on\"><span class=\"ds-enable-label\"><span class=\"ds-enable-lamp\"></span>Hold to enable</span><span class=\"ds-enable-sub\">Hold for 0.7 s</span><span class=\"ds-enable-fill\"></span></button><button class=\"ds-enable ds-enable--on\" type=\"button\" aria-label=\"Motors on, hold again to reset\"><span class=\"ds-enable-label\"><span class=\"ds-enable-lamp\"></span>Motors on</span><span class=\"ds-enable-sub\">Hold again to reset</span><span class=\"ds-enable-fill\"></span></button></div>",
+      "css": ".ds-enable-row { display: flex; gap: 14px; padding: 12px 16px; background: var(--panel, #222427); } .ds-enable { position: relative; overflow: hidden; display: grid; place-items: center; align-content: center; gap: 2px; box-sizing: border-box; min-width: 150px; padding: 10px 14px; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink, #ece8df); cursor: pointer; user-select: none; touch-action: none; transition: background-color 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-enable:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-enable:active { background: var(--amber, #f2aa3c); color: var(--amber-ink, #1d1304); box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-enable:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-enable-label { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; } .ds-enable-lamp { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #55595f; } .ds-enable-sub { font-size: 11px; letter-spacing: 0.02em; color: var(--ink-2, #aaa69d); } .ds-enable-fill { position: absolute; inset: auto 0 0 0; height: 5px; background: var(--green, #5ec683); transform: scaleX(0); transform-origin: left; transition: transform 160ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); } .ds-enable:active .ds-enable-fill { transform: scaleX(1); transition: transform 700ms linear; } .ds-enable.ds-enable--on, .ds-enable.ds-enable--on:hover, .ds-enable.ds-enable--on:active { background: linear-gradient(#27452f, #1d3425); border-color: #3f8a5a; } .ds-enable--on .ds-enable-label { color: #d9f5e2; } .ds-enable--on .ds-enable-lamp { background: var(--green, #5ec683); } .ds-enable--on .ds-enable-sub { color: #a9d8b8; }"
+    },
+    {
+      "name": "STOP key",
+      "kind": "button",
+      "refersTo": "key-stop",
+      "description": "The biggest key: red face, 36px legend, fires on press and from Space (or Esc, once no drag is left to cancel), never disabled. The build's 92%-opacity sub-line measures about 4.2:1 (not canonized; full Lit White is 4.7:1).",
+      "html": "<button class=\"ds-stop\" type=\"button\" aria-keyshortcuts=\"Space Escape\"><span class=\"ds-stop-big\">STOP</span><span class=\"ds-stop-sub\">Space or Esc</span></button>",
+      "css": ".ds-stop { display: grid; place-items: center; box-sizing: border-box; min-width: 232px; padding: 8px 26px; border: 2px solid #ef5d50; border-radius: 6px; background: var(--red, #d63a2f); color: #fff; box-shadow: 0 3px 0 #5f130d, 0 6px 14px rgb(0 0 0 / 0.45); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); cursor: pointer; touch-action: none; transition: background-color 100ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 100ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 100ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); } .ds-stop:hover { background: #e2453a; } .ds-stop:active { background: var(--red-deep, #9f2219); transform: translateY(3px); box-shadow: 0 0 0 #5f130d, inset 0 3px 6px rgb(0 0 0 / 0.35); } .ds-stop:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-stop-big { font-size: 36px; font-weight: 800; letter-spacing: 0.08em; line-height: 1; } .ds-stop-sub { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; opacity: 0.92; }"
+    },
+    {
+      "name": "State window",
+      "kind": "custom",
+      "refersTo": "readout-window",
+      "description": "Recessed window with the uppercase machine state over what to do next; each tone lights it to a different brightness (moving, alarm, ready, stopped, idle). The last window is READY on stale status: it keeps its word but drops to the unlit idle tone, never alarm.",
+      "html": "<div class=\"ds-readouts\"><div class=\"ds-readout\" data-tone=\"moving\"><p class=\"ds-readout-state\">MOVING</p><p class=\"ds-readout-detail\">Heading for the commanded position.</p></div><div class=\"ds-readout\" data-tone=\"alarm\"><p class=\"ds-readout-state\">STOP NOT CONFIRMED</p><p class=\"ds-readout-detail\">The controller didn't confirm the stop. Press the hardware E-stop now.</p></div><div class=\"ds-readout\" data-tone=\"ready\"><p class=\"ds-readout-state\">READY</p><p class=\"ds-readout-detail\">Click a key for one step, or drag rings or joint faders to plan a pose, then press Move.</p></div><div class=\"ds-readout\" data-tone=\"stopped\"><p class=\"ds-readout-state\">STOPPED</p><p class=\"ds-readout-detail\">The arm is stopped. Hold Enable to make it ready again.</p></div><div class=\"ds-readout\" data-tone=\"idle\"><p class=\"ds-readout-state\">READY</p><p class=\"ds-readout-detail\">Status is 1.4 s old (the Wi-Fi link stalls now and then). Moves wait for fresh status.</p></div></div>",
+      "css": ".ds-readouts { display: grid; gap: 8px; width: 480px; padding: 12px 16px; background: var(--panel, #222427); font-family: var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-readout { display: grid; align-content: center; gap: 4px; padding: 8px 14px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 4px; box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.5); color: var(--ink, #ece8df); transition: background-color 160ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), border-color 160ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); } .ds-readout-state { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.1; } .ds-readout-detail { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink-2, #aaa69d); } .ds-readout[data-tone=\"moving\"] { background: var(--amber, #f2aa3c); border-color: #ffd08a; } .ds-readout[data-tone=\"moving\"] :is(.ds-readout-state, .ds-readout-detail) { color: var(--amber-ink, #1d1304); } .ds-readout[data-tone=\"alarm\"] { background: #c62f25; border-color: #ff8073; } .ds-readout[data-tone=\"alarm\"] :is(.ds-readout-state, .ds-readout-detail) { color: #fff; } .ds-readout[data-tone=\"ready\"] { background: #1a4a2d; border-color: #4f9c6b; } .ds-readout[data-tone=\"ready\"] .ds-readout-state { color: #a6efbf; } .ds-readout[data-tone=\"ready\"] .ds-readout-detail { color: #d3eedc; } .ds-readout[data-tone=\"stopped\"] { background: #2b100d; border-color: #8c2f26; } .ds-readout[data-tone=\"stopped\"] .ds-readout-state { color: var(--alarm, #ff8073); } .ds-readout[data-tone=\"stopped\"] .ds-readout-detail { color: #f3c3bd; }"
+    },
+    {
+      "name": "Channel strip",
+      "kind": "custom",
+      "refersTo": "channel-strip",
+      "description": "Two faders: J1 travelling (lead ladder lit ten lights, 2.5 steps to go; amber goal frame, readout and 15px target line) and J2 mid-drag on a blocked target (cap lit for the grab, red goal frame following the pointer, target line reads Blocked, lead lights dark). A staged angle that hasn't been sent shows as planned, not commanded: a dashed goal frame and a Printed Grey target line (solid amber while it's being dragged, red with \"Blocked\" when the plan is blocked); the joint legend gains a dashed \"planned\" sample.",
+      "html": "<div class=\"ds-strips\"><article class=\"ds-strip ds-strip--moving\" style=\"--tape: var(--tape-1, #e3ba4f)\"><header class=\"ds-strip-tape\"><span>J1</span><span class=\"ds-strip-name\">Base</span><span class=\"ds-strip-act\" aria-hidden=\"true\"></span></header><button class=\"ds-strip-key\" type=\"button\" aria-label=\"Joint 1 plus one step\">+</button><div class=\"ds-meters\"><div class=\"ds-meter\" aria-hidden=\"true\"><span class=\"ds-meter-scale\" style=\"top: 0%; transform: none\">180</span><span class=\"ds-meter-scale\" style=\"top: 25%\">90</span><span class=\"ds-meter-scale\" style=\"top: 50%\">0</span><span class=\"ds-meter-scale\" style=\"top: 75%\">−90</span><span class=\"ds-meter-scale\" style=\"top: 100%; transform: translateY(-100%)\">−180</span><span class=\"ds-meter-lit\" style=\"clip-path: inset(37.5% 0 50% 0)\"></span><span class=\"ds-mark ds-mark--goal\" style=\"top: 36.81%\"></span><span class=\"ds-mark ds-mark--now\" style=\"top: 37.5%\"></span></div><div class=\"ds-lead\" aria-hidden=\"true\"><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i></i><i></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i></div><div class=\"ds-lead-step\"><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i></div><div class=\"ds-lead-step\"><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i></div></div><div class=\"ds-lead-zero\"></div><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div></div></div></div><button class=\"ds-strip-key\" type=\"button\" aria-label=\"Joint 1 minus one step\">−</button><output class=\"ds-strip-value\">45.00°</output><p class=\"ds-strip-toward\">→ 47.50°</p></article><article class=\"ds-strip ds-strip--dragging\" style=\"--tape: var(--tape-2, #7fb3d9)\"><header class=\"ds-strip-tape\"><span>J2</span><span class=\"ds-strip-name\">Shoulder</span><span class=\"ds-strip-act\" aria-hidden=\"true\"></span></header><button class=\"ds-strip-key\" type=\"button\" aria-label=\"Joint 2 plus one step\">+</button><div class=\"ds-meters\"><div class=\"ds-meter\" aria-hidden=\"true\"><span class=\"ds-meter-scale\" style=\"top: 0%; transform: none\">180</span><span class=\"ds-meter-scale\" style=\"top: 25%\">90</span><span class=\"ds-meter-scale\" style=\"top: 50%\">0</span><span class=\"ds-meter-scale\" style=\"top: 75%\">−90</span><span class=\"ds-meter-scale\" style=\"top: 100%; transform: translateY(-100%)\">−180</span><span class=\"ds-meter-lit\" style=\"clip-path: inset(50% 0 41.67% 0)\"></span><span class=\"ds-mark ds-mark--goal ds-mark--blocked\" style=\"top: 76.39%\"></span><span class=\"ds-mark ds-mark--now\" style=\"top: 58.33%\"></span></div><div class=\"ds-lead\" aria-hidden=\"true\"><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div></div><div class=\"ds-lead-zero\"></div><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div></div></div></div><button class=\"ds-strip-key\" type=\"button\" aria-label=\"Joint 2 minus one step\">−</button><output class=\"ds-strip-value\">-30.00°</output><p class=\"ds-strip-toward ds-strip-toward--blocked\">Blocked</p></article></div>",
+      "css": ".ds-strips { display: flex; gap: 8px; padding: 8px; background: var(--panel, #222427); container-type: inline-size; } .ds-strip { --tape: var(--tape-1, #e3ba4f); display: grid; grid-template-rows: auto 46px clamp(170px, 22vh, 280px) 46px auto auto; align-content: start; gap: 8px; box-sizing: border-box; width: 150px; padding: 8px; background: #1b1d20; border: 1px solid var(--seam, #33363b); border-radius: 4px; color: var(--ink, #ece8df); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-strip-tape { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 7px; background: var(--tape); color: #15161a; border-radius: 2px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; } .ds-strip-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-strip-act { flex: none; width: 8px; height: 8px; margin-left: auto; border-radius: 50%; background: rgb(21 22 26 / 0.35); } .ds-strip--moving .ds-strip-act { background: #15161a; box-shadow: 0 0 0 2px var(--amber, #f2aa3c); } .ds-strip-key { display: grid; place-items: center; padding: 0; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink, #ece8df); cursor: pointer; user-select: none; touch-action: none; transition: background-color 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); font: 500 24px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); } .ds-strip-key:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-strip-key:active { background: var(--amber, #f2aa3c); color: var(--amber-ink, #1d1304); box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-strip-key:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-meters { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 4px; min-height: 0; } .ds-meter { position: relative; overflow: hidden; touch-action: none; background: linear-gradient(var(--seam, #33363b), var(--seam, #33363b)) 50% 50% / 100% 1px no-repeat, repeating-linear-gradient(to bottom, #2a2d31 0 1px, transparent 1px calc(100% / 12)) 0 0 / 22% 100% no-repeat, repeating-linear-gradient(to bottom, #2a2d31 0 1px, transparent 1px calc(100% / 12)) 100% 0 / 22% 100% no-repeat, var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45); } .ds-meter--near-cap { cursor: grab; } .ds-strip--dragging .ds-meter { cursor: grabbing; } .ds-meter-scale { position: absolute; left: 4px; font-size: 10px; color: #8f8b83; transform: translateY(-50%); pointer-events: none; } .ds-meter-lit { position: absolute; top: 0; bottom: 0; left: 42%; right: 42%; background: color-mix(in srgb, var(--tape) 55%, transparent); transition: clip-path 140ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); } .ds-mark { position: absolute; left: 24%; right: 24%; box-sizing: border-box; transform: translateY(-50%); transition: top 140ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); } .ds-mark--now { height: 9px; border-radius: 2px; background: linear-gradient(#f6f3ec, #cfcac0); box-shadow: 0 1px 3px rgb(0 0 0 / 0.7); } .ds-mark--now::after { content: \"\"; position: absolute; left: 3px; right: 3px; top: 4px; height: 1px; background: rgb(0 0 0 / 0.45); } .ds-meter--near-cap .ds-mark--now, .ds-strip--dragging .ds-mark--now { background: linear-gradient(#ffffff, #e4dfd5); } .ds-mark--goal { height: 13px; border: 2px solid var(--amber, #f2aa3c); border-radius: 2px; } .ds-mark--goal.ds-mark--blocked { border-color: var(--alarm, #ff8073); } .ds-lead { display: flex; flex-direction: column; box-sizing: border-box; padding: 4px 5px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45); } .ds-lead-half, .ds-lead-step { flex: 1; display: flex; flex-direction: column; min-height: 0; } .ds-lead-half { gap: 5px; } .ds-lead-step { gap: 2px; } .ds-lead i { flex: 1; min-height: 2px; border-radius: 1px; background: #25282c; transition: background-color 80ms linear; } .ds-lead i.ds-lead-on { background: var(--amber, #f2aa3c); } .ds-lead-zero { flex: none; height: 2px; margin: 4px -5px; background: var(--ink-2, #aaa69d); } @media (max-width: 560px) { .ds-lead { padding: 3px; } .ds-lead-zero { margin: 3px -3px; } } .ds-strip-value { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; text-align: center; } .ds-strip--moving .ds-strip-value { color: var(--amber, #f2aa3c); } .ds-strip-toward { min-height: 20px; margin: -6px 0 0; font-size: 15px; font-weight: 650; color: var(--amber, #f2aa3c); text-align: center; } .ds-strip-toward--blocked { color: var(--alarm, #ff8073); } @container (max-width: 760px) { .ds-strip-tape { flex-wrap: wrap; row-gap: 1px; font-size: 11px; letter-spacing: 0.02em; } .ds-strip-name { order: 3; flex-basis: 100%; } } @media (max-width: 560px) { .ds-meters { grid-template-columns: minmax(0, 1fr) 22px; gap: 3px; } }"
+    },
+    {
+      "name": "Lead lights",
+      "kind": "custom",
+      "refersTo": "lead-ladder",
+      "description": "LED ladder counting the steps still to go: four lights per step, three steps each way, lit flat amber outward from the zero line (here a minus lead of five lights), with the joint bank's meter legend.",
+      "html": "<div class=\"ds-lead-demo\"><div class=\"ds-lead\" aria-hidden=\"true\"><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div></div><div class=\"ds-lead-zero\"></div><div class=\"ds-lead-half\"><div class=\"ds-lead-step\"><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i><i class=\"ds-lead-on\"></i></div><div class=\"ds-lead-step\"><i class=\"ds-lead-on\"></i><i></i><i></i><i></i></div><div class=\"ds-lead-step\"><i></i><i></i><i></i><i></i></div></div></div><p class=\"ds-meter-key\"><span class=\"ds-key-item\"><span class=\"ds-swatch ds-swatch--now\"></span>actual</span> <span class=\"ds-key-item\"><span class=\"ds-swatch ds-swatch--goal\"></span>commanded</span> <span class=\"ds-key-item\"><span class=\"ds-swatch ds-swatch--goal ds-swatch--planned\"></span>planned</span> <span class=\"ds-key-item\"><span class=\"ds-swatch ds-swatch--lead\"></span>steps ahead</span></p></div>",
+      "css": ".ds-lead-demo { display: flex; align-items: center; gap: 16px; padding: 12px; background: var(--panel, #222427); font: 400 12px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-lead-demo .ds-lead { width: 30px; height: 180px; } .ds-lead { display: flex; flex-direction: column; box-sizing: border-box; padding: 4px 5px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45); } .ds-lead-half, .ds-lead-step { flex: 1; display: flex; flex-direction: column; min-height: 0; } .ds-lead-half { gap: 5px; } .ds-lead-step { gap: 2px; } .ds-lead i { flex: 1; min-height: 2px; border-radius: 1px; background: #25282c; transition: background-color 80ms linear; } .ds-lead i.ds-lead-on { background: var(--amber, #f2aa3c); } .ds-lead-zero { flex: none; height: 2px; margin: 4px -5px; background: var(--ink-2, #aaa69d); } @media (max-width: 560px) { .ds-lead { padding: 3px; } .ds-lead-zero { margin: 3px -3px; } } .ds-meter-key { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 14px; margin: 0; color: var(--ink-2, #aaa69d); font-size: 12px; } .ds-swatch { display: inline-block; box-sizing: border-box; width: 18px; height: 6px; border-radius: 1px; } .ds-swatch--now { background: var(--ink, #ece8df); } .ds-swatch--goal { height: 8px; border: 2px solid var(--amber, #f2aa3c); } .ds-swatch--lead { width: 7px; height: 12px; background: var(--amber, #f2aa3c); } .ds-key-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; } .ds-swatch--planned { border-style: dashed; }"
+    },
+    {
+      "name": "3D monitor",
+      "kind": "custom",
+      "refersTo": "screen",
+      "description": "The ARM section: bank with title, legend and Reset view key over the sunk screen, with the floating drag readout (clear and blocked) and the plan bar docked along the screen's bottom while a pose is staged (it covers the grey help line). In the build the arm stands on its cart above the floor; the camera fits a sample of the arm's and cart's mesh points inside 14px margins and an 80px band kept for the plan bar (at most 30% of a short screen), re-frames on resize unless the user has turned or zoomed, and Reset view re-frames. A fader drag anchors the readout just outside that joint's ring, away from the links that follow it (J6: away from J5). A blocked plan shows a flat 14px contact mark (Alarm Red core, hard 2px Well Black rim, constant size on screen) where it first comes within 10mm of something and a faint red overlay with red edges on the cart part it would hit, never a red wash; Move then stays pressable but unlit, and a press gets the refusal ring and the reason on the message line. Under 520px of screen width the plan bar drops its legend and each chip's from-angle ('J2 → −20.0°'; the strips still show it), and its note sits beside the keys; on a phone (560px and below) the screen is half the window's height, 360px to 500px; on a screen at least 640px wide and more than 1.6 times as wide as tall (the stacked side panel) it docks at the bottom-right in a 248px column with the help line, and the camera frames arm and cart in the full height. The WebGL scene itself (URDF arm on its cart, tape-coloured rings, amber shadow arm, path line, floor grid) is not reproduced here. When a staged move at the chosen speed would carry the flange past the 250 mm/s redline, the plan note turns Alarm Red at regular weight and adds how fast. The bank also holds the Joints/Tool mode keys; the legend's drag sample reads 'drag a ring' (a Sky Tape ring) in Joints mode and 'drag an arrow or ring' (a ring in the gizmo's three axis colours) in Tool mode, and the help line speaks for the mode in use. In Tool mode the camera framing keeps the whole gizmo on screen, keeps a band as tall as the plan bar while it shows (up to half the screen), and re-frames when a newly staged pose leaves the gizmo near an edge or under the bar, unless the user has turned or zoomed; it never re-frames during a drag. A gizmo drag's readout sits just outside the gizmo toward the pointer, or, with no room there, centred above or below it, 120px from its centre.",
+      "html": "<section class=\"ds-monitor\"><div class=\"ds-monitor-bank\"><h2 class=\"ds-monitor-title\">Arm</h2><p class=\"ds-monitor-key\"><span class=\"ds-key-item\"><span class=\"ds-swatch-ring\"></span>drag a ring</span> <span class=\"ds-key-item\"><span class=\"ds-swatch-shadow\"></span>plan</span> <span class=\"ds-key-item\"><span class=\"ds-swatch-blocked\"></span>blocked</span></p><button class=\"ds-reset\" type=\"button\">Reset view</button></div><div class=\"ds-screen\"><p class=\"ds-tag\" style=\"left: 48px; top: 64px\">J2 -30.0° <span class=\"ds-tag-to\">→ -59.0°</span><span class=\"ds-tag-how\">Release to plan · Esc cancels</span></p><p class=\"ds-tag ds-tag--blocked\" style=\"left: 48px; top: 140px\">J2 -30.0° <span class=\"ds-tag-to\">→ -150.0°</span><span class=\"ds-tag-how\">Blocked: the forearm would come within 10 mm of a cart brace</span></p><div class=\"ds-plan\" role=\"group\" aria-label=\"Plan\"><p class=\"ds-plan-title\">Plan</p><div class=\"ds-plan-body\"><span class=\"ds-plan-chip\"><span class=\"ds-plan-tag\" style=\"--tape: var(--tape-2, #7fb3d9)\">J2</span>-30.0° → -57.0°<button class=\"ds-plan-x\" type=\"button\" aria-label=\"Take J2 out of the plan\">×</button></span><span class=\"ds-plan-chip\"><span class=\"ds-plan-tag\" style=\"--tape: var(--tape-3, #92cc8a)\">J3</span>50.0° → 70.0°<button class=\"ds-plan-x\" type=\"button\" aria-label=\"Take J3 out of the plan\">×</button></span><p class=\"ds-plan-note\">Moves J2, J3 together, at up to 10°/s.</p></div><div class=\"ds-plan-keys\"><button class=\"ds-plan-clear\" type=\"button\">Clear</button><button class=\"ds-plan-move\" type=\"button\">Move</button></div></div></div></section>",
+      "css": ".ds-monitor { display: grid; grid-template-rows: auto 1fr; gap: 12px; width: 560px; padding: 12px; background: var(--panel, #222427); border: 1px solid var(--seam, #33363b); border-radius: 6px; color: var(--ink, #ece8df); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-monitor-bank { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; } .ds-monitor-title { margin: 0 4px 0 0; font-size: 14px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; } .ds-monitor-key { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 14px; margin: 0 0 0 auto; color: var(--ink-2, #aaa69d); font-size: 12px; } .ds-swatch-ring { box-sizing: border-box; width: 12px; height: 12px; border: 2px solid var(--tape-2, #7fb3d9); border-radius: 50%; } .ds-swatch-shadow, .ds-swatch-blocked { box-sizing: border-box; width: 14px; height: 10px; border-radius: 1px; } .ds-swatch-shadow { background: rgb(242 170 60 / 0.45); border: 1px solid var(--amber, #f2aa3c); } .ds-swatch-blocked { background: rgb(255 128 115 / 0.4); border: 1px solid var(--alarm, #ff8073); } .ds-reset { display: grid; place-items: center; box-sizing: border-box; min-width: 46px; height: 30px; margin-left: 4px; padding: 0 8px; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink, #ece8df); cursor: pointer; user-select: none; touch-action: none; transition: background-color 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); font: 600 12px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); color: var(--ink-2, #aaa69d); } .ds-reset:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-reset:active { background: var(--amber, #f2aa3c); color: var(--amber-ink, #1d1304); box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-reset:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-screen { position: relative; height: 300px; overflow: hidden; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 4px; box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.5); } .ds-tag { position: absolute; z-index: 2; margin: 0; padding: 6px 9px; background: rgb(14 15 16 / 0.94); border: 1px solid var(--amber, #f2aa3c); border-radius: 3px; box-shadow: 0 4px 10px rgb(0 0 0 / 0.45); color: var(--ink, #ece8df); font-size: 13px; line-height: 1.35; white-space: nowrap; pointer-events: none; transform: translate(0, -50%); } .ds-tag-to { color: var(--amber, #f2aa3c); font-weight: 650; } .ds-tag-how { display: block; color: var(--ink-2, #aaa69d); font-size: 11px; } .ds-tag--blocked { border-color: var(--alarm, #ff8073); } .ds-tag--blocked :is(.ds-tag-to, .ds-tag-how) { color: var(--alarm, #ff8073); } .ds-screen-help { position: absolute; left: 12px; right: 12px; bottom: 9px; margin: 0; color: #9a968d; font-size: 12px; pointer-events: none; } .ds-plan { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 8px 10px; background: rgb(24 25 27 / 0.95); border: 1px solid var(--seam, #33363b); border-radius: 4px; box-shadow: 0 4px 12px rgb(0 0 0 / 0.45); } .ds-plan-title { margin: 0; color: var(--ink-2, #aaa69d); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; } .ds-plan-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; } .ds-plan-chip { display: inline-flex; align-items: center; gap: 7px; padding: 2px 3px 4px 3px; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 3px; font-size: 13px; white-space: nowrap; } .ds-plan-tag { padding: 1px 5px; background: var(--tape); color: var(--tape-ink, #15161a); border-radius: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; } .ds-plan-x { width: 24px; height: 22px; padding: 0; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); border: 1px solid var(--cap-edge, #50565d); border-radius: 3px; box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink-2, #aaa69d); font-size: 15px; line-height: 1; cursor: pointer; } .ds-plan-x:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); color: var(--ink, #ece8df); } .ds-plan-x:active { box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-plan-note { flex: 1 1 180px; margin: 0; color: var(--ink-2, #aaa69d); font-size: 12px; } .ds-plan-keys { display: flex; align-items: center; gap: 8px; } .ds-plan-clear { box-sizing: border-box; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); cursor: pointer; height: 36px; padding: 0 8px; color: var(--ink-2, #aaa69d); font: 600 12px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif); } .ds-plan-move { box-sizing: border-box; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); cursor: pointer; min-width: 104px; height: 40px; padding: 0 18px; border-color: #8a6420; box-shadow: inset 0 -3px 0 var(--amber, #f2aa3c), 0 2px 0 #0b0c0d; color: var(--amber, #f2aa3c); font: 700 15px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif); letter-spacing: 0.06em; text-transform: uppercase; } .ds-plan-move[aria-disabled=\"true\"] { color: var(--ink-2, #aaa69d); border-color: var(--cap-edge, #50565d); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); } .ds-plan-move.is-refused { color: var(--alarm, #ff8073); background: linear-gradient(#4a2a27, #3a2220); box-shadow: inset 0 0 0 2px var(--alarm, #ff8073); } .ds-plan-move:disabled { color: var(--ink-2, #aaa69d); border-color: var(--cap-edge, #50565d); box-shadow: none; } :is(.ds-plan-x, .ds-plan-clear, .ds-plan-move):focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-key-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; } .ds-plan--over .ds-plan-note { color: var(--alarm, #ff8073); }"
+    },
+    {
+      "name": "Mode keys",
+      "kind": "control",
+      "refersTo": "key-small",
+      "description": "Two small keys joined into one block in the ARM bank, like a desk's source selector: Joints and Tool, 58px by 30px, sharing a 1px rim with 4px outer corners. They choose what dragging in the 3D view moves. The one in use stays pressed in (a sunk #25282c to #2d3136 face with an inner shadow, inside a rim that stays put so the joined block keeps a straight outline, its Legend Ink legend 2px lower); the other stands up with a Printed Grey legend. Disabled until the 3D view is up; remembered on this PC; switching cancels a drag but keeps the plan.",
+      "html": "<div class=\"ds-mode-keys\" role=\"group\" aria-label=\"Dragging in the 3D view moves\"><button class=\"ds-mode-key\" type=\"button\" aria-pressed=\"false\">Joints</button><button class=\"ds-mode-key\" type=\"button\" aria-pressed=\"true\">Tool</button></div>",
+      "css": ".ds-mode-keys { display: inline-flex; padding: 12px; background: var(--panel, #222427); } .ds-mode-key { display: grid; place-items: center; box-sizing: border-box; min-width: 58px; height: 30px; padding: 0 8px; border: 1px solid var(--cap-edge, #50565d); background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink-2, #aaa69d); cursor: pointer; font: 600 12px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); } .ds-mode-key:first-child { border-radius: 4px 0 0 4px; } .ds-mode-key:last-child { border-left-width: 0; border-radius: 0 4px 4px 0; } .ds-mode-key:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-mode-key[aria-pressed=\"true\"] { background: linear-gradient(#25282c, #2d3136); box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.5); color: var(--ink, #ece8df); padding-top: 4px; } .ds-mode-key:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; }"
+    },
+    {
+      "name": "Tool gizmo",
+      "kind": "control",
+      "refersTo": "colors.ink",
+      "description": "Shown in Tool mode at the flange of the shadow arm, with its axes along the arm's base frame. Three arrows (a 3px shaft from 16px to 74px, a 20px cone tipped at 94px) and three rings 58px in radius, one about each arrow's axis, with printed letters X, Y, Z (18px bold, 2px Well Black outline) 108px out and the rings' names Rx, Ry, Rz (13px, the same print) 76px out, each at whichever of its ring's four diagonals reads best from the camera (near side, clear of the arrows, letters and other names; it holds its place until another is clearly better). Each axis wears its colour, as in other 3D tools, on its arrow, ring, letter and ring name: X Axis Red (#ff3352), Y Axis Green (#8bdc00), Z Axis Blue (#2890ff), over a 1.7px Well Black rim, drawn over everything at a fixed size on screen; the letters stay, so colour is never the only cue. Each ring's far half, facing away from the camera, is drawn at 35%, so the cage reads in depth (a ring seen face-on is drawn whole). Dims to 30% when locked and for the other handles during a drag; the hovered handle brightens a third of the way to white, keeping its hue, with a translucent band of its colour; a dragged arrow lights amber, like a held key; a dragged ring lights white and its turn is the amber: a 45% wedge edged by a heavier arc (both Alarm Red when blocked); on a ring seen nearly side-on the wedge flattens into the arc, and the readout carries the angle. Arrows slide the flange in 1mm steps (10mm with Shift), rings turn it in place in 0.5-degree steps (5 with Shift); the joints follow by inverse kinematics from the pose before, the drag stops at the last reachable pose, and release stages every joint the solution turns. A WebGL object, so the sample is a flat SVG rendering of it, turning about Ry (the other handles, which dim during a real drag, are shown undimmed).",
+      "html": "<svg class=\"ds-gizmo\" viewBox=\"-130 -130 260 260\" width=\"260\" height=\"260\" role=\"img\" aria-label=\"Tool gizmo: X, Y and Z arrows and rings in red, green and blue, turning about Ry\"><g fill=\"none\" stroke-linecap=\"round\"><path d=\"M-58 0 A58 20 0 0 1 58 0\" stroke=\"#0e0f10\" stroke-width=\"6.2\" stroke-opacity=\"0.315\"/><path d=\"M-58 0 A58 20 0 0 1 58 0\" stroke=\"#2890ff\" stroke-width=\"2.8\" stroke-opacity=\"0.35\"/><path d=\"M58 0 A58 20 0 0 1 -58 0\" stroke=\"#0e0f10\" stroke-width=\"6.2\" stroke-opacity=\"0.9\"/><path d=\"M58 0 A58 20 0 0 1 -58 0\" stroke=\"#2890ff\" stroke-width=\"2.8\"/><path d=\"M0 -58 A22 58 0 0 0 0 58\" stroke=\"#0e0f10\" stroke-width=\"6.2\" stroke-opacity=\"0.315\" transform=\"rotate(-18)\"/><path d=\"M0 -58 A22 58 0 0 0 0 58\" stroke=\"#ff3352\" stroke-width=\"2.8\" stroke-opacity=\"0.35\" transform=\"rotate(-18)\"/><path d=\"M0 -58 A22 58 0 0 1 0 58\" stroke=\"#0e0f10\" stroke-width=\"6.2\" stroke-opacity=\"0.9\" transform=\"rotate(-18)\"/><path d=\"M0 -58 A22 58 0 0 1 0 58\" stroke=\"#ff3352\" stroke-width=\"2.8\" transform=\"rotate(-18)\"/><path d=\"M0 0 L43.3 -29 A50 58 0 0 1 43.3 29 Z\" fill=\"#f2aa3c\" fill-opacity=\"0.45\" stroke=\"none\"/><ellipse cx=\"0\" cy=\"0\" rx=\"50\" ry=\"58\" stroke=\"#0e0f10\" stroke-width=\"6.2\" stroke-opacity=\"0.9\"/><ellipse cx=\"0\" cy=\"0\" rx=\"50\" ry=\"58\" stroke=\"#ffffff\" stroke-width=\"2.8\"/><path d=\"M43.3 -29 A50 58 0 0 1 43.3 29\" stroke=\"#f2aa3c\" stroke-width=\"6\"/><line x1=\"0\" y1=\"-16\" x2=\"0\" y2=\"-74\" stroke=\"#0e0f10\" stroke-width=\"6.4\"/><line x1=\"0\" y1=\"-16\" x2=\"0\" y2=\"-74\" stroke=\"#2890ff\" stroke-width=\"3\"/><line x1=\"15\" y1=\"5\" x2=\"70\" y2=\"24\" stroke=\"#0e0f10\" stroke-width=\"6.4\"/><line x1=\"15\" y1=\"5\" x2=\"70\" y2=\"24\" stroke=\"#ff3352\" stroke-width=\"3\"/><line x1=\"-11\" y1=\"9\" x2=\"-52\" y2=\"40\" stroke=\"#0e0f10\" stroke-width=\"6.4\"/><line x1=\"-11\" y1=\"9\" x2=\"-52\" y2=\"40\" stroke=\"#8bdc00\" stroke-width=\"3\"/></g><g stroke=\"#0e0f10\" stroke-width=\"3.4\" stroke-linejoin=\"round\"><path d=\"M0 -94 L-6 -73 L6 -73 Z\" fill=\"#2890ff\"/><path d=\"M89 30 L67 30 L71 19 Z\" fill=\"#ff3352\"/><path d=\"M-67 51 L-55 34 L-49 43 Z\" fill=\"#8bdc00\"/></g><g font-family=\"Segoe UI Variable Text, Segoe UI, system-ui, sans-serif\" font-weight=\"700\" text-anchor=\"middle\" dominant-baseline=\"central\" stroke=\"#0e0f10\" stroke-width=\"4\" paint-order=\"stroke\"><g font-size=\"18\"><text x=\"0\" y=\"-110\" fill=\"#2890ff\">Z</text><text x=\"104\" y=\"35\" fill=\"#ff3352\">X</text><text x=\"-82\" y=\"62\" fill=\"#8bdc00\">Y</text></g><g font-size=\"13\"><text x=\"-44\" y=\"-62\" fill=\"#ff3352\">Rx</text><text x=\"50\" y=\"-56\" fill=\"#8bdc00\">Ry</text><text x=\"-80\" y=\"-10\" fill=\"#2890ff\">Rz</text></g></g></svg>",
+      "css": ".ds-gizmo { display: block; background: var(--well, #0e0f10); border: 1px solid var(--seam, #33363b); border-radius: 4px; }"
+    },
+    {
+      "name": "Tool axis rows",
+      "kind": "custom",
+      "refersTo": "key-jog-tool",
+      "description": "The tool section's two columns, POSITION beside ORIENTATION: each row is name, minus key, reading with an 11px amber target line while moving, plus key. One column at 560px and below.",
+      "html": "<div class=\"ds-axes\"><p class=\"ds-axis-group\">Position</p><div class=\"ds-axis ds-axis--moving\"><span class=\"ds-axis-name\">X</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"X minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">312.4 mm</output><span class=\"ds-axis-toward\">→ 322.4 mm</span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"X plus one step\">+</button></div><div class=\"ds-axis\"><span class=\"ds-axis-name\">Y</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Y minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">4.0 mm</output><span class=\"ds-axis-toward\"></span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Y plus one step\">+</button></div><div class=\"ds-axis\"><span class=\"ds-axis-name\">Z</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Z minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">180.0 mm</output><span class=\"ds-axis-toward\"></span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Z plus one step\">+</button></div><p class=\"ds-axis-group\">Orientation</p><div class=\"ds-axis\"><span class=\"ds-axis-name\">Roll</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Roll minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">180.0°</output><span class=\"ds-axis-toward\"></span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Roll plus one step\">+</button></div><div class=\"ds-axis\"><span class=\"ds-axis-name\">Pitch</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Pitch minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">0.0°</output><span class=\"ds-axis-toward\"></span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Pitch plus one step\">+</button></div><div class=\"ds-axis\"><span class=\"ds-axis-name\">Yaw</span><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Yaw minus one step\">−</button><div class=\"ds-axis-reading\"><output class=\"ds-axis-value\">90.0°</output><span class=\"ds-axis-toward\"></span></div><button class=\"ds-axis-key\" type=\"button\" aria-label=\"Yaw plus one step\">+</button></div></div>",
+      "css": ".ds-axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); grid-auto-flow: column; gap: 8px; align-content: start; width: 680px; padding: 12px; background: var(--panel, #222427); color: var(--ink, #ece8df); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-axis-group { margin: 4px 0 -2px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2, #aaa69d); } .ds-axis { display: grid; grid-template-columns: 58px 50px minmax(0, 1fr) 50px; gap: 8px; align-items: center; padding: 6px 8px; background: #1b1d20; border: 1px solid var(--seam, #33363b); border-radius: 4px; } .ds-axis-name { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; } .ds-axis-key { display: grid; place-items: center; height: 44px; padding: 0; border: 1px solid var(--cap-edge, #50565d); border-radius: 4px; background: linear-gradient(var(--cap-top, #3f444a), var(--cap, #34383d)); box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); color: var(--ink, #ece8df); cursor: pointer; user-select: none; touch-action: none; transition: background-color 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), box-shadow 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)), transform 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); font: 400 22px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); } .ds-axis-key:hover { background: linear-gradient(#4a5057, var(--cap-top, #3f444a)); } .ds-axis-key:active { background: var(--amber, #f2aa3c); color: var(--amber-ink, #1d1304); box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3); transform: translateY(2px); } .ds-axis-key:focus-visible { outline: 2px solid var(--ink, #ece8df); outline-offset: 2px; } .ds-axis-reading { position: relative; display: grid; justify-items: center; } .ds-axis-value { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; text-align: center; } .ds-axis--moving .ds-axis-value { color: var(--amber, #f2aa3c); } .ds-axis-toward { position: absolute; top: 100%; left: 0; right: 0; font-size: 11px; line-height: 1.1; color: var(--amber, #f2aa3c); text-align: center; } @media (max-width: 560px) { .ds-axes { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; width: auto; } }"
+    },
+    {
+      "name": "Link lamp",
+      "kind": "custom",
+      "refersTo": "lamp-live",
+      "description": "The panel name over the link lamp: unlit while connecting, green while fresh status is arriving, plain grey (no ring) when the status is more than 1s old, red when it stops.",
+      "html": "<div class=\"ds-ident\"><p class=\"ds-ident-title\">Jog panel</p><p class=\"ds-link\"><span class=\"ds-led\"></span>Connecting…</p><p class=\"ds-link\"><span class=\"ds-led ds-led--live\"></span>Live · 192.168.2.1</p><p class=\"ds-link\"><span class=\"ds-led ds-led--slow\"></span>Live · 192.168.2.1 · status 1.4 s old</p><p class=\"ds-link\"><span class=\"ds-led ds-led--dead\"></span>No status from 192.168.2.1</p></div>",
+      "css": ".ds-ident { display: grid; align-content: center; gap: 6px; padding: 12px 16px; background: var(--panel, #222427); color: var(--ink, #ece8df); font: 400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-ident-title { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; } .ds-link { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--ink-2, #aaa69d); } .ds-led { flex: none; box-sizing: border-box; width: 9px; height: 9px; border-radius: 50%; background: #55595f; } .ds-led--live { background: var(--green, #5ec683); } .ds-led--slow { background: #8f8b83; } .ds-led--dead { background: var(--alarm, #ff8073); }"
+    },
+    {
+      "name": "Message line",
+      "kind": "custom",
+      "refersTo": "message-line",
+      "description": "The well pinned to the bottom (position: sticky): the latest message coloured by tone (ink done, amber while a hold or move is pending, red failed) and a standing hint at the right.",
+      "html": "<footer class=\"ds-console\"><span class=\"ds-console-note\" data-tone=\"wait\" role=\"status\">Sending J2 to -59.0°…</span><span class=\"ds-console-hint\">Click + or − for one step; holding repeats, up to 3 steps ahead. Drag rings or joint fader caps to plan a pose, then press Move.</span></footer>",
+      "css": ".ds-console { position: sticky; bottom: 0; z-index: 9; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; padding: 9px 16px; background: var(--well, #0e0f10); border-top: 1px solid var(--seam, #33363b); color: var(--ink, #ece8df); font: 400 13px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", sans-serif); font-variant-numeric: tabular-nums; } .ds-console-note[data-tone=\"ok\"] { color: var(--ink, #ece8df); } .ds-console-note[data-tone=\"wait\"] { color: var(--amber, #f2aa3c); } .ds-console-note[data-tone=\"bad\"] { color: var(--alarm, #ff8073); font-weight: 600; } .ds-console-hint { color: var(--ink-2, #aaa69d); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Six-Channel Desk",
+    "overview": "The jog panel is a mixing desk for a robot arm. Each of the six joints is a channel strip: a length of coloured scribble tape with the joint's name, a plus key, a vertical meter with a ladder of lead lights beside it, a minus key and a readout. The meter shows where the joint is (a solid fader cap that can be grabbed and dragged) and where it was sent (a hollow amber frame); the lead lights count the steps the joint still has to go and go out as it catches up. A 3D monitor, stacked above the faders in the owner's app side panel and beside them on wide screens, shows the arm itself, standing on its cart above the floor, with a ring at each joint in that joint's tape colour: dragging rings (or the meters' fader caps) stages a pose, shown by an amber shadow arm, and nothing moves until Move sends it. The tool gets a master section of six axis rows. A meter bridge across the top carries the link lamp, the machine state, the hold-to-enable key and an oversized red STOP; a message line is pinned along the bottom.\n\nThe desk is matte charcoal and dense, with every control on screen at once. Colour is light, not paint: the keys are identical charcoal caps, and colour appears only to report state. Amber is reserved for held keys and motion, green for live and powered, red for stopped, faulted or unreachable, and for moves that are refused or blocked. The owner watches the arm more than the screen, so the state reads at a glance: one big state word in a window that lights up, one big red key. Light is flat and never glows. Motion is short and mechanical, mostly on one quick ease-out curve, and switches off when reduced motion is requested.\n\nThe panel rejects Umbratek Studio's grey round buttons floating over a 3D viewport. Its 3D view is a monitor sunk into the desk, the controls inside it are the joints' own rings, and the only panels over the picture are a readout while a drag is under way and the plan bar docked along its bottom while a pose is staged. Every other control is a square key with a printed legend, mounted on the desk.",
+    "keyCharacteristics": [
+      "Matte charcoal desk; depth comes from recessed wells, flat panels and raised key caps.",
+      "Square backlit keys; colour only reports state: amber held or moving, green live, red stop or fault.",
+      "Step and speed set on small detented faders, the same cap and slot as the joint faders, snapping to the values the arm accepts, with a speedometer-style redline wherever the flange could pass 250 mm/s.",
+      "One scribble-tape colour per joint, carried onto that joint's ring in the 3D monitor.",
+      "A sunk 3D monitor where dragging joints' rings or their fader caps, or a gizmo at the flange whose arrows and rings move the tool while the joints follow, stages a pose shown by an amber shadow arm, which Move sends as one move; the arm stands on its cart, and a pose that would hit anything turns red.",
+      "Amber lead lights that count the steps a joint still has to travel.",
+      "One system sans family, tabular figures, uppercase printed legends.",
+      "A sticky meter bridge with STOP, the biggest key, at its top-right, and a message line pinned to the bottom.",
+      "Keys travel: a hard 2px bottom edge that collapses when pressed."
+    ],
+    "rules": [
+      {
+        "name": "The Backlight Rule",
+        "body": "Keys are charcoal at rest. Colour on the desk is light that reports state: amber for held keys and motion, green for live and motors on, red for stop, fault, no signal and refusal, and for speeds past the redline. Focus is drawn in Legend Ink, and nothing is coloured for decoration: besides the state colours, only the tapes, which name joints, and the gizmo's axis colours, which name axes, carry hue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Brightness Ladder Rule",
+        "body": "The state window's tones differ in brightness, not just hue. From brightest to darkest: MOVING lit solid amber, an alarm in solid red, READY lit green, STOPPED or PAUSED in a dark red tint, MOTORS OFF or CONNECTING in a plain dark well. Stale status drops any lit tone except alarm to that dark well and keeps the word.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Red Key Rule",
+        "body": "STOP is the only key with a red face, and the alarm state window is the only other solid red. Elsewhere red is a lamp, a word, a rim, a 2px ring, a tick or a printed rule, and it marks a refused or blocked move, or a speed past the redline: the red shadow arm, arc, path and readout border, the red contact mark and the red overlay on the part it would hit, the red goal frame on a fader, and the red zone on a speed fader.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tape Rule",
+        "body": "Each joint keeps its tape colour, in joint order, on its scribble strip, its meter's lit column and its ring in the 3D monitor, and nowhere else (the legend's ring sample borrows tape 2). Tape names a joint; its hue never reports state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Axis Colour Rule",
+        "body": "The tool gizmo colours X, Y and Z red, green and blue, as 3D tools do, and nothing else wears those three colours (the Tool legend's ring sample borrows them). They name an axis and never report state: a dragged arrow lights amber and a blocked turn goes Alarm Red, as everywhere. The printed letters stay, so colour is never the only cue, as for someone who can't tell red from green."
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every figure is tabular, set once for the whole page, with fixed decimals: two for joint angles, one for tool values and drag targets. Digits never shuffle while the arm moves.",
+        "section": "typography"
+      },
+      {
+        "name": "The Printed Legend Rule",
+        "body": "Names of groups, settings and channels are printed: uppercase, semibold or bold, tracked 0.06 to 0.1em. Machine states are uppercase words, even inside a message (\"STOP NOT CONFIRMED: press the hardware E-stop now.\"). Instructions, values, units and messages otherwise stay in sentence case.",
+        "section": "typography"
+      },
+      {
+        "name": "The Bridge Stays Rule",
+        "body": "The meter bridge and the message line never scroll away, and STOP is always at the bridge's top-right.",
+        "section": "layout"
+      },
+      {
+        "name": "The First Screenful Rule",
+        "body": "Stacked, the monitor stays short enough (clamp(300px, 36vh, 500px)) and the fader meters compact enough (clamp(170px, 22vh, 280px)) that the fader readouts still land in the first screenful; side by side, at 1241px and wider, the monitor stays pinned in view while the faders scroll.",
+        "section": "layout"
+      },
+      {
+        "name": "The Up Is Plus Rule",
+        "body": "On a strip, + sits above the meter and − below, matching the meter's scale (+180 at the top) and the lead lights (a + lead lights upward). Tool rows read − on the left and + on the right.",
+        "section": "layout"
+      },
+      {
+        "name": "The Key Travel Rule",
+        "body": "A pressed key moves: its 2px edge collapses, the cap drops 2px (STOP 3px) and the shadow turns inward, over 120ms (STOP 100ms). Hover only brightens the cap a step; nothing lifts.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Sunk Display Rule",
+        "body": "The state window, the 3D screen, the meters, the lead ladders and the message line are wells; keys are raised caps; sections and strips stay flat between them.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat Light Rule",
+        "body": "Lit things are flat: lamps, lead lights and lit state windows never glow, the joint rings are flat unlit colour, and the shadow arm is self-lit and translucent without a halo. The only coloured shadows are hard 2px rings: the refusal ring and the activity ring.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Square Key Rule",
+        "body": "Every key is a squared cap with 4px corners (STOP 6px). No key is round or pill-shaped; round belongs to lamps and joint rings.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Biggest Key Rule",
+        "body": "No key is bigger or louder than STOP: the only red face, the largest legend on the page, the full height of the bridge, with its shortcuts printed on it.",
+        "section": "components"
+      },
+      {
+        "name": "The Hold-to-Commit Rule",
+        "body": "Switching the motors on is a hold, not a click: the green bar must fill the key's lower edge before anything happens.",
+        "section": "components"
+      },
+      {
+        "name": "The Stage-then-Move Rule",
+        "body": "Dragging a ring, a gizmo handle or a joint's fader cap only stages: the shadow arm, arc, path and readout show the plan, and nothing moves until Move sends every staged joint as one move. Esc backs out a drag, then the plan; a blocked plan can't be sent, and the server checks every plan again.",
+        "section": "components"
+      },
+      {
+        "name": "The Dash Rule",
+        "body": "An unknown value is an em dash (—) with an empty meter and dark lead lights, never a zero and never the last known number.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do keep every key except STOP a charcoal cap with 4px corners, a 1px rim and a 2px hard bottom edge, lit amber only while it is held.",
+      "Do print group and setting names as uppercase legends (11px, 600, 0.08em, Printed Grey), and channel names on their tape (12px, 700, uppercase, Marker Black).",
+      "Do give each joint its tape colour, in joint order, on its scribble strip, meter column and 3D ring only.",
+      "Do show a commanded value only while the joint or axis is still travelling to it: a hollow amber frame on the meter, amber lead lights counting the steps to go, an amber \"→ value\" line and, for joints, the amber shadow arm. A staged angle is planned, not commanded: a dashed frame and a grey \"→ value\" until Move sends it.",
+      "Do keep the 3D monitor a sunk screen in the desk, with the joints' own rings, or the gizmo at the flange, as its controls.",
+      "Do colour the gizmo's axes red, green and blue (X, Y, Z) over a Well Black rim, and still name its axes and rings with printed letters; light a dragged arrow amber, and draw a ring's turn in amber.",
+      "Do set the floating readout just outside the ring, outward from its centre (and, for a fader drag, away from the links that follow), so it never covers the ring or its arc.",
+      "Do keep STOP the biggest key, red, at the top-right of the sticky bridge, with its keyboard shortcuts printed on it.",
+      "Do set step and speed on detented faders that can only rest on values the arm accepts, with the value above and the range printed under the ends; start the speeds slow every time.",
+      "Do print a redline on the speed faders, like a speedometer's red zone with its figures, wherever the flange could pass 250 mm/s, and let the joint speed redline follow the arm's pose and any staged plan, whichever is lower.",
+      "Do make each state-window tone differ from the others in brightness as well as hue.",
+      "Do draw the focus ring in Legend Ink (2px, 2px offset; tight around a fader's slot).",
+      "Do put displays in recessed wells, and keep sections and strips flat with 1px seams.",
+      "Do keep text at 4.5:1 or better against its ground, as every built pair does except Printed Grey on key caps and STOP's dimmed sub-line."
+    ],
+    "donts": [
+      "Don't float grey round buttons over a 3D view of the arm, as Umbratek Studio's Live Control does.",
+      "Don't make any key round or pill-shaped; only lamps and the 3D monitor's rings are round.",
+      "Don't use the axis colours anywhere but the gizmo and its legend sample, or let them report state: a dragged arrow lights amber and a blocked move goes Alarm Red, as everywhere.",
+      "Don't give any key but STOP a red face; a refused key gets a red ring and legend on a darkened cap.",
+      "Don't wash the 3D scene red for a blocked move; a red contact mark and a red overlay on the part it would hit say where.",
+      "Don't use amber for focus or decoration; it means a held key or motion.",
+      "Don't use green or red as decoration, or tape colours for state.",
+      "Don't make lights glow; lamps, lead lights, rings and lit windows are flat, and the only coloured shadows are hard 2px rings.",
+      "Don't show a zero or the last known number when a value is unknown; show an em dash and an empty meter.",
+      "Don't add a second type family or proportional figures.",
+      "Don't put shadows on sections or strips; shadows belong to keys, fader caps, wells, the sticky bridge, the floating readout and the plan bar."
+    ]
+  }
+}

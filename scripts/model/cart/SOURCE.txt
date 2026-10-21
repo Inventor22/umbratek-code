@@ -1,0 +1,23 @@
+The aluminium-extrusion cart the UTRA 6-1000 stands on, for the jog panel's 3D view and collision checks.
+
+Source: Dustin's SolidWorks assembly "UTRA 1000 Aluminum Extrusion Assembly.SLDASM" in
+https://github.com/Inventor22/umbratek-cad (folder "Utra 1000", last changed in commit 1aec164),
+read with SolidWorks 2026 (3DEXPERIENCE R2026x) through its COM API, without saving anything back:
+one STL per component in assembly coordinates, plus each component's placement.
+
+Frame: everything is in the arm's URDF base_link frame (z up; origin at the centre of the base's
+mounting face, where the base meets the mounting plate). The assembly's 1000-BASE part is lined up with
+Umbratek's URDF base: its cylinder axis and mounting face come from the part's own geometry, and its turn
+about that axis is the best fit of the two base meshes (1.2 mm mean gap; the next best, 180 degrees off,
+is 1.7 mm). So the arm stands on the cart as it does in the CAD; if the real arm was mounted turned on its
+plate, the cart will look turned in the 3D view relative to the real one.
+
+utra_cart.urdf:
+  - visual: meshes/frame.STL (extrusions, brackets, plate, plank, screws), meshes/casters.STL and
+    meshes/controller.STL (the NTRO controller), lightly decimated by vertex clustering (1.5 mm for the
+    frame, 4 mm for the casters and controller).
+  - collision: one box per part along the part's own axes, tight around its mesh; the round mounting plate
+    is a cylinder (85 mm radius, 12.7 mm thick). Collision names are what the jog panel's messages call
+    each part. The floor is a thin box whose top touches the bottoms of the casters, 730 mm below the
+    base's mounting face.
+  - The arm's own parts in the assembly, and the hidden "5kg cube" weights, are left out.
