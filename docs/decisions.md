@@ -115,3 +115,49 @@ Each is marked unverified in `tools/utra_sim.py` and gets a morning test:
 - **Alternatives:** command-line fault flags only (can't act mid-test, as a hand or a machine's signal does).
 - **Why:** teaching, I/O waits and recovery can't be tested without something outside the controller acting. Nothing
   in `scripts/` may use it.
+
+## D13. Build order: kinematics, frames, moves, programs, teaching
+
+- **Decision:** as `docs/capabilities.md` section 7: server-side kinematics (K1); tools, frames, calibration and
+  keep-out zones (F1 to F4); straight and relative moves with supervision (M2 to M5); the program model, runner, event
+  log and I/O steps (P1 to P5, S2, A1); freedrive and recording targets (T1, T2).
+- **Alternatives:** teaching first (it would have nothing to record into); I/O after teaching (every job needs I/O
+  steps, and they cost little once the runner exists).
+- **Why:** each needs the ones before it; the brief's expected order holds, with I/O folded into the runner.
+
+## D14. The tool point is applied on the PC; the controller's tool offset stays zero
+
+- **Decision:** tools (tool point, payload, shape) live in `cell/cell.json`. Targets are tool-point poses; the server
+  converts them to flange poses (target x inverse(tool)) and sends flange poses. The controller's offset stays zero,
+  so its reported pose stays the flange's, which our kinematics matches in every captured frame. The payload is sent
+  to the controller (`set_tcp_load`), since its dynamics and collision detection need it.
+- **Alternatives:** set the controller's offset to the active tool (`set_tcp_offset`): its lines would then be
+  straight for the tool point even while turning, but the offset's convention is undocumented and unmeasured, and the
+  reported pose's meaning would change with it.
+- **Why:** everything stays on measured ground. A translation-only line of the flange is a straight line of the tool
+  point; lines that also turn are split by the planner into segments short enough that the tool point stays within
+  0.1 mm of its line (checked). Revisit after the morning test of the offset's convention.
+
+## D15. The cell is stored as JSON in `cell/`, one file for the cell and one per program
+
+- **Decision:** `cell/cell.json` (tools, frames, targets, zones) and `cell/programs/<name>.json`, written atomically
+  (a temporary file, then a rename), each with a revision number; run logs in `cell/logs/`. `--cell DIR` picks
+  another folder. Git ignores `cell/`.
+- **Alternatives:** SQLite (opaque to the owner, who may want to read or diff a program); one file for everything
+  (every program edit would rewrite the cell).
+- **Why:** readable, diffable, and the owner can put it under version control if he likes. The revision number stops
+  two browser tabs from overwriting each other.
+
+## D16. Poses are stored with roll, pitch and yaw in degrees
+
+- **Decision:** `{"xyz": [mm], "rpy": [deg]}`, R = Rz(yaw) Ry(pitch) Rx(roll), as the controller reports and the panel
+  shows. Quaternions only inside interpolation.
+- **Alternatives:** quaternions (RAPID's choice; unreadable to the owner), rotation vectors.
+- **Why:** the owner reads these numbers in the panel and the controller's own displays; the conversions are checked
+  against SciPy.
+
+## D17 to D19: from the study of RAPID, UR, PLCopen and behaviour trees
+
+Recorded with their reasons in `docs/capabilities.md` section 4: fine points only, no fly-by zones or blends (D17);
+a UR-like tree of steps with PLCopen's step outcomes and Stop/Halt distinction (D18); behaviour trees' step results
+and Retry/Fallback adopted for later, their reactive ticking rejected (D19).
