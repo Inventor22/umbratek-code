@@ -1,0 +1,4 @@
+{"t": "2026-10-21T12:48:55.049", "event": "run.start", "program": "check", "mode": "run", "override": 50, "manual": false}
+{"t": "2026-10-21T12:48:55.050", "event": "step.start", "id": "s1", "type": "move", "text": "Joint move to home", "path": "1"}
+{"t": "2026-10-21T12:48:55.061", "event": "move.planned", "text": "Joint move to home at 10\u00b0/s, about 0.1 s", "durationS": 0.09, "path": "1"}
+{"t": "2026-10-21T12:48:55.075", "event": "run.faulted", "reason": "step 1: the controller rejected the move (code -3)", "path": "1"}

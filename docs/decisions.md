@@ -345,9 +345,9 @@ Decided on the arm, 2026-10-21, before the program tests.
 - **Decision:** for sessions at the arm, the controller is cabled to the router (192.168.1.43 here) and the server
   runs against that address.
 - **Alternatives:** the controller's own Wi-Fi (NTRO_43, 192.168.2.1), as overnight.
-- **Why:** on Wi-Fi, stalls of 1 to 3 s came about every 100 s; two caused SDK reply timeouts (code -3), one of
-  which also lost a STOP's reply ("STOP NOT CONFIRMED", cleared with the E-stop). On the cable: exactly 100 frames in
-  every 10 s. The cost: on the home network the controller's command port and Umbratek's dashboard are open to every
+- **Why:** on Wi-Fi the status stream dropped out for about 3 s every 33 s (the afternoon's recording, 12:09 to
+  13:15); two drop-outs caused SDK reply timeouts (code -3), one of which also lost a STOP's reply ("STOP NOT
+  CONFIRMED", cleared with the E-stop). On the cable: no gaps at all, 100 frames in every 10 s. The cost: on the home network the controller's command port and Umbratek's dashboard are open to every
   device there, with no password.
 
 ## D39. A joint past its limit is recovered by hand, one brake at a time

@@ -1,0 +1,17 @@
+{"t": "2026-10-21T15:23:41.371", "event": "run.start", "program": "Taught", "mode": "run", "override": 50, "manual": false}
+{"t": "2026-10-21T15:23:41.373", "event": "step.start", "id": "s1", "type": "move", "text": "Straight line to p1", "path": "1"}
+{"t": "2026-10-21T15:23:44.474", "event": "move.planned", "text": "Straight line to p1, 518.8 mm turning 105.1\u00b0, at 25 mm/s, about 21.0 s", "durationS": 20.99, "path": "1"}
+{"t": "2026-10-21T15:23:44.477", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "1"}
+{"t": "2026-10-21T15:24:05.466", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 21.0, "path": "1"}
+{"t": "2026-10-21T15:24:05.467", "event": "step.done", "id": "s1", "seconds": 24.09, "path": "1"}
+{"t": "2026-10-21T15:24:05.468", "event": "step.start", "id": "s2", "type": "move", "text": "Straight line to p2", "path": "2"}
+{"t": "2026-10-21T15:24:06.446", "event": "move.planned", "text": "Straight line to p2, 177.0 mm turning 12.0\u00b0, at 25 mm/s, about 7.3 s", "durationS": 7.31, "path": "2"}
+{"t": "2026-10-21T15:24:06.447", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "2"}
+{"t": "2026-10-21T15:24:13.813", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 7.36, "path": "2"}
+{"t": "2026-10-21T15:24:13.814", "event": "step.done", "id": "s2", "seconds": 8.34, "path": "2"}
+{"t": "2026-10-21T15:24:13.814", "event": "step.start", "id": "s3", "type": "move", "text": "Straight line to p3", "path": "3"}
+{"t": "2026-10-21T15:24:17.466", "event": "move.planned", "text": "Straight line to p3, 638.8 mm turning 94.9\u00b0, at 25 mm/s, about 25.8 s", "durationS": 25.79, "path": "3"}
+{"t": "2026-10-21T15:24:17.468", "event": "move.sent", "segment": 1, "of": 1, "speed": 25.0, "path": "3"}
+{"t": "2026-10-21T15:24:43.293", "event": "move.arrived", "segment": 1, "of": 1, "seconds": 25.83, "path": "3"}
+{"t": "2026-10-21T15:24:43.294", "event": "step.done", "id": "s3", "seconds": 29.49, "path": "3"}
+{"t": "2026-10-21T15:24:43.295", "event": "run.done", "seconds": 61.92}

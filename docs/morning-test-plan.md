@@ -7,8 +7,8 @@ it passed. About 2 to 2.5 hours.
 
 Every result goes in the sheet at the end and in `data/captures/2026-10-21-tests/` (the commands below write there).
 
-**Run on 2026-10-21, 11:00 to 15:00,** with the owner at the arm: MT-1, 2, 3, 7 and 9 passed, after fixes the arm
-made necessary (decisions D32 to D39); MT-8 is next; MT-4, 5, 6 and 10 wait for their equipment. The sheet at the
+**Run on 2026-10-21, 11:00 to 15:00,** with the owner at the arm: MT-1, 2, 3, 7, 8 and 9 passed, after fixes the arm
+made necessary (decisions D32 to D39); MT-4, 5, 6 and 10 wait for their equipment. The sheet at the
 end has the numbers. From 13:15 the controller was cabled to the home network (192.168.1.43), which the plan below
 now recommends (D38).
 Anything that surprises you: press STOP (or the hardware E-stop), write down what happened, and skip to the next
@@ -309,14 +309,14 @@ assumption (flange frame, mm and rpy), `tests/sim_tests.py` live_registers.
 
 | Test | Result (numbers) | Pass? | Notes |
 | ---- | ---------------- | ----- | ----- |
-| MT-1 frames in 10 s, spread, tau at rest, sensitivities, payload | 100 frames / 10 s on the cable (Wi-Fi: 1 to 3 s stalls about every 100 s); joints held within 0.005°; tau exactly 0 with the motors off; at rest J1 -5.13, J2 +0.10, J3 -23.94, J4 +2.27, J5 +0.80, J6 -0.82; collision and teach sensitivity 0, payload and offset 0 after power-on | Pass | tau is servo-side; holding values depend on how the arm got there (J2 5.5 last night at the same pose) |
+| MT-1 frames in 10 s, spread, tau at rest, sensitivities, payload | 100 frames / 10 s on the cable (Wi-Fi: a 3 s gap every 33 s); joints held within 0.005°; tau exactly 0 with the motors off; at rest J1 -5.13, J2 +0.10, J3 -23.94, J4 +2.27, J5 +0.80, J6 -0.82; collision and teach sensitivity 0, payload and offset 0 after power-on | Pass | tau is servo-side; holding values depend on how the arm got there (J2 5.5 last night at the same pose) |
 | MT-2 enable shift (mm), STOP overrun (°) | enable 0.468 mm (J3 +0.057°; simulator 0.456); STOP from J1 at -10 °/s: 0.167° past (16.6 ms), stopped in the next frame, settled within 0.3 s | Pass | J3 gains about 0.055° at every "ready"; the simulator's fixed-time STOP model doesn't scale with speed (capture: 6.4 ms at 30 °/s) |
 | MT-3 dry-run estimate vs real (s); line times vs estimates; turn step time; pause regain offset (mm); stop; zone fault | estimate 9.8 s; at 20%: b line 25.09 planned / 25.12 s, back to a 10.19 / 10.28, home 2.03 / 2.06, 10° turn 1.9 / 1.44; at 50%: 18.66 s; pause regain 0.511 mm, rest of line 15.33 / 15.29 s; within 0.40 mm of the line while moving; stop 39 ms; zone fault at step 3, 94 mm along the line | Pass | after D32 (arrival tolerance) and D33 (status slots); two Wi-Fi faults led to D38; the controller paces pure turns faster than the planner assumes |
 | MT-4 tau ratios J2, J3, J4; scale and sign; empty vs empty2 | not run | | needs the 1 kg mass |
 | MT-5 tool point (mm), RMS, repeat difference | not run | | needs the pointer and spike |
 | MT-6 landing before and after moving the plate (mm) | not run | | needs the plate |
-| MT-7 freedrive: drift, feel, by sensitivity | with the probe: 0, 90, 100 and 110 all entered; hands off within 0.07 mm over 18.6 s (0), 0.29 mm / 22 s and 0.49 mm / 54 s (100); guided at up to 290 mm/s with no error; STOP rigid in mode 2; leaving: motors off, J3 +0.43° | Pass (probe); panel re-test pending | 0 and 90 stop where released; 100 and 110 lighter at shoulder and elbow, which sinks back a few degrees; wrist 1 turned to 358° faulted (error 23), recovered by D39 |
-| MT-8 taught passes over marks (mm) | | | |
+| MT-7 freedrive: drift, feel, by sensitivity | with the probe: 0, 90, 100 and 110 all entered; hands off within 0.07 mm over 18.6 s (0), 0.29 mm / 22 s and 0.49 mm / 54 s (100); guided at up to 290 mm/s with no error; STOP rigid in mode 2; leaving: motors off, J3 +0.43° | Pass (probe, then the panel at 15:04: in and out in 0.3 s each) | 0 and 90 stop where released; 100 and 110 lighter at shoulder and elbow, which sinks back a few degrees; wrist 1 turned to 358° faulted (error 23), recovered by D39 |
+| MT-8 taught passes over marks (mm) | three points taught by freedrive (no plate today); at 20% and 50% every target reached within 0.26 mm and 0.06°; line times within 0.05 s of the plan (52.2, 17.9, 64.1 s at 20%) | Pass | the lines' straightness from the status stream: up to 0.58 mm at 20% but 0.0001 mm at 50%, which suggests the stream reports the commanded path while moving: not evidence of the physical path (open question) |
 | MT-9 page closed: DONE, log complete | DONE in 18.88 s, all 6 steps logged (133132-check.jsonl) | Pass | |
 | MT-10 level 1 to 5: trip force still / moving (N), error code, false trips | not run | | needs the spring scale and foam |
 | MT-11 I/O | not run | | |

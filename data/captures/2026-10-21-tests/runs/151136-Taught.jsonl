@@ -1,0 +1,13 @@
+{"t": "2026-10-21T15:11:36.260", "event": "run.start", "program": "Taught", "mode": "dry", "override": 100, "manual": false}
+{"t": "2026-10-21T15:11:36.261", "event": "step.start", "id": "s1", "type": "move", "text": "Straight line to p1", "path": "1"}
+{"t": "2026-10-21T15:11:39.063", "event": "move.planned", "text": "Straight line to p1, 520.1 mm turning 105.4\u00b0, at 50 mm/s, about 10.8 s", "durationS": 10.76, "path": "1"}
+{"t": "2026-10-21T15:11:39.064", "event": "step.done", "id": "s1", "seconds": 2.8, "path": "1"}
+{"t": "2026-10-21T15:11:39.064", "event": "step.start", "id": "s2", "type": "move", "text": "Straight line to p2", "path": "2"}
+{"t": "2026-10-21T15:11:39.924", "event": "move.planned", "text": "Straight line to p2, 176.9 mm turning 12.1\u00b0, at 50 mm/s, about 3.9 s", "durationS": 3.9, "path": "2"}
+{"t": "2026-10-21T15:11:39.925", "event": "step.done", "id": "s2", "seconds": 0.86, "path": "2"}
+{"t": "2026-10-21T15:11:39.925", "event": "step.start", "id": "s3", "type": "move", "text": "Straight line to p3", "path": "3"}
+{"t": "2026-10-21T15:11:43.535", "event": "move.planned", "text": "Straight line to p3, 639.1 mm turning 94.9\u00b0, at 50 mm/s, about 13.1 s", "durationS": 13.14, "path": "3"}
+{"t": "2026-10-21T15:11:43.535", "event": "step.done", "id": "s3", "seconds": 3.61, "path": "3"}
+{"t": "2026-10-21T15:11:43.536", "event": "run.done", "seconds": 7.28, "estimateS": 27.8}
+{"t": "2026-10-21T15:14:20.586", "event": "operator", "action": "override", "percent": 30}
+{"t": "2026-10-21T15:14:22.314", "event": "operator", "action": "override", "percent": 20}
