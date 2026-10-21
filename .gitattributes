@@ -1,0 +1,2 @@
+# Captured data is stored byte for byte, exactly as the capture tools wrote it.
+data/captures/** -text
