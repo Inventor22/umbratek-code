@@ -274,4 +274,91 @@ and Retry/Fallback adopted for later, their reactive ticking rejected (D19).
   `"fullSpeed": true`.
 - **Alternatives:** start at a slow override every time, as the jog speed faders do.
 - **Why:** a program's speeds are chosen when it's written; the override is for trying a program slower. The
-  reduced-speed cap is the standing guard. The test plan runs new programs at 25% first.
+  reduced-speed cap is the standing guard. The test plan runs new programs at 20% first (the fader's
+  detents are 10% apart).
+
+## D32. Straight lines arrive within 1.0 mm and 0.3°
+
+Decided on the arm, 2026-10-21, before the program tests.
+- **Decision:** the executor counts a straight line as arrived within 1.0 mm and 0.3° of its goal (it was 0.2 mm and
+  0.1°).
+- **Alternatives:** keep the tight limit and retry the last millimetre; a limit per move.
+- **Why:** the capture's 24 lines came to rest a median 0.21 mm (at most 0.47 mm and 0.125°) from their goals, so
+  the old limit would have faulted most real lines. `tests/capture_tests.py` checks the tolerance against them.
+
+## D33. Enable measures the joints from the server's own status stream
+
+- **Decision:** Enable's checks (`arm.preflight`, `arm.verified_targets`) take the measured joints from a frame of
+  the server's own 10 Hz stream that arrived after the check began, not from a new status connection.
+- **Alternatives:** retry the connection; hold a second status connection open.
+- **Why:** the controller serves at most five clients on port 30001 (Umbratek's SDK readme) and frees closed ones
+  slowly; on the arm, Enable's extra connections filled the slots and it failed with "the controller closed the
+  status connection". The simulator's `--report-clients` and the feature test scenario_status_slots reproduce it.
+
+## D34. Freedrive follows Umbratek's order: settings, then ready, then mode 2
+
+- **Decision:** to enter freedrive the server writes the teach sensitivity only if it differs from the controller's,
+  makes the arm ready through Enable's checked sequence if it's stopped, then selects motion mode 2, and counts
+  freedrive as on only once a later status frame shows mode 2, not stopped, no error. Freedrive is refused from
+  anything but a still, ready arm with every motor on.
+- **Alternatives:** (a) set_motion_mode(2) after the sensitivity, as overnight; (b) Umbratek's sequence for position
+  mode (mode, enable, ready) after a STOP, as tried this morning. Both failed on the arm.
+- **Why:** step by step on the arm (`tools/capture/teach_probe.py`, logged in
+  `data/captures/2026-10-21-tests/teach_probe.jsonl`): writing the teach sensitivity stops the arm; mode 2 is ignored
+  while it's stopped, which is why (a) and (b) failed; from ready, mode 2 is taken at once and the arm reports
+  state 1. Umbratek's current SDK readme gives the same order (load, offset, mounting and sensitivity; enable; ready;
+  mode), and the controller's own dashboard refuses "Joint Tech" while the arm is stopped.
+
+## D35. Teach sensitivity is 90, 100 or 110 %, 90 by default, and fixed during freedrive
+
+- **Decision:** the panel offers 90, 100 and 110 %, default 90, and the server refuses a change while in freedrive
+  (leave, then enter again).
+- **Alternatives:** 1 to 5 (the pinned SDK's docstring); 100 (Umbratek's stated default); 0 (the controller's value
+  at power-on, which neither SDK documents); changing it live.
+- **Why:** Umbratek's current SDK documents 90 to 110 %. On the arm, 0 and 90 moved easily and stopped where the hand
+  let go (within 0.07 mm over 18 s, hands off); at 100 and 110 the shoulder and elbow were lighter, but a raised elbow
+  sank back a few degrees; base and wrist joints felt the same at all four. For placing points, holding where
+  released matters most. The levels 1 to 5 were never tried in the right order, so they stay unknown. The
+  sensitivity write stops the arm, so a live change would end freedrive anyway.
+
+## D36. Leaving freedrive switches the motors off; Enable then runs, unless nobody may be there
+
+- **Decision:** leaving freedrive selects mode 0, which on this controller switches the motors off onto their brakes
+  (J3 settles about 0.45°, 0.43 measured), then runs Enable's checked sequence. When freedrive times out after 10
+  minutes, the motors stay off. STOP in freedrive sends STOP (the arm holds rigid, still in mode 2) and then mode 0,
+  so it too ends with the motors off.
+- **Alternatives:** STOP and stay in mode 2, holding (what a later "ready" does then is untested, and might free the
+  arm unexpectedly); leave the motors off every time (one more hold of Enable for the user).
+- **Why:** it's the controller's own exit, measured on the arm. Re-enabling on the user's explicit request, with
+  Enable's no-jump checks, keeps teach-then-test quick. A timeout may mean nobody is at the arm, so it doesn't
+  re-energise anything. Targets recorded in freedrive are taken before the settle, so they're unaffected.
+
+## D37. Enable checks that the controller is in position mode afterwards
+
+- **Decision:** Enable fails, and stops the arm, if a status frame from after it reports any motion mode but 0.
+- **Alternatives:** trust the sequence.
+- **Why:** after this morning, mode changes are known to be refused silently in some states. A ready arm in the wrong
+  mode, free or rigid, is what the panel must never assume away.
+
+## D38. Test sessions use the controller on the home network, by cable
+
+- **Decision:** for sessions at the arm, the controller is cabled to the router (192.168.1.43 here) and the server
+  runs against that address.
+- **Alternatives:** the controller's own Wi-Fi (NTRO_43, 192.168.2.1), as overnight.
+- **Why:** on Wi-Fi, stalls of 1 to 3 s came about every 100 s; two caused SDK reply timeouts (code -3), one of
+  which also lost a STOP's reply ("STOP NOT CONFIRMED", cleared with the E-stop). On the cable: exactly 100 frames in
+  every 10 s. The cost: on the home network the controller's command port and Umbratek's dashboard are open to every
+  device there, with no password.
+
+## D39. A joint past its limit is recovered by hand, one brake at a time
+
+- **Decision:** a documented procedure, not a panel feature: switch off only that joint's motor
+  (`set_motion_enable(n, 0)`, numbering from 1, and check the enable mask shows just that joint off), release only its
+  brake for a bounded time, with a guard that re-engages it on the wrong direction, and turn it back by hand inside
+  the limit; then freedrive for the rest.
+- **Alternatives:** Umbratek's newer limit switch (LIMIT_FUN, register 0x49), which this firmware doesn't answer;
+  servo commands over the RS485 pass-through; asking Umbratek.
+- **Why:** wrist 1 turned by hand in freedrive to 358° faulted (error 23, "Mechanical angle limit"). From then on
+  every "ready" raised it again, freedrive was refused while it was flagged, and a move back was rejected. The
+  procedure brought it back on the arm. It needs a person holding the joint and is rare, so it stays out of the
+  panel; the README describes it.

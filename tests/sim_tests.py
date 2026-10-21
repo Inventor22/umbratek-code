@@ -421,28 +421,73 @@ def live_registers():
         st_c, cin = arm.get_cgpio_in()
         check("inputs set on the control port read back through the SDK", tin[1] == 1 and cin[1] == 8, (tin, cin))
 
+        # Freedrive as the real arm did it (2026-10-21, data/captures/2026-10-21-tests/teach_probe.jsonl).
         enabled(arm)
         wait_state(ctl, lambda s: s["status"] in (0, 2))
-        arm.set_motion_mode(2)
         start = ctl(cmd="state")["joints"]
         goal = [a + d for a, d in zip(start, (10, -5, 8, 0, 15, -20))]
+        arm.set_teach_sens(90)
+        s = ctl(cmd="state")
+        check("writing the teach sensitivity stops a ready arm, as on the arm", s["status"] == 4
+              and s["config"]["teach_sens"] == 90, (s["status"], s["config"]["teach_sens"]))
+        arm.set_motion_mode(2)
+        s = ctl(cmd="state")
+        r = ctl(cmd="hand", joints=goal, seconds=0.3)
+        check("mode 2 is ignored while stopped (both of the server's first tries on the arm), so the hand can't move it",
+              s["mode"] == 0 and s["status"] == 4 and not r["ok"], (s["mode"], s["status"], r))
+        arm.set_motion_status(0)
+        wait_state(ctl, lambda s: s["status"] in (0, 2))
+        arm.set_motion_mode(2)
+        s = ctl(cmd="state")
+        check("from ready, mode 2 is taken at once, and the arm reports state 1 (moving), as on the arm",
+              s["mode"] == 2 and s["status"] == 1 and s["enable"] == 63, (s["mode"], s["status"]))
         r = ctl(cmd="hand", joints=goal, seconds=0.6)
         s = wait_state(ctl, lambda s: max(abs(a - b) for a, b in zip(s["joints"], goal)) < 1e-6, timeout=3)
-        check("freedrive (motion mode 2, teach sensitivity 2): the hand moves the arm", r["ok"]
-              and max(abs(a - b) for a, b in zip(s["joints"], goal)) < 1e-6, (r, s["joints"]))
+        check("and the hand moves the arm", r["ok"] and max(abs(a - b) for a, b in zip(s["joints"], goal)) < 1e-6,
+              (r, s["joints"]))
         target = [math.radians(v + 5) for v in goal]
         arm.moveto_joint_p2p(target, math.radians(10), math.radians(100), 0)
         time.sleep(0.3)
         check("motion commands are refused in freedrive", "discarded" in open(log).read().splitlines()[-1]
               and not ctl(cmd="state")["moving"])
-        arm.set_motion_mode(0)
+        arm.set_motion_status(4)
+        s = ctl(cmd="state")
         r = ctl(cmd="hand", joints=start, seconds=0.3)
-        check("out of freedrive the hand can't move it", not r["ok"])
-        arm.set_teach_sens(0)
+        check("STOP holds the arm rigid, still in mode 2 with the motors on, as on the arm", s["status"] == 4
+              and s["mode"] == 2 and s["enable"] == 63 and not r["ok"], (s["status"], s["mode"], s["enable"], r))
+        before = ctl(cmd="state")["joints"]
+        arm.set_motion_mode(0)
+        s = ctl(cmd="state")
+        check("leaving mode 2 switches the motors off, and J3 settles 0.45 deg onto its brake (0.43 on the arm)",
+              s["mode"] == 0 and s["enable"] == 0 and s["status"] == 4 and abs(s["joints"][2] - before[2] - 0.45) < 1e-6,
+              (s["mode"], s["enable"], s["joints"][2] - before[2]))
+        enabled(arm)
+        s = wait_state(ctl, lambda s: s["status"] in (0, 2))
+        check("Enable's sequence makes it ready in position mode again", s["mode"] == 0 and s["enable"] == 63
+              and s["status"] in (0, 2), (s["mode"], s["enable"], s["status"]))
+        arm.set_motion_mode(2)
+        far = list(ctl(cmd="state")["joints"])
+        far[3] = 400.0
+        ctl(cmd="hand", joints=far, seconds=0.3)
+        s = wait_state(ctl, lambda s: s["err"] == 23, timeout=3)
+        check("wrist 1 pushed past its limit by hand: error 23 with the motors off, out of freedrive (as at 358 deg)",
+              s["err"] == 23 and s["enable"] == 0 and s["mode"] == 0 and abs(s["joints"][3] - 358.85) < 0.01,
+              (s["err"], s["enable"], s["mode"], s["joints"][3]))
         arm.set_motion_mode(2)
         r = ctl(cmd="hand", joints=start, seconds=0.3)
-        check("teach sensitivity 0 (as captured): the arm holds against the hand (unverified on the arm)", not r["ok"], r)
+        check("and with the error flagged freedrive holds: mode 2 is taken, the arm isn't free",
+              ctl(cmd="state")["mode"] == 2 and not r["ok"], r)
         arm.set_motion_mode(0)
+        enabled(arm)
+        wait_state(ctl, lambda s: s["status"] in (0, 2))
+        arm.set_motion_enable(4, 0)
+        check("joints are switched by number, from 1: (4, off) switches off just J4, as on the arm",
+              ctl(cmd="state")["enable"] == 0b110111, ctl(cmd="state")["enable"])
+        enabled(arm)
+        home = list(ctl(cmd="state")["joints"])
+        home[3] = 0.0
+        arm.moveto_joint_p2p([math.radians(v) for v in home], math.radians(100), math.radians(200), 0)
+        wait_state(ctl, lambda s: not s["moving"] and s["status"] == 2, timeout=10)
 
         q = ctl(cmd="state")["joints"]
         target = [math.radians(v) for v in q]

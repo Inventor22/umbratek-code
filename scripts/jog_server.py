@@ -117,6 +117,12 @@ SYNC_TOLERANCE_DEG = 1.0
 # others turn about +/-359 deg; plans stay within the faders' +/-180 deg.
 DRAG_LIMITS_DEG = plannermod.DRAG_LIMITS_DEG
 FREEDRIVE_MAX_S = 600.0  # freedrive ends on its own after this long
+FREEDRIVE_CONFIRM_S = 2.0  # how long the controller has to report a change of motion mode once asked
+# The teach sensitivity, in % as Umbratek's current SDK documents it (90 to 110, 100 its default). On the arm
+# (2026-10-21) 90 held where the hand let go; 100 and 110 made the shoulder and elbow lighter, but a raised elbow sank
+# back a few degrees. The controller boots at 0, which felt like 90; the pinned SDK's 1 to 5 was never tried.
+TEACH_SENSITIVITIES = (90, 100, 110)
+TEACH_SENSITIVITY_DEFAULT = 90
 MAX_BODY_BYTES = 262144  # programs can be long
 
 
@@ -127,6 +133,12 @@ def wrap(angle):
 
 def rounded(values, digits):
     return [round(v, digits) if math.isfinite(v) else None for v in values]
+
+
+def in_freedrive(frame):
+    """Whether a status frame shows the arm free to guide: mode 2, not stopped, no error. The real arm reports state 1
+    then; stopped in mode 2 it holds rigid, and with an error flagged it holds too (2026-10-21)."""
+    return frame["mode"] == 2 and frame["status"] != 4 and not frame["err"]
 
 
 def pick(value, allowed, name):
@@ -248,6 +260,17 @@ class Panel:
     def _busy(self, frame):
         return frame["status"] == 1 or frame["queued"] > 0 or time.monotonic() - self.sent_at < BUSY_AFTER_SEND_S
 
+    def _await_frame(self, since, test, timeout_s):
+        """The first status frame to arrive after `since` (monotonic) that passes `test`, or None after timeout_s."""
+        deadline = since + timeout_s
+        while True:
+            frame, at = self.frame, self.frame_at
+            if frame is not None and at > since and test(frame):
+                return frame
+            if time.monotonic() > deadline or self.closing:
+                return None
+            time.sleep(0.02)
+
     def _say(self, text, ok=True):
         self.note, self.note_ok = text, ok
         return text
@@ -287,7 +310,7 @@ class Panel:
         out["run"] = {k: run[k] for k in ("state", "mode", "manual", "program", "path", "step", "reason", "override",
                                           "halt", "hit")}
         out["run"]["lastEvent"] = run["events"][-1] if run["events"] else None
-        out["freedrive"] = frame["mode"] == 2
+        out["freedrive"] = in_freedrive(frame)
         out["teachSensitivity"] = self.teach_level  # what this server last set for freedrive (None before)
         out["mode"] = frame["mode"]
         out["cellRevision"] = self.cell.revision
@@ -314,6 +337,9 @@ class Panel:
             def switch_on():
                 arm.prepare_for_motion(self.arm, self.axis)
                 arm.verified_targets(self.arm, self.ip, self.axis, start, measured=self._live_joints)
+                if self.frame["mode"] != 0:  # the frame _live_joints waited for, from after the switch-on
+                    raise arm.ArmError(f"After Enable the controller reports motion mode {self.frame['mode']}, not "
+                                       "position mode (0).")
 
             arm.guarded(self.ip, self.arm, switch_on, STOP_LOCK_WAIT_S)
             self.goal_kind = self.goal = None
@@ -459,39 +485,83 @@ class Panel:
                          "outputs": int(outs[1]) if isinstance(outs, list) else None}
         return out
 
-    def freedrive(self, on, sensitivity=1):
-        """Enter freedrive (motion mode 2, at a teach sensitivity of 1 to 5) or leave it."""
-        if on:
-            level = pick(sensitivity, (1, 2, 3, 4, 5), "teach sensitivity")
-            if self.runner.busy:
-                raise arm.ArmError("A program is running. Stop it before freedrive.")
-            with self.lock:
-                frame = self._fresh_frame()
-                if frame["err"] or self.stop_alarm:
-                    raise arm.ArmError("Clear the fault first (hold Enable).")
-                if frame["enable"] & self.mask != self.mask:
-                    raise arm.ArmError("The motors are off. Hold Enable first.")
-                if frame["status"] == 1 or self._busy(frame):
-                    raise arm.ArmError("The arm is moving. Wait for it to stop.")
-                if self.arm.set_teach_sens(int(level)) not in arm.OK_CODES or \
-                        self.arm.set_motion_mode(2) not in arm.OK_CODES:
-                    raise arm.ArmError("The controller refused freedrive.")
-            self.freedrive_since = time.monotonic()
-            self.teach_level = int(level)
-            return self._say(f"Freedrive on (sensitivity {level:g}): guide the arm by hand. Record targets as you go; "
-                             "leave freedrive or press STOP when done.")
-        with self.lock:
-            if self.arm.set_motion_mode(0) not in arm.OK_CODES:
-                raise arm.ArmError("The controller refused to leave freedrive. Press STOP.")
-        self.freedrive_since = None
+    def freedrive(self, on, sensitivity=None, reenable=True):
+        """Enter freedrive (motion mode 2, joint teaching) at a teach sensitivity in TEACH_SENSITIVITIES, or leave it.
+
+        Umbratek's order (their SDK's readme, and the controller's own dashboard): the settings first, then the motors on
+        and the arm ready, then mode 2. What this arm did (2026-10-21, tools/capture/teach_probe.py): writing the teach
+        sensitivity stops it; mode 2 is ignored while it's stopped, and taken at once from ready, after which it reports
+        state 1; STOP holds it rigid, still in mode 2; leaving mode 2 switches the motors off onto their brakes (J3
+        settles about 0.45 deg). So entering may run Enable's checked sequence first, and leaving runs it again after,
+        unless `reenable` is False (freedrive timing out, with nobody at the arm)."""
+        if not on:
+            return self._leave_freedrive(reenable)
+        level = pick(TEACH_SENSITIVITY_DEFAULT if sensitivity is None else sensitivity, TEACH_SENSITIVITIES,
+                     "teach sensitivity")
+        if self.runner.busy:
+            raise arm.ArmError("A program is running. Stop it before freedrive.")
         frame = self._fresh_frame()
-        targets = arm.target_joints(self.arm)
-        joint, diff = arm.worst_diff(targets, frame["joints"])
-        if diff > arm.MAX_JOINT_MISMATCH_DEG:
-            self.stop("the controller's targets didn't match the arm after freedrive")
-            raise arm.ArmError(f"After freedrive, J{joint}'s target is {diff:.1f}\u00b0 from where it is; stopped. "
-                               "Hold Enable to carry on.")
-        return self._say("Freedrive off: the arm holds its pose.")
+        if frame["err"] or self.stop_alarm:
+            raise arm.ArmError("Clear the fault first (hold Enable).")
+        if frame["mode"] == 2:
+            raise arm.ArmError("Already in freedrive: to change the sensitivity, leave freedrive first."
+                               if in_freedrive(frame) else "The arm is stopped in freedrive mode. Hold Enable first.")
+        if frame["enable"] & self.mask != self.mask:
+            raise arm.ArmError("The motors are off. Hold Enable first.")
+        if frame["status"] in (1, 3) or self._busy(frame):
+            raise arm.ArmError("The arm is moving. Wait for it to stop.")
+        with self.lock:
+            ret, current = self.arm.get_teach_sens()
+            written = None
+            if ret not in arm.OK_CODES or current != level:
+                written = time.monotonic()
+                if self.arm.set_teach_sens(int(level)) not in arm.OK_CODES:
+                    raise arm.ArmError("The controller refused the teach sensitivity.")
+        self.teach_level = int(level)
+        if written is not None:  # the write stops the arm: wait for that, then make it ready again
+            self._await_frame(written, lambda f: f["status"] == 4, 1.0)
+        if self._fresh_frame()["status"] == 4:
+            self.enable()  # Enable's checks (no jump) and sequence: ready in position mode
+        with self.lock:
+            frame = self._fresh_frame()
+            if frame["status"] not in (0, 2) or frame["mode"] != 0 or frame["err"]:
+                raise arm.ArmError(f"The arm isn't ready for freedrive (state {frame['status']}, mode {frame['mode']}, "
+                                   f"error {frame['err']}). Hold Enable, then try again.")
+            asked = time.monotonic()
+            ret = self.arm.set_motion_mode(2)
+        if ret not in arm.OK_CODES:
+            raise arm.ArmError(f"The controller refused freedrive (code {ret}); the arm holds, ready.")
+        frame = self._await_frame(asked, in_freedrive, FREEDRIVE_CONFIRM_S)
+        if frame is None:
+            self.stop("the controller didn't enter freedrive")  # and leaves mode 2 if it took it: motors off
+            last = self.frame or {}
+            raise arm.ArmError(f"The controller didn't enter freedrive (it reports state {last.get('status')}, mode "
+                               f"{last.get('mode')}, error {last.get('err')}); stopped. Hold Enable to carry on.")
+        self.freedrive_since = time.monotonic()
+        return self._say(f"Freedrive on (sensitivity {level}%): guide the arm by hand and record targets as you go. "
+                         "Leaving switches the motors off and on again.")
+
+    def _leave_freedrive(self, reenable):
+        frame = self._fresh_frame()
+        self.freedrive_since = None
+        if frame["mode"] != 2:
+            return self._say("Not in freedrive.")
+        with self.lock:
+            asked = time.monotonic()
+            ret = self.arm.set_motion_mode(0)
+        if ret not in arm.OK_CODES or self._await_frame(asked, lambda f: f["mode"] != 2, FREEDRIVE_CONFIRM_S) is None:
+            confirmed, _ = self.stop("the controller didn't confirm leaving freedrive")
+            if not confirmed:
+                raise arm.ArmError("STOP NOT CONFIRMED leaving freedrive: press the hardware E-stop now.")
+            raise arm.ArmError("The controller didn't confirm leaving freedrive; stopped. Hold Enable to carry on.")
+        if not reenable:
+            return self._say("Freedrive off: the motors are off and the arm rests on its brakes. Hold Enable to carry on.")
+        try:
+            self.enable()  # Enable's checks (no jump) and sequence: ready in position mode
+        except arm.ArmError as e:
+            raise arm.ArmError(f"Freedrive off; the motors are off and the arm rests on its brakes. {e}")
+        return self._say("Freedrive off: motors back on, ready to move. The arm settled onto its brakes first "
+                         "(about 0.5 mm); targets recorded in freedrive are unaffected.")
 
     def jog(self, body):
         """Move one step. Returns (moved, message)."""
@@ -684,8 +754,9 @@ class Panel:
             frame, sent_at = self.frame, self.sent_at
             if self.freedrive_since is not None and time.monotonic() - self.freedrive_since > FREEDRIVE_MAX_S:
                 try:
-                    self.freedrive(False)
-                    self._say(f"Freedrive ended on its own after {FREEDRIVE_MAX_S / 60:.0f} minutes.")
+                    self.freedrive(False, reenable=False)  # nobody may be there: the motors stay off
+                    self._say(f"Freedrive ended on its own after {FREEDRIVE_MAX_S / 60:.0f} minutes; the motors are "
+                              "off. Hold Enable to carry on.")
                 except arm.ArmError:
                     pass
                 self.freedrive_since = None
@@ -1064,7 +1135,7 @@ def api_post(panel, path, body):
         panel.write_output(body.get("output"), 1 if body.get("value") else 0)
         return {"ok": True, "io": panel.io_state(), "message": f"{body.get('output')} set to {1 if body.get('value') else 0}."}
     if path == "/api/freedrive":
-        return {"ok": True, "message": panel.freedrive(bool(body.get("on")), body.get("sensitivity", 1))}
+        return {"ok": True, "message": panel.freedrive(bool(body.get("on")), body.get("sensitivity"))}
     return None
 
 

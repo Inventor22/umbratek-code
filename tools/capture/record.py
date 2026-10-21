@@ -1,6 +1,6 @@
 """Record the controller's status stream (port 30001) and config stream (port 30003) to a folder until Ctrl+C, or for
 --seconds. It only listens: it sends the arm nothing, and runs alongside the jog panel (the controller serves a second
-client on 30001; capture 2026-10-21). It reconnects if the link drops.
+client on 30001; capture 2026-10-21). It reconnects if the link drops or goes silent for 5 s.
 
     python tools/capture/record.py data/captures/<folder> [--ip 192.168.2.1] [--seconds S]
 
@@ -18,6 +18,7 @@ import threading
 import time
 
 STREAMS = ((30001, "status10hz"), (30003, "config"))
+SILENT_S = 5.0  # both streams send 10 frames a second: this long without data means a dead link
 
 
 def record(ip, port, path, stop, counts, notes):
@@ -25,14 +26,19 @@ def record(ip, port, path, stop, counts, notes):
         try:
             with socket.create_connection((ip, port), timeout=3.0) as sock, open(path, "ab") as f:
                 sock.settimeout(0.5)
-                buf = b""
+                buf, heard = b"", time.monotonic()
                 while not stop.is_set():
                     try:
                         chunk = sock.recv(65536)
                     except socket.timeout:
+                        # A controller that loses power never closes the connection (2026-10-21), so reconnect
+                        # after silence rather than waiting for the socket to fail.
+                        if time.monotonic() - heard > SILENT_S:
+                            raise ConnectionError(f"no data on port {port} for {SILENT_S:g} s")
                         continue
                     if not chunk:
                         raise ConnectionError(f"the controller closed port {port}")
+                    heard = time.monotonic()
                     wall, mono = time.time_ns(), time.perf_counter_ns()
                     buf += chunk
                     while len(buf) >= 2:

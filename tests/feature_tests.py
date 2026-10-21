@@ -576,10 +576,14 @@ def scenario_teach():
         rig.enable()
         tool = setup_cell(rig)
         save_program(rig, {"name": "taught", "steps": [{"type": "move", "kind": "joint", "target": "home"}]})
-        r = rig.post("/api/freedrive", {"on": True, "sensitivity": 2})
+        r = rig.post("/api/freedrive", {"on": True, "sensitivity": 100})
         s = rig.wait(lambda s: s.get("freedrive"), 5)
-        check("freedrive on at sensitivity 2: the controller is in motion mode 2", r["ok"] and s["freedrive"]
-              and rig.ctl(cmd="state")["config"]["teach_sens"] == 2, r)
+        check("freedrive on at sensitivity 100 % (the write stops the arm, so Enable's sequence, then mode 2 from ready, "
+              "as on the arm): the controller reports mode 2 and state 1", r["ok"] and s["freedrive"] and s["mode"] == 2
+              and s["state"] == 1 and rig.ctl(cmd="state")["config"]["teach_sens"] == 100, (r, s.get("mode"), s.get("state")))
+        r = rig.post("/api/freedrive", {"on": True, "sensitivity": 110})
+        check("the sensitivity can't change in freedrive (the write would stop the arm)", not r["ok"]
+              and "leave freedrive first" in r["message"] and rig.ctl(cmd="state")["config"]["teach_sens"] == 100, r)
         r = rig.post("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 1.0, "speed": 10.0})
         check("jogs are refused in freedrive", not r["ok"] and "freedrive" in r["message"], r)
         r = rig.post("/api/run/start", {"name": "taught"})
@@ -605,9 +609,13 @@ def scenario_teach():
                                                                                        ("move", "picked", "line")],
               prog["steps"])
         r = rig.post("/api/freedrive", {"on": False})
-        s = rig.wait(lambda s: not s.get("freedrive"), 5)
-        check("leaving freedrive: position mode, the arm holds where the hand left it", r["ok"] and not s["freedrive"]
-              and max(abs(a - b) for a, b in zip(rig.sim_joints(), hand)) < 0.01, r)
+        s = rig.wait(lambda s: not s.get("freedrive") and s.get("state") in (0, 2) and s.get("enabled"), 5)
+        moved = [a - b for a, b in zip(rig.sim_joints(), hand)]
+        check("leaving freedrive: mode 0 switches the motors off (J3 settles onto its brake), then Enable's checked "
+              "sequence: ready in position mode where the hand left it but for the settle and the enable shift "
+              "(J3 0.45 + 0.06 deg)", r["ok"] and not s["freedrive"] and s["state"] in (0, 2) and s["enabled"]
+              and rig.ctl(cmd="state")["mode"] == 0 and abs(moved[2] - 0.5054) < 0.01
+              and max(abs(m) for i, m in enumerate(moved) if i != 2) < 0.03, (r, s.get("state"), moved))
         r = rig.post("/api/run/start", {"name": "taught"})
         s = rig.run_state("done", "faulted", timeout=60)
         p, _ = tool_point_in(rig, frame_pose, tool, rig.sim_joints())
@@ -617,11 +625,18 @@ def scenario_teach():
         r = rig.post("/api/cell/target/delete", {"name": "picked", "revision": rev})
         check("a target a program moves to can't be deleted, naming the program", not r["ok"]
               and "program taught" in r["message"] and "picked" in rig.get("/api/cell")["cell"]["targets"], r)
-        rig.post("/api/freedrive", {"on": True, "sensitivity": 1})
-        rig.wait(lambda s: s.get("freedrive"), 5)
+        r = rig.post("/api/freedrive", {"on": True})
+        s = rig.wait(lambda s: s.get("freedrive"), 5)
+        check("freedrive again at the default 90 %", r["ok"] and s.get("freedrive") and s.get("teachSensitivity") == 90
+              and rig.ctl(cmd="state")["config"]["teach_sens"] == 90, r)
         rig.post("/api/stop")
-        s = rig.wait(lambda s: not s.get("freedrive"), 5)
-        check("STOP ends freedrive", not s["freedrive"] and rig.ctl(cmd="state")["mode"] == 0, s.get("mode"))
+        s = rig.wait(lambda s: not s.get("freedrive") and not s.get("enabled"), 5)
+        pushed = rig.ctl(cmd="hand", joints=hand, seconds=0.3)
+        check("STOP ends freedrive: STOP holds the arm, then mode 0 switches the motors off onto the brakes",
+              not s["freedrive"] and s["state"] == 4 and not s["enabled"] and rig.ctl(cmd="state")["mode"] == 0
+              and not pushed["ok"], (s.get("state"), s.get("enabled"), pushed))
+        r = rig.post("/api/freedrive", {"on": True, "sensitivity": 1})
+        check("sensitivities outside 90, 100 and 110 % are refused", not r["ok"] and "Unsupported" in r["message"], r)
     finally:
         rig.close()
 
@@ -679,7 +694,7 @@ def scenario_model():
         rig.wait(lambda s: s["run"]["state"] == "running" and s.get("state") == 1, 20, 0.05)
         checks = [("/api/run/start", {"name": "slow"}, "under way"), ("/api/run/resume", {}, "Nothing to resume"),
                   ("/api/run/step", {}, "Step works on a paused run"), ("/api/run/reset", {}, "stop it first"),
-                  ("/api/freedrive", {"on": True, "sensitivity": 1}, "A program is running"),
+                  ("/api/freedrive", {"on": True, "sensitivity": 90}, "A program is running"),
                   ("/api/enable", {}, "A program is running"),
                   ("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 1.0, "speed": 10.0}, "program is running")]
         for path, body, words in checks:

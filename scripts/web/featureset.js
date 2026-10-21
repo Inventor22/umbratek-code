@@ -12,7 +12,7 @@ const RUN_ENDED = ["idle", "done", "stopped"];
 const HOLD_MS = 700;
 const CONFIRM_MS = 3000;
 const OVERRIDES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-const SENSITIVITIES = [1, 2, 3, 4, 5];
+const SENSITIVITIES = [90, 100, 110];  // the teach sensitivity in % (Umbratek's current SDK); see jog_server.py
 
 let status = null;
 let cell = null;  // GET /api/cell's reply: the cell, its frames and targets in the base frame, and what to draw
@@ -698,11 +698,10 @@ async function refreshEvents(s) {
 }
 
 // ---- Teach: freedrive and recording targets ----
+// Set before entering freedrive: the controller stops the arm when the sensitivity is written.
 const sensitivity = fader($("sensitivityFader"), {
-  name: "Teach sensitivity for freedrive", label: "Sensitivity", values: SENSITIVITIES, unit: "", value: 1, home: 1,
-  onChange: (level) => {
-    if (status && status.freedrive) send("/api/freedrive", {on: true, sensitivity: level});
-  },
+  name: "Teach sensitivity for freedrive", label: "Sensitivity", values: SENSITIVITIES, unit: "%", value: 90,
+  home: 90, onChange: () => {},
 });
 
 const freedriveKey = $("freedriveKey");
@@ -755,6 +754,7 @@ function renderTeach(s) {
     : s.stopAlarm ? "Locked: use the E-stop" : s.err ? "Locked: clear the fault first" : !s.enabled ? "Locked: motors off"
     : "Locked: wait for the arm to stop";
   setText($("freedriveSub"), on ? "Press to leave" : freedriveKey.disabled ? locked : "Hold for 0.7 s");
+  sensitivity.input.disabled = on;
   if (on && s.teachSensitivity) sensitivity.set(s.teachSensitivity);
   const moving = RUN_MOVING.includes(r.state);
   $("recordKey").disabled = !live || moving;

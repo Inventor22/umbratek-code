@@ -22,16 +22,24 @@ fits the model to it):
     real controller's report in every one of the capture's 2292 frames, then the tool offset, if one is set.
   - STOP halts at once with the measured transient: the joints carry on STOP_OVERRUN_S at speed, swing back, and settle
     within 0.4 s (STOP_TRANSIENT, from J1 stopped at 30 deg/s).
-  - Switching the motors on shifts the joints by ENABLE_SHIFT_DEG, as measured (0.46 mm at the tool).
+  - Switching the motors on shifts the joints by ENABLE_SHIFT_DEG, as measured (0.46 mm at the tool); switching them off
+    (or the E-stop) lets them settle onto their brakes by BRAKE_SETTLE_DEG (J3 about 0.45 deg, measured that day).
   - The status frame's queued count leaves out the one command waiting in the planner: the capture's frames showed 0
     with a second click queued behind a moving one.
+  - Freedrive (motion mode 2, "joint teaching"), as the real arm did it in the tests that afternoon
+    (data/captures/2026-10-21-tests/teach_probe.jsonl): writing the teach sensitivity stops the arm; mode 2 is taken
+    only from ready with every motor on (it's ignored while stopped), and the arm then reports state 1 while the
+    control port's "hand" moves it at any sensitivity; with an error flagged the mode is taken but the arm holds. STOP
+    holds it rigid, still in mode 2; leaving mode 2, free or stopped, switches the motors off onto their brakes.
+    Pushing a joint to its limit by hand gives error 23 with the motors off, as wrist 1 did at 358 deg. Single joints
+    are enabled by number, from 1. Unverified: making the arm ready while it's stopped in mode 2 (here: freedrive
+    again).
 Unverified on the real arm, and modelled as plausibly as the SDK allows: pause and resume (a ramp to a halt along the
-path and back), freedrive (motion mode 2 lets the control port's "hand" move the joints, if teach sensitivity is 1 to
-5), collision detection (a control-port "contact" past a threshold set by the collision sensitivity raises error 31),
-the joint speed fault (error 24 past 84% of a joint servo's limit, where the real J3 faulted), joint limits (error 23),
-unreachable lines (error 21), the tool offset's convention, and GPIO (16 digital inputs and outputs on the tool and the
-controller, no analog). The "tau" readings are the capture's mean values at rest plus a term in acceleration:
-illustrative, not a model.
+path and back), collision detection (a control-port "contact" past a threshold set by the collision sensitivity raises
+error 31), the joint speed fault (error 24 past 84% of a joint servo's limit, where the real J3 faulted), joint limits
+(error 23; wrist 1's fired between 355.9 and 358.0 deg against the xacro's 358.9), unreachable lines (error 21), the
+tool offset's convention, and GPIO (16 digital inputs and outputs on the tool and the controller, no analog). The "tau"
+readings are the capture's mean values at rest plus a term in acceleration: illustrative, not a model.
 
 The control port (HOST:30099, JSON lines, the simulator's alone) lets tests act on the arm: move it by hand in
 freedrive, set inputs, read outputs, press the E-stop, bump it, or read its whole state. See control().
@@ -71,6 +79,11 @@ STOP_OVERRUN_S = 0.00639  # 0.192 deg past the stop point at 30 deg/s
 STOP_TRANSIENT = ((0.0, -1.0), (0.0992, -1.7222), (0.1993, -0.1183), (0.2991, -0.0172), (0.3991, -0.001),
                   (0.4991, 0.0))
 ENABLE_SHIFT_DEG = (-0.0016, 0.0002, 0.0554, -0.0080, -0.0007, 0.0015)
+# Joints settling onto their brakes when their motors switch off, measured 2026-10-21 at folded poses like the
+# capture's: J3 +0.43 deg leaving freedrive, +0.46 on a power cut, +0.49 on the E-stop; J2 +0.02. (The sign follows
+# gravity, so other poses may settle the other way.)
+BRAKE_SETTLE_DEG = (0.0, 0.02, 0.45, 0.0, 0.0, 0.0)
+FULL_MASK = (1 << AXIS) - 1
 REST_TAU = (-2.56, 5.52, -25.95, 0.87, -0.07, 1.69)  # the capture's mean "tau" at rest
 TAU_PER_ACC = 0.15  # illustrative: J1 read about +/-15 accelerating at 100 deg/s^2
 # Faults, unverified: joint limits from Umbratek's xacro, and the speed past which a joint faults (error 24): 84% of
@@ -354,7 +367,7 @@ class Arm:
         self.pause = None  # (kind "down"/"up", started, tau at start) while ramping
         self.q = [math.radians(d) for d in a.joints]
         self.transient = None  # (started, final joints, overrun per joint) after a STOP
-        self.hand = None  # (started, start joints, goal joints, seconds) while moved by hand in freedrive
+        self.hand = None  # (started, start joints, goal joints, seconds, past a limit) while moved by hand in freedrive
         self.received = 0.0  # when the last motion command arrived
         self.ready_at = None  # when the arm was last set ready
         self.report_connections, self.nan_joints = 0, False
@@ -420,13 +433,18 @@ class Arm:
             self.transient = None
             return list(final)
         if self.hand is not None:
-            started, start, goal, seconds = self.hand
+            started, start, goal, seconds, past_limit = self.hand
             f = min(1.0, (now - started) / seconds) if seconds > 0 else 1.0
             f = f * f * (3 - 2 * f)
             q = [s + (g - s) * f for s, g in zip(start, goal)]
             if f >= 1.0:  # done: the arm stays where the hand left it, whichever call notices first
                 self.hand = None
                 self.q = list(q)
+                if past_limit:  # as on the arm (2026-10-21): J4 turned by hand to 358 deg gave error 23, motors off
+                    self.motors_off(FULL_MASK)
+                    self.mode, self.err, self.status = 0, 23, 2
+                    log("moved by hand to a joint limit -> error 23, motors off, out of freedrive")
+                    return list(self.q)
             return q
         if self.current is None:
             return list(self.q)
@@ -453,6 +471,19 @@ class Arm:
                 return
         self.current, self.clock, self.tau0, self.pause = m, start_at, 0.0, None
         self.status = 1
+
+    def motors_off(self, bits, now=None):
+        """Switch off the motors in `bits`: the arm stops, and those joints settle onto their brakes."""
+        if self.current is not None and now is not None:
+            self.q = self.joints_at(now)
+        off = self.enable & bits
+        self.enable &= ~bits
+        self.q = [v + (math.radians(BRAKE_SETTLE_DEG[j]) if off >> j & 1 else 0.0) for j, v in enumerate(self.q)]
+        self.current, self.pause, self.hand, self.transient = None, None, None, None
+        self.queue.clear()
+        self.status = 4
+        if off:
+            log(f"motors off (mask {off:06b}): those joints settle onto their brakes")
 
     def fault(self, code, why, now, transient=False):
         if transient:
@@ -607,35 +638,56 @@ class Arm:
                 self.err = 0
             return b""
         if cmd == 0x20:
+            # Joint teaching (freedrive) as the real arm did it on 2026-10-21 (tools/capture/teach_probe.py, logged in
+            # data/captures/2026-10-21-tests/teach_probe.jsonl), which is Umbratek's documented order: motors on and
+            # ready, then mode 2.
             mode = data[0]
-            if mode == 2 and self.current is not None:
-                log("teach mode refused while moving")
-            else:
-                if mode != self.mode:
-                    log(f"motion mode {self.mode} -> {mode}")
+            if mode == 2 and self.mode != 2:
+                if self.current is not None or self.status in (1, 3):
+                    log("teach mode refused while moving")
+                elif self.status == 4:
+                    log("teach mode ignored: the arm is stopped")  # as both of the server's first attempts found
+                elif self.err:
+                    self.mode = 2  # taken, but the arm holds: freedrive needs a clear error (seen with error 23)
+                    log("motion mode 2 with an error: the arm holds")
+                elif self.enable != FULL_MASK:
+                    log("teach mode ignored: motors off")  # unverified: Umbratek's dashboard asks for all of them on
+                else:
+                    self.mode, self.status = 2, 1  # the real arm reports freedrive as moving (state 1)
+                    log("motion mode 0 -> 2: freedrive")
+            elif mode != 2 and self.mode == 2:
+                # Leaving teach mode, whether free or stopped, switches the motors off onto the brakes.
                 self.mode = mode
-                if mode != 2:
-                    self.hand = None
+                self.motors_off(FULL_MASK, now)
+                log(f"motion mode 2 -> {mode}: motors off")
+            elif mode != self.mode:
+                log(f"motion mode {self.mode} -> {mode}")
+                self.mode = mode
             return b""
         if cmd == 0x21:
             if not self.a.enable_fails:
-                was = self.enable
-                self.enable = ((1 << AXIS) - 1) if data[1] else 0
-                if self.enable:
-                    self.q = [v + math.radians(d) for v, d in zip(self.q, ENABLE_SHIFT_DEG)]
-                    if not was:
+                axis, on = data[0], data[1]
+                bits = 1 << (axis - 1) if 1 <= axis <= AXIS else FULL_MASK  # joints count from 1 (2026-10-21)
+                if on:
+                    was = self.enable
+                    self.enable |= bits
+                    self.q = [v + (math.radians(d) if bits >> j & 1 else 0.0)
+                              for j, (v, d) in enumerate(zip(self.q, ENABLE_SHIFT_DEG))]
+                    if self.enable & ~was:
                         log("motors on")
                 else:
-                    self.current, self.pause, self.hand = None, None, None
-                    self.queue.clear()
-                    self.status = 4
+                    self.motors_off(bits, now)
             return b""
         if cmd == 0x22:
             return b""
         if cmd == 0x25:
             v = data[0]
             if v == 0 and not self.err:
-                if self.status == 3 and self.current is not None:  # resume along the path
+                if self.mode == 2:
+                    if self.status == 4 and self.enable == FULL_MASK:  # unverified on the arm: back to freedrive
+                        self.status = 1
+                        log("made ready in mode 2: freedrive again")
+                elif self.status == 3 and self.current is not None:  # resume along the path
                     self.pause = ("up", now, self.progress(now))
                     self.status = 1
                     log("resumed")
@@ -649,7 +701,7 @@ class Arm:
                 log("stop ignored (fault injection)")
             elif v == 4:
                 self.halt(now)
-                self.status, self.phantom_queued = 4, 0
+                self.status, self.phantom_queued, self.hand = 4, 0, None  # stopped: the arm holds, even in freedrive
                 self.queue.clear()
             return b""
         if cmd == 0x26:
@@ -685,6 +737,11 @@ class Arm:
             return b"\x00\x00\x00\x00" if n == 1 else b""
         if cmd in (0x47, 0x48):
             self.config["collis_sens" if cmd == 0x47 else "teach_sens"] = data[0]
+            if cmd == 0x48 and self.status != 4:  # as on the arm (2026-10-21): the write stops it
+                self.halt(now)
+                self.status, self.phantom_queued, self.hand = 4, 0, None
+                self.queue.clear()
+                log("teach sensitivity set: stopped")
             return b""
         if cmd == 0x61:
             line, _, reg = data[0], data[1], data[2]
@@ -714,15 +771,13 @@ class Arm:
                         "outputs": {"tool": self.outputs[2], "controller": self.outputs[3]}}
             if what == "hand":
                 goal = [math.radians(v) for v in request["joints"]]
-                if self.mode != 2 or not self.enable:
-                    return {"ok": False, "why": "not in freedrive (motion mode 2 with the motors on)"}
-                if not 1 <= self.config["teach_sens"] <= 5:
-                    log("hand push resisted: teach sensitivity 0")
-                    return {"ok": False, "why": "teach sensitivity 0: the arm holds"}
-                goal = [max(lo, min(hi, g)) for g, (lo, hi) in zip(goal, JOINT_LIMITS_RAD)]
+                if self.mode != 2 or self.status != 1 or self.enable != FULL_MASK or self.err:
+                    return {"ok": False, "why": "not in freedrive (motion mode 2, reported moving, motors on, no error)"}
+                clamped = [max(lo, min(hi, g)) for g, (lo, hi) in zip(goal, JOINT_LIMITS_RAD)]
                 self.q = self.joints_at(now)
-                self.hand = (now, list(self.q), goal, float(request.get("seconds", 1.0)))
-                log(f"moved by hand towards [{' '.join(f'{math.degrees(g):.2f}' for g in goal)}]")
+                self.hand = (now, list(self.q), clamped, float(request.get("seconds", 1.0)), clamped != goal)
+                log(f"moved by hand towards [{' '.join(f'{math.degrees(g):.2f}' for g in clamped)}]"
+                    + (" (to a joint limit)" if clamped != goal else ""))
                 return {"ok": True}
             if what == "input":
                 line = 2 if request.get("line") == "tool" else 3
@@ -761,7 +816,8 @@ class Arm:
     def estop(self, now):
         self.q = self.joints_at(now)
         self.transient, self.hand = None, None
-        self.err, self.status, self.enable, self.current, self.pause = 1, 4, 0, None, None
+        self.motors_off(FULL_MASK)
+        self.err, self.status, self.current, self.pause = 1, 4, None, None
         self.queue.clear()
         log("hardware E-stop pressed (fault injection)")
 
@@ -910,7 +966,7 @@ def main():
     p.add_argument("--joint-jerk", type=float, default=math.degrees(24.0), help="configured joint jerk, deg/s^3")
     p.add_argument("--tcp-jerk", type=float, default=2000.0, help="configured tool jerk, mm/s^3 (2000)")
     p.add_argument("--collision-sens", type=int, default=0, help="collision sensitivity at start, 0-5 (0, as captured)")
-    p.add_argument("--teach-sens", type=int, default=0, help="teach sensitivity at start, 0-5 (0, as captured)")
+    p.add_argument("--teach-sens", type=int, default=0, help="teach sensitivity at start (0, as the controller boots)")
     p.add_argument("--multi-client", action="store_true",
                    help="serve several command connections at once (the real controller serves one)")
     p.add_argument("--no-report", action="store_true", help="do not serve port 30001")
