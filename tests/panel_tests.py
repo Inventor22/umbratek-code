@@ -492,7 +492,7 @@ def last_move(rig, label="MOVEJ_P2P"):
 
 def scenario_speeds():
     print("== step and speed detents: joint top speeds and the controller's acceleration limits")
-    rig = Rig("speeds", ("--joint-maxacc", "300"))  # the controller's maximum accelerations: 300 deg/s^2, 3000 mm/s^2
+    rig = Rig("speeds", ("--joint-maxacc", "300", "--tcp-maxacc", "3000"))  # the controller's maximum accelerations: 300 deg/s^2, 3000 mm/s^2
     try:
         t = rig.token
         wait_for(lambda s: s.get("live"))

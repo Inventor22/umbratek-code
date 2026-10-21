@@ -50,6 +50,7 @@ SUITES = {
     "paths": ("check_path against dense sampling along moves", "test", ["path_tests.py", "6"], ["path_tests.py", "2"], 1800),
     "capture": ("the real arm's capture: our kinematics and tools against its measurements", "test",
                 ["capture_tests.py"], None, 600),
+    "sim": ("the simulator against the capture, and its registers and control port", "test", ["sim_tests.py"], None, 600),
 }
 
 

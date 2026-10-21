@@ -40,15 +40,19 @@ script by hand, use `conda run -p .venv-oracle python tests/<script>.py`.
 | collide | `collide_tests.py` | Oracle (NumPy): the collision geometry's closest points against dense sampling. |
 | paths | `path_tests.py` | `check_path` against dense sampling along random moves. Slow in pure Python, so it samples 6 moves (2 with `--quick`). |
 | capture | `capture_tests.py` | The real arm's capture (`data/captures/2026-10-21`): our forward kinematics against the controller's pose in every one of its 2292 status frames and the quoted joint/pose pairs, the streams' timing and config, and `tools/capture/capture.py analyze` reproducing the committed summary. |
+| sim | `sim_tests.py` | The simulator's motion model replayed against the capture's 43 joint moves, 24 straight lines, STOP and enable shift; then the running simulator: 10 Hz state, port 30002 refused, the config stream on 30003, the start delay, STOP, the queue count, straight lines through a pause, faults, the tool offset, payload and sensitivity registers, GPIO, freedrive and collision detection. |
 
 ## The simulator
 
 ```
-python tools/utra_sim.py                 # serves 127.0.0.1:502 and the status stream on :30001
+python tools/utra_sim.py                 # serves 127.0.0.1:502, the status stream on :30001 and config on :30003
 python scripts/jog_server.py 127.0.0.1   # then open http://127.0.0.1:8765
 ```
 
-`python tools/utra_sim.py --help` lists the faults it can inject. `--host` picks another loopback address.
+`python tools/utra_sim.py --help` lists its options and the faults it can inject; `--host` picks another loopback
+address. How it moves is fitted to the capture (`python tools/capture/fit_sim.py` shows the fit; `docs/decisions.md`
+D6 to D12 say what's measured and what's assumed). Its control port, 30099, lets tests act as a hand, a machine's
+signals or the E-stop; see `Arm.control` in `tools/utra_sim.py`.
 
 ## The capture tools
 
