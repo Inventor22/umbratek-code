@@ -1,0 +1,144 @@
+# Overnight summary: the machine-tending featureset, 2026-10-21 to 22
+
+Built on branch `inventor22/machine-tending-featureset`, against the simulator only: nothing connected to the
+controller (192.168.2.1), the jog-server terminal and `main` were left alone, and the main checkout was only read from
+(the capture was copied out of it).
+
+**In short.** The simulator, the tests and the capture tools are in the repo, with one runner (`python
+tests/run_all.py`, 11 suites, all passing). The simulator now behaves like the capture: 10 Hz state, the command
+delay, the enable shift and the measured STOP. `docs/capabilities.md` specifies the featureset from four tending jobs
+and puts it in build order. Its foundations are built on the server, in the simulator and in the panel: tool and work
+frames with calibration and re-mapping, keep-out zones, straight-line and relative moves (all collision-checked), a
+program model with a server-side runner (start, pause, resume, stop, step, override, dry run, faults, event log), and
+teaching by freedrive. `docs/morning-test-plan.md` tests it on the arm and settles what the capture left open: tau's
+units, freedrive at each teach sensitivity, and each collision sensitivity level.
+
+## What was built
+
+| Commit | What |
+| ------ | ---- |
+| 1137f86, cb4882f | The simulator (`tools/utra_sim.py`), the suites (`tests/`, one runner `run_all.py`), the capture tools (`tools/capture/`) and the 2026-10-21 capture (`data/captures/`, byte for byte), with relative paths. The capture became regression fixtures (`tests/capture_tests.py`). |
+| feee832 | The simulator fitted to the capture: a jerk-limited profile, start delays, the queue count, STOP's 6.39 ms overrun and settle, the enable shift, port 30002 refused, the config stream, registers, GPIO, freedrive, collision detection, faults, and a control port for tests (D6 to D12). |
+| fb4b9ae | `docs/capabilities.md`: the controller's facts; the four jobs broken into steps; the capabilities they share; RAPID, UR, PLCopen and behaviour trees adopted or rejected; each capability with what the controller provides, what we build, acceptance and dependencies; what 10 Hz rules out; build order. |
+| 00075d1 | K1: server-side kinematics (`scripts/kinematics.py`), checked against Pinocchio and SciPy. |
+| 1e502ef | On the server: the cell (`cell.py`: tools, frames, targets, zones, calibration, re-mapping), planning (`planner.py`: joint and straight moves, offsets, zones, singularities, durations), supervised execution (`executor.py`), the program model and runner (`runner.py`), freedrive and teaching (`jog_server.py`), and their API. |
+| 078adb8 | In the panel: the Program, Teach and Cell sections (`scripts/web/featureset.js`), designed to DESIGN.md and reviewed; faulted steps drawn in the 3D view; the morning's tools (`tau_check.py`, `sensitivity.py`); a simulator bug fixed. |
+| 209ae3d | `docs/morning-test-plan.md`. |
+| 97f6be6 | Tests for the program model and the runner's states; the spec's acceptance text corrected to what the tests check; decisions D20 to D31. |
+
+## How each claim was verified
+
+Every check below is in the suites (`python tests/run_all.py`); the judge is outside the code under test.
+
+| Claim | Judge | Result |
+| ----- | ----- | ------ |
+| Our forward kinematics is the controller's | the capture's 2292 frames (1146 moving) | within 0.001 mm and 0.001 deg |
+| ... and Pinocchio's, from the same URDF | Pinocchio | 1000 joint sets within 1e-9 m and 1e-9 rad |
+| Inverse kinematics lands where asked | Pinocchio | 99% or more of 366 reachable poses from a seed within 6 deg, within 0.01 mm and 0.006 deg |
+| Roll, pitch, yaw, rotation logs, slerp | SciPy | within 1e-9 |
+| The double-S profile | exact integration of its jerk | within 1e-9 of the distance; limits never exceeded |
+| The simulator moves like the arm | replaying the capture's commands | 43 joint moves: median error under 0.05 deg (0.034 in the fit); 24 lines: median under 0.15 mm; STOP: J1 rests 0.19 to 0.21 deg on, as measured; enable shift 0.456 mm (measured 0.46 and 0.53); command to first motion median 94 ms (captured 111, within 40); 10 Hz; port 30002 refused |
+| Tool points | Pinocchio frames at the same placement | 20 tools x 50 joint sets within 1e-9 m |
+| Three-point frames | ground truth, SciPy's Kabsch fit | exact (1e-9); with 0.1 mm noise, origin RMS 0.172 mm against 0.173 predicted, orientation RMS 0.10 deg |
+| Four-point tool fits | ground truth, SciPy least squares | exact (1e-6 mm); with 0.1 mm noise RMS 0.11 mm, equal to SciPy within 1e-6 mm |
+| Calibration end to end | the simulator, touching with the pointer | frame within 0.05 mm and 0.01 deg; tool point within 0.05 mm |
+| Recalibrating a frame moves its targets and zones, and only those | NumPy | within 1e-9; out-of-reach targets flagged |
+| Keep-out zones and the tool's shape are never missed or over-reported | dense sampling (NumPy) | 34 random moves near random zones: none missed, none false |
+| The page's collision check agrees with the server's | `xcheck.mjs` against the server, with a tool and zones | same verdicts |
+| Straight lines are straight | Pinocchio at every planned sample; the simulator while running | planned within 0.05 mm (27 lines, 3 refused); executed, 152 samples within 0.1 mm, ending on target within 0.1 mm |
+| Offsets (along the tool, in a frame) | SciPy composition; the simulator | within 1e-12; an approach 50 mm back ends 50.00 mm away |
+| Override and the reduced-speed cap | the simulator's log of what was sent | 500 mm/s at 50% is sent at 250; at 100% a program not marked fullSpeed is still capped at 250 |
+| A dry run moves nothing and estimates the run | the simulator's log; a real run | no writes; estimate 10.8 s against 12.2 s less 0.5 s of supervision (within 10%) |
+| The runner's controls and states | the simulator | pause mid-line stops on the line (0.1 mm), resume re-enables, regains the line and finishes on it; step runs one step; stop; each control refused with a reason where it doesn't apply; runs carry on with the page closed; manual moves don't |
+| Faults | injected in the simulator | controller error mid-move, the arm knocked 3 deg off its path, an input timeout (2.0 to 2.6 s), a zone in the way (refused before moving, with the hit drawn in the 3D view); a faulted run needs Reset |
+| The program model | the server's API | malformed programs refused with the step's path; a full round trip changes only the revision; stale saves refused; a server killed mid-run leaves whole log lines |
+| Teaching by freedrive | Pinocchio | the recorded target equals the forward kinematics of the hand's joints, in the frame, within 0.001 mm; the taught program runs onto it within 0.1 mm |
+| tau_check's expected torques | Pinocchio's generalized gravity | within 1e-6 N m over 40 poses and loads; recovers a synthetic scale within 2% |
+| The capture tools still reproduce the capture's analysis | `capture.py analyze` | summary identical to `summary.json` |
+| The panel's new sections | a browser against the simulator; a separate design review | screenshots at 1600, 900 and 420 px; the review's eight material fixes applied and confirmed in its second pass; every element the module uses exists once in the page (panel suite) |
+
+Suites at the last run: cli, inproc, collide, js and paths (pass/fail), panel 194/194, oracle 17/17, geometry 24/24,
+capture 18/18, sim 46/46, feature 86/86; 11 of 11, in about 5.5 minutes.
+
+## What is still unverified: needs the arm
+
+Each is in the morning test plan (MT-n):
+- **tau's units** (MT-4). The URDF has no masses, so offline it can't be done; `tau_check.py` is ready.
+- **Freedrive** at each teach sensitivity, and what the controller's current 0 means (MT-7). The simulator assumes 0
+  holds the arm.
+- **Collision sensitivity:** what each level does, and whether it reports error 31 or 22 (MT-10). The simulator's
+  thresholds are guesses.
+- **Pause on the arm**: STOP, re-enable (the 0.5 mm shift) and the regain move (MT-3).
+- **How the controller paces a turn on a straight line**: the planner assumes 1 rad takes as long as 100 mm (MT-3).
+- **Calibration repeatability** with a real pointer and fixture (MT-5, MT-6), and landing on taught points (MT-8).
+- **GPIO**: line numbering and wiring (MT-11). The simulator assumes 16 digital lines each on the tool and the
+  controller.
+- **The controller's tool offset convention** (MT-12). Not used (D14).
+- Not tested in the plan, and not relied on: whether the enable shift depends on pose; STOP's settle for other joints
+  and speeds; the queue count with more than one move pending; how the controller handles singular or unreachable
+  lines (the planner refuses them before sending); the controller's own pause; queued register writes.
+
+## Decisions
+
+All 31 are in `docs/decisions.md`, each with its alternatives:
+- **Layout and tests:** D1 to D5.
+- **The simulator's model:** D6 to D12.
+- **Build order:** D13.
+- **The tool point on the PC, the controller's offset at zero:** D14.
+- **The cell as JSON with revisions:** D15.
+- **Roll, pitch and yaw in degrees:** D16.
+- **From RAPID, UR, PLCopen and behaviour trees:** D17 to D19: fine points only, a UR-like step tree with PLCopen
+  outcomes, behaviour-tree results for later.
+- **The runner:** pause as STOP plus re-plan (D20); faults need Reset (D21); runs don't need the page, manual moves do
+  (D22).
+- **Moves:** tool jogs checked as lines (D23).
+- **Testing:** statistical calibration checks (D24).
+- **The panel:** built from the desk's own parts (D25); target keys stage a plan (D26); Space types in text fields
+  (D27); targets in use can't be deleted (D28); the page edits top-level steps and repeats (D29); the morning tools
+  listen or need the panel closed (D30); Override starts at 100% (D31).
+
+## Found and fixed along the way
+
+- **The simulator** left a finished hand move short of its goal when the control port, not the status loop, noticed
+  the end. A test that failed only under full load found it.
+- **Two tests** read the arm's state before a pause's STOP had shown or settled; they now wait for it.
+- **STOP's overrun:** a first pass took it as 7.05 ms through an arithmetic slip; a test caught it (6.39 ms, D7).
+- **Earlier oracle-test flaws** were fixed: a stale Pinocchio data object, and a sampled integration that couldn't
+  judge the profile.
+- **`capabilities.md`** promised more than the tests checked (an OpenCV check that doesn't exist, tighter tolerances);
+  it now says what is tested.
+
+## Known issues, not fixed
+
+- **A pre-existing layout gap.** Between 861 and about 920 px wide, the bridge's minimum widths overflow by about
+  20 px. Your app side panel (about 1018 px) fits. Moving the two-row breakpoint from 860 to about 940 px would fix
+  it.
+- **The design detector** leaves 63 advisory notes. They are colour values DESIGN.md's shadow vocabulary and state
+  tones already use, and two older font sizes; I didn't suppress them.
+- **I/O isn't shown in the panel** (only at `/api/io`). A program's "full speed" flag and its default speeds are
+  edited in its JSON.
+- **The design review** was run by a general-purpose agent with the design skill's reviewer instructions, because the
+  skill's own reviewer agent isn't available in this app.
+
+## Questions for you
+
+1. After MT-4, should the next step be using tau (S4, checking a grasp by the payload) or grippers (A2)?
+2. Which teach sensitivity should freedrive default to, after MT-7?
+3. Collision detection: leave it off (0) and rely on the planner's checks, or set the level MT-10 finds? The panel
+   doesn't manage it.
+4. Is a 250 mm/s cap on program lines (unless marked full speed) what you want? Should Override start at 25% each
+   time the server starts, like the jog speeds?
+5. Next in the page: ifs and calls, or patterns for trays (F5)?
+6. What I/O will the first job use (a printer door switch, a gripper on tool.0)? Lines and names would make the I/O
+   test concrete.
+7. Should the cell and programs (`cell/`, git-ignored now) be committed?
+8. Is a firmware update that serves port 30002 (100 Hz) possible? It lifts most of the limits in capabilities.md
+   section 6.
+9. Fix the 900 px bridge overflow?
+
+## Trying it
+
+- **Tests:** `python tests/run_all.py`; `tests/README.md` sets up the oracle environment.
+- **The panel against the simulator:** `python tools/utra_sim.py --host 127.0.0.31`, then
+  `python scripts/jog_server.py 127.0.0.31 --port 8831 --cell <a scratch folder>`, and open
+  http://127.0.0.1:8831.
