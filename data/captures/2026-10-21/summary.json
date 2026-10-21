@@ -1,0 +1,918 @@
+{
+ "frames": 2292,
+ "configFrames": 2292,
+ "status10hz": {
+  "seconds": 229.0,
+  "rateHz": 10.01,
+  "intervalMs": {
+   "p1": 88.6,
+   "p50": 100.0,
+   "p99": 102.6,
+   "max": 109.1
+  },
+  "gapsOver150ms": 0,
+  "gapsOver1s": 0
+ },
+ "configConstant": true,
+ "config": {
+  "linearMaxAcc": 200.0,
+  "linearJerk": 2000.0,
+  "rotationalMaxAcc": 4.0,
+  "rotationalJerk": 8.0,
+  "jointMaxAcc": 3.4906585216522217,
+  "jointJerk": 24.0,
+  "tcpOffset": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "tcpLoad": [
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "gravityDir": [
+   0.0,
+   0.0,
+   -1.0
+  ],
+  "collisionSensitivity": 0,
+  "teachSensitivity": 0
+ },
+ "rest": {
+  "frames": 601,
+  "joints": [
+   {
+    "meanDeg": 36.1091,
+    "stdDeg": 0.00082,
+    "rangeDeg": 0.0033
+   },
+   {
+    "meanDeg": 28.5281,
+    "stdDeg": 0.00011,
+    "rangeDeg": 0.00055
+   },
+   {
+    "meanDeg": 138.7846,
+    "stdDeg": 0.00022,
+    "rangeDeg": 0.00133
+   },
+   {
+    "meanDeg": 108.4337,
+    "stdDeg": 0.00036,
+    "rangeDeg": 0.00462
+   },
+   {
+    "meanDeg": 45.7665,
+    "stdDeg": 0.00028,
+    "rangeDeg": 0.00198
+   },
+   {
+    "meanDeg": 64.6233,
+    "stdDeg": 0.00013,
+    "rangeDeg": 0.00088
+   }
+  ],
+  "current": [
+   {
+    "mean": -2.5648,
+    "std": 0.7192,
+    "min": -4.8399,
+    "max": -1.2672
+   },
+   {
+    "mean": 5.5211,
+    "std": 0.0842,
+    "min": 5.2869,
+    "max": 5.8038
+   },
+   {
+    "mean": -25.9496,
+    "std": 0.2018,
+    "min": -26.6158,
+    "max": -25.2466
+   },
+   {
+    "mean": 0.866,
+    "std": 0.1585,
+    "min": -0.1045,
+    "max": 1.7319
+   },
+   {
+    "mean": -0.0705,
+    "std": 0.1062,
+    "min": -0.3911,
+    "max": 0.3662
+   },
+   {
+    "mean": 1.6939,
+    "std": 0.048,
+    "min": 1.5739,
+    "max": 1.9133
+   }
+  ],
+  "tcpScatterMm": 0.0135
+ },
+ "commandToMotionMs": {
+  "n": 86,
+  "min": 2,
+  "p50": 111,
+  "max": 178,
+  "note": "frame-quantised: status arrives every ~100 ms"
+ },
+ "segments": [
+  {
+   "label": "rest",
+   "seconds": 60.01
+  },
+  {
+   "label": "J1 +15 deg at 10 deg/s",
+   "seconds": 2.12,
+   "joint": 1,
+   "peakDegPerS": 10.3,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -0.528,
+    14.538
+   ],
+   "currentAtEnd": 7.306
+  },
+  {
+   "label": "J1 back at 10 deg/s",
+   "seconds": 2.18,
+   "joint": 1,
+   "peakDegPerS": 11.2,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -15.368,
+    7.267
+   ],
+   "currentAtEnd": -6.901
+  },
+  {
+   "label": "J1 -15 deg at 10 deg/s",
+   "seconds": 2.18,
+   "joint": 1,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -15.199,
+    -5.774
+   ],
+   "currentAtEnd": -7.491
+  },
+  {
+   "label": "J1 back at 10 deg/s",
+   "seconds": 2.18,
+   "joint": 1,
+   "peakDegPerS": 11.3,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -6.945,
+    17.336
+   ],
+   "currentAtEnd": 7.304
+  },
+  {
+   "label": "J1 +15 deg at 30 deg/s",
+   "seconds": 1.33,
+   "joint": 1,
+   "peakDegPerS": 30.0,
+   "askedDegPerS": 30.0,
+   "currentRange": [
+    6.493,
+    24.605
+   ],
+   "currentAtEnd": 8.721
+  },
+  {
+   "label": "J1 back at 30 deg/s",
+   "seconds": 1.37,
+   "joint": 1,
+   "peakDegPerS": 30.0,
+   "askedDegPerS": 30.0,
+   "currentRange": [
+    -20.947,
+    6.326
+   ],
+   "currentAtEnd": -6.982
+  },
+  {
+   "label": "J1 -15 deg at 30 deg/s",
+   "seconds": 1.32,
+   "joint": 1,
+   "peakDegPerS": 30.1,
+   "askedDegPerS": 30.0,
+   "currentRange": [
+    -25.552,
+    -6.458
+   ],
+   "currentAtEnd": -8.054
+  },
+  {
+   "label": "J1 back at 30 deg/s",
+   "seconds": 1.35,
+   "joint": 1,
+   "peakDegPerS": 30.0,
+   "askedDegPerS": 30.0,
+   "currentRange": [
+    -2.867,
+    23.482
+   ],
+   "currentAtEnd": 7.926
+  },
+  {
+   "label": "J2 +10 deg at 10 deg/s",
+   "seconds": 1.6,
+   "joint": 2,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -0.002,
+    17.64
+   ],
+   "currentAtEnd": -0.002
+  },
+  {
+   "label": "J2 back at 10 deg/s",
+   "seconds": 1.68,
+   "joint": 2,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -20.315,
+    0.012
+   ],
+   "currentAtEnd": -0.897
+  },
+  {
+   "label": "J2 -10 deg at 10 deg/s",
+   "seconds": 1.68,
+   "joint": 2,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -14.77,
+    2.882
+   ],
+   "currentAtEnd": 2.882
+  },
+  {
+   "label": "J2 back at 10 deg/s",
+   "seconds": 1.68,
+   "joint": 2,
+   "peakDegPerS": 11.3,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    2.35,
+    20.183
+   ],
+   "currentAtEnd": 6.243
+  },
+  {
+   "label": "J2 +10 deg at 20 deg/s",
+   "seconds": 1.24,
+   "joint": 2,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -4.835,
+    20.859
+   ],
+   "currentAtEnd": -0.321
+  },
+  {
+   "label": "J2 back at 20 deg/s",
+   "seconds": 1.25,
+   "joint": 2,
+   "peakDegPerS": 20.2,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -31.707,
+    -0.945
+   ],
+   "currentAtEnd": -1.067
+  },
+  {
+   "label": "J2 -10 deg at 20 deg/s",
+   "seconds": 1.3,
+   "joint": 2,
+   "peakDegPerS": 22.6,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -22.034,
+    5.187
+   ],
+   "currentAtEnd": 3.236
+  },
+  {
+   "label": "J2 back at 20 deg/s",
+   "seconds": 1.36,
+   "joint": 2,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    0.889,
+    26.163
+   ],
+   "currentAtEnd": 6.13
+  },
+  {
+   "label": "J3 +10 deg at 10 deg/s",
+   "seconds": 1.6,
+   "joint": 3,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -22.4,
+    -16.081
+   ],
+   "currentAtEnd": -18.387
+  },
+  {
+   "label": "J3 back at 10 deg/s",
+   "seconds": 1.62,
+   "joint": 3,
+   "peakDegPerS": 11.3,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -32.717,
+    -18.336
+   ],
+   "currentAtEnd": -30.118
+  },
+  {
+   "label": "J3 -10 deg at 10 deg/s",
+   "seconds": 1.67,
+   "joint": 3,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -36.988,
+    -27.141
+   ],
+   "currentAtEnd": -27.164
+  },
+  {
+   "label": "J3 back at 10 deg/s",
+   "seconds": 1.73,
+   "joint": 3,
+   "peakDegPerS": 10.0,
+   "askedDegPerS": 10.0,
+   "currentRange": [
+    -26.678,
+    -17.926
+   ],
+   "currentAtEnd": -23.734
+  },
+  {
+   "label": "J3 +10 deg at 20 deg/s",
+   "seconds": 1.18,
+   "joint": 3,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -23.851,
+    -14.006
+   ],
+   "currentAtEnd": -18.454
+  },
+  {
+   "label": "J3 back at 20 deg/s",
+   "seconds": 1.17,
+   "joint": 3,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -33.964,
+    -18.727
+   ],
+   "currentAtEnd": -30.0
+  },
+  {
+   "label": "J3 -10 deg at 20 deg/s",
+   "seconds": 1.3,
+   "joint": 3,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -36.391,
+    -25.403
+   ],
+   "currentAtEnd": -26.709
+  },
+  {
+   "label": "J3 back at 20 deg/s",
+   "seconds": 1.29,
+   "joint": 3,
+   "peakDegPerS": 20.0,
+   "askedDegPerS": 20.0,
+   "currentRange": [
+    -25.209,
+    -15.827
+   ],
+   "currentAtEnd": -23.715
+  },
+  {
+   "label": "J4 +20 deg at 15 deg/s",
+   "seconds": 2.05,
+   "joint": 4,
+   "peakDegPerS": 15.0,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    0.849,
+    4.101
+   ],
+   "currentAtEnd": 2.932
+  },
+  {
+   "label": "J4 back at 15 deg/s",
+   "seconds": 2.0,
+   "joint": 4,
+   "peakDegPerS": 17.0,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -4.073,
+    2.856
+   ],
+   "currentAtEnd": -1.253
+  },
+  {
+   "label": "J4 -20 deg at 15 deg/s",
+   "seconds": 2.06,
+   "joint": 4,
+   "peakDegPerS": 15.0,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -2.961,
+    0.362
+   ],
+   "currentAtEnd": 0.362
+  },
+  {
+   "label": "J4 back at 15 deg/s",
+   "seconds": 2.04,
+   "joint": 4,
+   "peakDegPerS": 17.1,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    0.848,
+    4.571
+   ],
+   "currentAtEnd": 3.557
+  },
+  {
+   "label": "J4 +20 deg at 45 deg/s",
+   "seconds": 1.3,
+   "joint": 4,
+   "peakDegPerS": 44.2,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    0.786,
+    4.852
+   ],
+   "currentAtEnd": 3.042
+  },
+  {
+   "label": "J4 back at 45 deg/s",
+   "seconds": 1.36,
+   "joint": 4,
+   "peakDegPerS": 44.3,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    -4.721,
+    2.951
+   ],
+   "currentAtEnd": -1.302
+  },
+  {
+   "label": "J4 -20 deg at 45 deg/s",
+   "seconds": 1.38,
+   "joint": 4,
+   "peakDegPerS": 43.3,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    -3.932,
+    0.853
+   ],
+   "currentAtEnd": 0.534
+  },
+  {
+   "label": "J4 back at 45 deg/s",
+   "seconds": 1.24,
+   "joint": 4,
+   "peakDegPerS": 44.9,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    1.305,
+    6.032
+   ],
+   "currentAtEnd": 3.411
+  },
+  {
+   "label": "J5 +20 deg at 15 deg/s",
+   "seconds": 2.07,
+   "joint": 5,
+   "peakDegPerS": 15.0,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    0.113,
+    4.347
+   ],
+   "currentAtEnd": 2.234
+  },
+  {
+   "label": "J5 back at 15 deg/s",
+   "seconds": 2.05,
+   "joint": 5,
+   "peakDegPerS": 15.1,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -4.502,
+    1.825
+   ],
+   "currentAtEnd": -2.805
+  },
+  {
+   "label": "J5 -20 deg at 15 deg/s",
+   "seconds": 1.98,
+   "joint": 5,
+   "peakDegPerS": 15.1,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -4.481,
+    -1.413
+   ],
+   "currentAtEnd": -2.22
+  },
+  {
+   "label": "J5 back at 15 deg/s",
+   "seconds": 2.03,
+   "joint": 5,
+   "peakDegPerS": 15.0,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -2.171,
+    4.115
+   ],
+   "currentAtEnd": 1.137
+  },
+  {
+   "label": "J5 +20 deg at 45 deg/s",
+   "seconds": 1.29,
+   "joint": 5,
+   "peakDegPerS": 44.5,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    0.716,
+    5.437
+   ],
+   "currentAtEnd": 2.298
+  },
+  {
+   "label": "J5 back at 45 deg/s",
+   "seconds": 1.29,
+   "joint": 5,
+   "peakDegPerS": 44.6,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    -5.575,
+    2.351
+   ],
+   "currentAtEnd": -2.712
+  },
+  {
+   "label": "J5 -20 deg at 45 deg/s",
+   "seconds": 1.36,
+   "joint": 5,
+   "peakDegPerS": 44.3,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    -5.466,
+    -1.202
+   ],
+   "currentAtEnd": -2.107
+  },
+  {
+   "label": "J5 back at 45 deg/s",
+   "seconds": 1.37,
+   "joint": 5,
+   "peakDegPerS": 44.8,
+   "askedDegPerS": 45.0,
+   "currentRange": [
+    -1.739,
+    5.467
+   ],
+   "currentAtEnd": 0.97
+  },
+  {
+   "label": "J6 +30 deg at 15 deg/s",
+   "seconds": 2.69,
+   "joint": 6,
+   "peakDegPerS": 16.7,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    0.402,
+    3.797
+   ],
+   "currentAtEnd": 2.064
+  },
+  {
+   "label": "J6 back at 15 deg/s",
+   "seconds": 2.75,
+   "joint": 6,
+   "peakDegPerS": 15.1,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -4.403,
+    2.087
+   ],
+   "currentAtEnd": -3.672
+  },
+  {
+   "label": "J6 -30 deg at 15 deg/s",
+   "seconds": 2.61,
+   "joint": 6,
+   "peakDegPerS": 15.1,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -3.853,
+    -0.62
+   ],
+   "currentAtEnd": -0.62
+  },
+  {
+   "label": "J6 back at 15 deg/s",
+   "seconds": 2.74,
+   "joint": 6,
+   "peakDegPerS": 16.8,
+   "askedDegPerS": 15.0,
+   "currentRange": [
+    -0.499,
+    3.712
+   ],
+   "currentAtEnd": 1.867
+  },
+  {
+   "label": "J6 +30 deg at 60 deg/s",
+   "seconds": 1.41,
+   "joint": 6,
+   "peakDegPerS": 59.8,
+   "askedDegPerS": 60.0,
+   "currentRange": [
+    0.347,
+    5.518
+   ],
+   "currentAtEnd": 1.979
+  },
+  {
+   "label": "J6 back at 60 deg/s",
+   "seconds": 1.36,
+   "joint": 6,
+   "peakDegPerS": 59.4,
+   "askedDegPerS": 60.0,
+   "currentRange": [
+    -5.554,
+    -0.165
+   ],
+   "currentAtEnd": -3.87
+  },
+  {
+   "label": "J6 -30 deg at 60 deg/s",
+   "seconds": 1.49,
+   "joint": 6,
+   "peakDegPerS": 60.0,
+   "askedDegPerS": 60.0,
+   "currentRange": [
+    -5.174,
+    -0.533
+   ],
+   "currentAtEnd": -0.533
+  },
+  {
+   "label": "J6 back at 60 deg/s",
+   "seconds": 1.41,
+   "joint": 6,
+   "peakDegPerS": 60.0,
+   "askedDegPerS": 60.0,
+   "currentRange": [
+    -0.498,
+    5.366
+   ],
+   "currentAtEnd": 1.8
+  },
+  {
+   "label": "line X +100 mm at 50 mm/s",
+   "seconds": 3.06,
+   "axis": "X",
+   "travelMm": 99.97,
+   "maxOffLineMm": 0.085,
+   "maxOrientationChangeDeg": 0.044,
+   "peakMmPerS": 50.1,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line X back at 50 mm/s",
+   "seconds": 3.11
+  },
+  {
+   "label": "line X +100 mm at 100 mm/s",
+   "seconds": 2.62,
+   "axis": "X",
+   "travelMm": 99.94,
+   "maxOffLineMm": 0.082,
+   "maxOrientationChangeDeg": 0.047,
+   "peakMmPerS": 87.6,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line X back at 100 mm/s",
+   "seconds": 2.67
+  },
+  {
+   "label": "line X -50 mm at 50 mm/s",
+   "seconds": 1.73,
+   "axis": "X",
+   "travelMm": 49.86,
+   "maxOffLineMm": 0.067,
+   "maxOrientationChangeDeg": 0.014,
+   "peakMmPerS": 50.0,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line X back at 50 mm/s",
+   "seconds": 1.81
+  },
+  {
+   "label": "line X -50 mm at 100 mm/s",
+   "seconds": 1.54,
+   "axis": "X",
+   "travelMm": 49.99,
+   "maxOffLineMm": 0.042,
+   "maxOrientationChangeDeg": 0.026,
+   "peakMmPerS": 89.6,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line X back at 100 mm/s",
+   "seconds": 1.56
+  },
+  {
+   "label": "line Y +100 mm at 50 mm/s",
+   "seconds": 3.09,
+   "axis": "Y",
+   "travelMm": 99.95,
+   "maxOffLineMm": 0.075,
+   "maxOrientationChangeDeg": 0.128,
+   "peakMmPerS": 50.3,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line Y back at 50 mm/s",
+   "seconds": 3.13
+  },
+  {
+   "label": "line Y +100 mm at 100 mm/s",
+   "seconds": 2.71,
+   "axis": "Y",
+   "travelMm": 99.92,
+   "maxOffLineMm": 0.07,
+   "maxOrientationChangeDeg": 0.024,
+   "peakMmPerS": 89.7,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line Y back at 100 mm/s",
+   "seconds": 2.64
+  },
+  {
+   "label": "line Y -100 mm at 50 mm/s",
+   "seconds": 3.14,
+   "axis": "Y",
+   "travelMm": 99.88,
+   "maxOffLineMm": 0.212,
+   "maxOrientationChangeDeg": 0.096,
+   "peakMmPerS": 50.1,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line Y back at 50 mm/s",
+   "seconds": 3.2
+  },
+  {
+   "label": "line Y -100 mm at 100 mm/s",
+   "seconds": 2.73,
+   "axis": "Y",
+   "travelMm": 99.99,
+   "maxOffLineMm": 0.199,
+   "maxOrientationChangeDeg": 0.061,
+   "peakMmPerS": 89.8,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line Y back at 100 mm/s",
+   "seconds": 2.63
+  },
+  {
+   "label": "line Z +100 mm at 50 mm/s",
+   "seconds": 3.19,
+   "axis": "Z",
+   "travelMm": 99.8,
+   "maxOffLineMm": 0.072,
+   "maxOrientationChangeDeg": 0.039,
+   "peakMmPerS": 55.8,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line Z back at 50 mm/s",
+   "seconds": 3.15
+  },
+  {
+   "label": "line Z +100 mm at 100 mm/s",
+   "seconds": 2.68,
+   "axis": "Z",
+   "travelMm": 99.8,
+   "maxOffLineMm": 0.08,
+   "maxOrientationChangeDeg": 0.024,
+   "peakMmPerS": 89.4,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line Z back at 100 mm/s",
+   "seconds": 2.68
+  },
+  {
+   "label": "line Z -100 mm at 50 mm/s",
+   "seconds": 3.12,
+   "axis": "Z",
+   "travelMm": 99.9,
+   "maxOffLineMm": 0.025,
+   "maxOrientationChangeDeg": 0.003,
+   "peakMmPerS": 50.1,
+   "askedMmPerS": 50.0
+  },
+  {
+   "label": "line Z back at 50 mm/s",
+   "seconds": 3.12
+  },
+  {
+   "label": "line Z -100 mm at 100 mm/s",
+   "seconds": 2.74,
+   "axis": "Z",
+   "travelMm": 99.96,
+   "maxOffLineMm": 0.017,
+   "maxOrientationChangeDeg": 0.04,
+   "peakMmPerS": 89.2,
+   "askedMmPerS": 100.0
+  },
+  {
+   "label": "line Z back at 100 mm/s",
+   "seconds": 2.62
+  },
+  {
+   "label": "joint return after lines",
+   "seconds": 1.04
+  },
+  {
+   "label": "STOP test: J1 +30 deg at 30 deg/s",
+   "seconds": 0.8
+  },
+  {
+   "label": "STOP sent",
+   "seconds": 2.52
+  },
+  {
+   "label": "enable after STOP",
+   "seconds": 1.82
+  },
+  {
+   "label": "return to start",
+   "seconds": 2.39
+  },
+  {
+   "label": "rest at end",
+   "seconds": 15.01
+  }
+ ],
+ "stopTest": {
+  "jointSpeedBeforeDegPerS": 30.0,
+  "stoppedWithinMs": 299,
+  "travelAfterStopDeg": 0.21,
+  "flangeTravelAfterStopMm": 1.1,
+  "note": "frame-quantised: status arrives every ~100 ms"
+ },
+ "reenableShift": {
+  "windowS": 1.82,
+  "maxJointDeg": 0.0554,
+  "tcpMm": 0.456
+ },
+ "firstEnableShift": {
+  "maxJointDeg": 0.061,
+  "tcpMm": 0.53,
+  "source": "panel status (0.01 mm, 0.001 deg)"
+ }
+}

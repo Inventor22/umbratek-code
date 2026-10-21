@@ -13,6 +13,11 @@ Code and experiments for controlling an [Umbratek UTRA 1000 6-DOF robotic arm](h
 | `scripts/model/cart/` | The aluminium-extrusion cart the arm stands on, as a URDF in the arm's base frame, built from the SolidWorks assembly in [Inventor22/umbratek-cad](https://github.com/Inventor22/umbratek-cad) (see its `SOURCE.txt`). |
 | `notebooks/0 UTRA Tests.ipynb` | SDK motion demos: joint point-to-point, linear, blended linear, arcs, servo. |
 | `arduino/Chess Gripper/` | Servo calibration sketch for the chess-piece gripper (servo on pin 9, alternates 25° and 120°). |
+| `tools/utra_sim.py` | A stand-in for the NTRO controller, for trying the jog panel and `arm.py` offline and for the tests. |
+| `tools/capture/` | The tools that recorded the arm's status streams, settings and servo registers (with the owner present). |
+| `data/captures/` | What the real arm measured: raw streams, commands, settings and the analysis, one folder per capture. |
+| `tests/` | The test suites and their runner, `python tests/run_all.py` (see `tests/README.md`). |
+| `docs/` | The machine-tending featureset's specification, decisions, test plans and reports. |
 
 CAD for the mounting plate and gripper, plus the UTRA quick start guide PDF, live in [Inventor22/umbratek-cad](https://github.com/Inventor22/umbratek-cad).
 

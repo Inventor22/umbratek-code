@@ -1,0 +1,1993 @@
+[
+ {
+  "path": "/api/enable",
+  "body": {},
+  "sentWallNs": 1792575461919799700,
+  "sentMonoNs": 746786300,
+  "replyMonoNs": 863834100,
+  "reply": {
+   "ok": true,
+   "message": "Motors on. Click a key to move one step; hold it to repeat."
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    51.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575524014269100,
+  "sentMonoNs": 62840800700,
+  "replyMonoNs": 62874910900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 51.1\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575526130376500,
+  "sentMonoNs": 64956815100,
+  "replyMonoNs": 64979576500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 36.1\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    21.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575528306375000,
+  "sentMonoNs": 67132760400,
+  "replyMonoNs": 67165010600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 21.1\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575530486408400,
+  "sentMonoNs": 69312957600,
+  "replyMonoNs": 69334871500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 36.1\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    51.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 30.0
+  },
+  "sentWallNs": 1792575532665584000,
+  "sentMonoNs": 71492008500,
+  "replyMonoNs": 71527816300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 51.1\u00b0 at 30\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 30.0
+  },
+  "sentWallNs": 1792575533993240900,
+  "sentMonoNs": 72819848900,
+  "replyMonoNs": 72846163400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 36.1\u00b0 at 30\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    21.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 30.0
+  },
+  "sentWallNs": 1792575535367657900,
+  "sentMonoNs": 74194013400,
+  "replyMonoNs": 74230088000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 21.1\u00b0 at 30\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 30.0
+  },
+  "sentWallNs": 1792575536684556900,
+  "sentMonoNs": 75510910900,
+  "replyMonoNs": 75532938700,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 36.1\u00b0 at 30\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    38.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575538038484300,
+  "sentMonoNs": 76865506200,
+  "replyMonoNs": 76893282700,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 38.5\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575539643242400,
+  "sentMonoNs": 78469303400,
+  "replyMonoNs": 78497306800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 28.5\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    18.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575541322495800,
+  "sentMonoNs": 80148950700,
+  "replyMonoNs": 80175815400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 18.5\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575543002433300,
+  "sentMonoNs": 81828971400,
+  "replyMonoNs": 81855256400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 28.5\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    38.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575544684681800,
+  "sentMonoNs": 83511004300,
+  "replyMonoNs": 83534897800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 38.5\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575545920991600,
+  "sentMonoNs": 84747377700,
+  "replyMonoNs": 84777267100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 28.5\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    18.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575547170798900,
+  "sentMonoNs": 85997028000,
+  "replyMonoNs": 86022697200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 18.5\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575548468988000,
+  "sentMonoNs": 87295402700,
+  "replyMonoNs": 87318294400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J2 \u2192 28.5\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    148.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575549833491400,
+  "sentMonoNs": 88659739800,
+  "replyMonoNs": 88679328500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 148.8\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575551436793000,
+  "sentMonoNs": 90263234000,
+  "replyMonoNs": 90286381900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 138.8\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    128.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575553056787700,
+  "sentMonoNs": 91882954800,
+  "replyMonoNs": 91900759100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 128.8\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575554725864100,
+  "sentMonoNs": 93552111900,
+  "replyMonoNs": 93570577800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 138.8\u00b0 at 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    148.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575556453586100,
+  "sentMonoNs": 95279690200,
+  "replyMonoNs": 95297456100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 148.8\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575557633958100,
+  "sentMonoNs": 96460079500,
+  "replyMonoNs": 96478797400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 138.8\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    128.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575558798864500,
+  "sentMonoNs": 97625121800,
+  "replyMonoNs": 97642295500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 128.8\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 20.0
+  },
+  "sentWallNs": 1792575560094832400,
+  "sentMonoNs": 98921007900,
+  "replyMonoNs": 98938119300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J3 \u2192 138.8\u00b0 at 20\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    128.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575561382682800,
+  "sentMonoNs": 100208756400,
+  "replyMonoNs": 100227890300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 128.4\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575563433349200,
+  "sentMonoNs": 102259861000,
+  "replyMonoNs": 102287949400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 108.4\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    88.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575565433957900,
+  "sentMonoNs": 104260345700,
+  "replyMonoNs": 104281738200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 88.4\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575567489860200,
+  "sentMonoNs": 106315943900,
+  "replyMonoNs": 106334065500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 108.4\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    128.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575569531318000,
+  "sentMonoNs": 108357392600,
+  "replyMonoNs": 108376869800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 128.4\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575570835640300,
+  "sentMonoNs": 109661630700,
+  "replyMonoNs": 109679593300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 108.4\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    88.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575572193272200,
+  "sentMonoNs": 111019305400,
+  "replyMonoNs": 111052233900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 88.4\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575573575921600,
+  "sentMonoNs": 112402073300,
+  "replyMonoNs": 112425053900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J4 \u2192 108.4\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    65.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575574815806700,
+  "sentMonoNs": 113641931500,
+  "replyMonoNs": 113665209800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 65.8\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575576884838900,
+  "sentMonoNs": 115710851300,
+  "replyMonoNs": 115727595300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 45.8\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    25.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575578930448500,
+  "sentMonoNs": 117756299200,
+  "replyMonoNs": 117771959800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 25.8\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575580912050000,
+  "sentMonoNs": 119738229600,
+  "replyMonoNs": 119754219900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 45.8\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    65.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575582944656300,
+  "sentMonoNs": 121770493700,
+  "replyMonoNs": 121785316600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 65.8\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575584238709800,
+  "sentMonoNs": 123064757500,
+  "replyMonoNs": 123085094900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 45.8\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    25.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575585531991900,
+  "sentMonoNs": 124357963500,
+  "replyMonoNs": 124375115100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 25.8\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 45.0
+  },
+  "sentWallNs": 1792575586889338000,
+  "sentMonoNs": 125715217700,
+  "replyMonoNs": 125737079600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J5 \u2192 45.8\u00b0 at 45\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    94.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575588262259200,
+  "sentMonoNs": 127088108000,
+  "replyMonoNs": 127103704300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 94.6\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575590948715700,
+  "sentMonoNs": 129774647900,
+  "replyMonoNs": 129790555000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 64.6\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    34.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575593696262600,
+  "sentMonoNs": 132522067700,
+  "replyMonoNs": 132539230300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Moving J4, J6 together to the plan at up to 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 15.0
+  },
+  "sentWallNs": 1792575596305251000,
+  "sentMonoNs": 135131269300,
+  "replyMonoNs": 135158065800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 64.6\u00b0 at 15\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    94.622
+   ],
+   "speed": 60.0
+  },
+  "sentWallNs": 1792575599044562200,
+  "sentMonoNs": 137870401700,
+  "replyMonoNs": 137885719800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 94.6\u00b0 at 60\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 60.0
+  },
+  "sentWallNs": 1792575600458492500,
+  "sentMonoNs": 139284354800,
+  "replyMonoNs": 139298801800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 64.6\u00b0 at 60\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    34.622
+   ],
+   "speed": 60.0
+  },
+  "sentWallNs": 1792575601817520800,
+  "sentMonoNs": 140643292200,
+  "replyMonoNs": 140658987500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 34.6\u00b0 at 60\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 60.0
+  },
+  "sentWallNs": 1792575603304784900,
+  "sentMonoNs": 142130431200,
+  "replyMonoNs": 142144753300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J6 \u2192 64.6\u00b0 at 60\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575604718088000,
+  "sentMonoNs": 143543574300,
+  "replyMonoNs": 143558421300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 358.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575604732763900,
+  "sentMonoNs": 143558528200,
+  "replyMonoNs": 143564313200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 408.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575607774939600,
+  "sentMonoNs": 146600671400,
+  "replyMonoNs": 146610319300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 358.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575607784945400,
+  "sentMonoNs": 146610379500,
+  "replyMonoNs": 146634869500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 308.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575610885107000,
+  "sentMonoNs": 149711049200,
+  "replyMonoNs": 149722360300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 358.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575610897105800,
+  "sentMonoNs": 149722441100,
+  "replyMonoNs": 149728494200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 408.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575613500707700,
+  "sentMonoNs": 152326400900,
+  "replyMonoNs": 152336100100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 358.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575613510709700,
+  "sentMonoNs": 152336198600,
+  "replyMonoNs": 152342672900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 308.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575616171985800,
+  "sentMonoNs": 154997585400,
+  "replyMonoNs": 155006872500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 258.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575617906003500,
+  "sentMonoNs": 156731544900,
+  "replyMonoNs": 156764508900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 308.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575619719050100,
+  "sentMonoNs": 158544594300,
+  "replyMonoNs": 158554182500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X \u221250 mm \u2192 258.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 0,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575621257118600,
+  "sentMonoNs": 160082616700,
+  "replyMonoNs": 160092516000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "X +50 mm \u2192 308.5 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575622814382500,
+  "sentMonoNs": 161640120300,
+  "replyMonoNs": 161649803900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 36.8 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575622824383300,
+  "sentMonoNs": 161649866300,
+  "replyMonoNs": 161655323200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 86.8 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575625908333600,
+  "sentMonoNs": 164733848000,
+  "replyMonoNs": 164756581100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 36.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575625931333900,
+  "sentMonoNs": 164756658300,
+  "replyMonoNs": 164762359300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -13.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575629038564200,
+  "sentMonoNs": 167864034200,
+  "replyMonoNs": 167873154000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 36.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575629047502000,
+  "sentMonoNs": 167873216200,
+  "replyMonoNs": 167899193500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 86.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575631743709600,
+  "sentMonoNs": 170569222300,
+  "replyMonoNs": 170588120200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 36.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575631762708100,
+  "sentMonoNs": 170588182400,
+  "replyMonoNs": 170617719000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -13.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575634386950400,
+  "sentMonoNs": 173212304700,
+  "replyMonoNs": 173222706900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -63.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575634396946400,
+  "sentMonoNs": 173222779100,
+  "replyMonoNs": 173250695000,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -113.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575637525945800,
+  "sentMonoNs": 176351523900,
+  "replyMonoNs": 176363661800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 -63.2 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575637537946400,
+  "sentMonoNs": 176363758600,
+  "replyMonoNs": 176386828600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 -13.2 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575640726387900,
+  "sentMonoNs": 179552012300,
+  "replyMonoNs": 179562327700,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -63.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575640737386100,
+  "sentMonoNs": 179562394200,
+  "replyMonoNs": 179568567400,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y \u221250 mm \u2192 -113.3 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575643460977800,
+  "sentMonoNs": 182286378700,
+  "replyMonoNs": 182296612900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 -63.2 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 1,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575643471220700,
+  "sentMonoNs": 182296743100,
+  "replyMonoNs": 182320800300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Y +50 mm \u2192 -13.2 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575646087753100,
+  "sentMonoNs": 184913019400,
+  "replyMonoNs": 184928147700,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 526.0 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575646102753700,
+  "sentMonoNs": 184928224400,
+  "replyMonoNs": 184934815900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 576.0 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575649278311200,
+  "sentMonoNs": 188103525600,
+  "replyMonoNs": 188114127200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 525.9 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575649288316200,
+  "sentMonoNs": 188114190900,
+  "replyMonoNs": 188120211300,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 475.9 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575652432136000,
+  "sentMonoNs": 191257419600,
+  "replyMonoNs": 191276539900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 525.9 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575652451137400,
+  "sentMonoNs": 191276602600,
+  "replyMonoNs": 191293102800,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 575.9 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575655110270900,
+  "sentMonoNs": 193935574100,
+  "replyMonoNs": 193946756500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 525.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575655121271500,
+  "sentMonoNs": 193946845000,
+  "replyMonoNs": 193952683100,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 475.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575657787886700,
+  "sentMonoNs": 196613157300,
+  "replyMonoNs": 196622985200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 425.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575657798020000,
+  "sentMonoNs": 196623047900,
+  "replyMonoNs": 196648619500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 375.7 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575660909680600,
+  "sentMonoNs": 199734793000,
+  "replyMonoNs": 199746128500,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 425.8 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 50.0
+  },
+  "sentWallNs": 1792575660920682600,
+  "sentMonoNs": 199746202200,
+  "replyMonoNs": 199751954700,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 475.8 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575664026073600,
+  "sentMonoNs": 202851252500,
+  "replyMonoNs": 202863070600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 425.6 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": -1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575664038071000,
+  "sentMonoNs": 202863169900,
+  "replyMonoNs": 202869745600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z \u221250 mm \u2192 375.6 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575666768096000,
+  "sentMonoNs": 205593244100,
+  "replyMonoNs": 205612840900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 425.6 mm"
+  }
+ },
+ {
+  "path": "/api/jog",
+  "body": {
+   "kind": "tool",
+   "index": 2,
+   "dir": 1,
+   "step": 50.0,
+   "rotStep": 5.0,
+   "speed": 100.0
+  },
+  "sentWallNs": 1792575666788097900,
+  "sentMonoNs": 205612974300,
+  "replyMonoNs": 205619115200,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Z +50 mm \u2192 475.6 mm"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575669389850100,
+  "sentMonoNs": 208214868100,
+  "replyMonoNs": 208231707600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Moving J3, J4, J5, J6 together to the plan at up to 10\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    66.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 30.0
+  },
+  "sentWallNs": 1792575670429079300,
+  "sentMonoNs": 209254399100,
+  "replyMonoNs": 209298858600,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "J1 \u2192 66.1\u00b0 at 30\u00b0/s"
+  }
+ },
+ {
+  "path": "/api/stop",
+  "body": {},
+  "sentWallNs": 1792575671227622000,
+  "sentMonoNs": 210052554500,
+  "replyMonoNs": 210065213600,
+  "reply": {
+   "ok": true,
+   "message": "Stopped. The controller confirmed it. Hold Enable to carry on."
+  }
+ },
+ {
+  "path": "/api/enable",
+  "body": {},
+  "sentWallNs": 1792575673743653800,
+  "sentMonoNs": 212568598000,
+  "replyMonoNs": 212674934500,
+  "reply": {
+   "ok": true,
+   "message": "Motors on. Click a key to move one step; hold it to repeat."
+  }
+ },
+ {
+  "path": "/api/move",
+  "body": {
+   "targets": [
+    36.112,
+    28.528,
+    138.784,
+    108.432,
+    45.764,
+    64.622
+   ],
+   "speed": 10.0
+  },
+  "sentWallNs": 1792575675567568900,
+  "sentMonoNs": 214392589300,
+  "replyMonoNs": 214419939900,
+  "reply": {
+   "ok": true,
+   "moved": true,
+   "message": "Moving J1, J3 together to the plan at up to 10\u00b0/s"
+  }
+ }
+]

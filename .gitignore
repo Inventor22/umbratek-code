@@ -130,3 +130,9 @@ dmypy.json
 
 # three.js for the jog panel's 3D view: scripts/jog_server.py downloads it on its first run
 scripts/vendor/
+
+# Oracle environment for offline tools and test oracles (conda-forge: NumPy, SciPy, OpenCV, Pinocchio); see tests/README.md
+.venv-oracle/
+
+# Simulator and server logs written by the test suites
+tests/logs/

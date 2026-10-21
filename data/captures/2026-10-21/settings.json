@@ -1,0 +1,353 @@
+{
+ "time": "2026-10-21T02:34:22-0700",
+ "arm": {
+  "get_uuid": [
+   0,
+   "00:e0:4c:68:00:3d"
+  ],
+  "get_sw_version": [
+   0,
+   "739c89bb822021-12-18"
+  ],
+  "get_hw_version": [
+   0,
+   "0001110001  x86J1900"
+  ],
+  "get_motion_mode": [
+   0,
+   0
+  ],
+  "get_motion_enable": [
+   0,
+   0
+  ],
+  "get_brake_enable": [
+   0,
+   0
+  ],
+  "get_error_code": [
+   0,
+   [
+    0,
+    0
+   ]
+  ],
+  "get_servo_msg": [
+   0,
+   "0 0 0 0 0 0 0 0 0 0 0 0"
+  ],
+  "get_joint_maxacc": [
+   0,
+   3.4906585216522217
+  ],
+  "get_joint_jerk": [
+   0,
+   24.0
+  ],
+  "get_tcp_maxacc": [
+   0,
+   200.0
+  ],
+  "get_tcp_jerk": [
+   0,
+   2000.0
+  ],
+  "get_tcp_offset": [
+   0,
+   [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  ],
+  "get_tcp_load": [
+   0,
+   [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  ],
+  "get_gravity_dir": [
+   0,
+   [
+    0.0,
+    0.0,
+    -1.0
+   ]
+  ],
+  "get_collis_sens": [
+   0,
+   0
+  ],
+  "get_teach_sens": [
+   0,
+   0
+  ],
+  "get_tcp_target_pos": [
+   0,
+   [
+    308.37579345703125,
+    -13.305757522583008,
+    477.81817626953125,
+    1.6196856498718262,
+    -1.1062129735946655,
+    1.3849941492080688
+   ]
+  ],
+  "get_tcp_actual_pos": [
+   0,
+   0
+  ],
+  "get_tgpio_sw_version": [
+   0,
+   "be675f3-1013"
+  ],
+  "get_tgpio_hw_version": [
+   0,
+   "220101220101220101000000"
+  ],
+  "get_cgpio_sw_version": [
+   0,
+   "d4265e8-1217"
+  ],
+  "get_cgpio_hw_version": [
+   0,
+   "210103210103210103000000"
+  ]
+ },
+ "servos": {
+  "1": {
+   "UUID": " ",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011%\u0006\u0011%\u0006\u0011%\u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 26.44133186340332,
+   "TEMP_MOTOR": 26.468162536621094,
+   "BUS_VOLT": 47.758365631103516,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 75.62026977539062,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 2.799999952316284,
+   "VEL_CURRENT": -4.1703963958410195e-13,
+   "VEL_LIMIT_MAX": 220.0,
+   "VEL_LIMIT_MIN": -220.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.10000000149011612,
+   "VEL_PIDI": 0.0003000000142492354,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 5.933332920074463,
+   "TAU_LIMIT_MIN": -5.933332920074463,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 0.9509999752044678,
+   "TAU_PIDI": 0.002309999894350767,
+   "readSeconds": 0.14
+  },
+  "2": {
+   "UUID": "\n",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011%\u0006\u0011%\u0006\u0011%\u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 27.346763610839844,
+   "TEMP_MOTOR": 27.319995880126953,
+   "BUS_VOLT": 47.86235809326172,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 59.763126373291016,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 2.799999952316284,
+   "VEL_CURRENT": -0.00010871206904994324,
+   "VEL_LIMIT_MAX": 220.0,
+   "VEL_LIMIT_MIN": -220.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.10000000149011612,
+   "VEL_PIDI": 0.0003000000142492354,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 5.933332920074463,
+   "TAU_LIMIT_MIN": -5.933332920074463,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 0.9509999752044678,
+   "TAU_PIDI": 0.002309999894350767,
+   "readSeconds": 0.12
+  },
+  "3": {
+   "UUID": "0",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011 \u0006\u0011 \u0006\u0011 \u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 28.3231201171875,
+   "TEMP_MOTOR": 28.270084381103516,
+   "BUS_VOLT": 47.996971130371094,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 242.1181640625,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 2.200000047683716,
+   "VEL_CURRENT": -0.0007763124885968864,
+   "VEL_LIMIT_MAX": 250.0,
+   "VEL_LIMIT_MIN": -250.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.10000000149011612,
+   "VEL_PIDI": 0.00019999999494757503,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 2.7249999046325684,
+   "TAU_LIMIT_MIN": -2.7249999046325684,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 1.8259999752044678,
+   "TAU_PIDI": 0.010999999940395355,
+   "readSeconds": 0.12
+  },
+  "4": {
+   "UUID": "\u0011",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011\u0017\u0006\u0011\u0017\u0006\u0011\u0017\u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 31.530988693237305,
+   "TEMP_MOTOR": 31.479843139648438,
+   "BUS_VOLT": 48.13957977294922,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 189.25909423828125,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 1.7999999523162842,
+   "VEL_CURRENT": 0.0022218620870262384,
+   "VEL_LIMIT_MAX": 260.0,
+   "VEL_LIMIT_MIN": -260.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.15000000596046448,
+   "VEL_PIDI": 0.0003000000142492354,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 2.5439999103546143,
+   "TAU_LIMIT_MIN": -2.5439999103546143,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 1.0290000438690186,
+   "TAU_PIDI": 0.0061599998734891415,
+   "readSeconds": 0.14
+  },
+  "5": {
+   "UUID": "\u001c",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011\u0017\u0006\u0011\u0017\u0006\u0011\u0017\u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 32.649452209472656,
+   "TEMP_MOTOR": 32.523353576660156,
+   "BUS_VOLT": 47.99348449707031,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 79.87693786621094,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 1.7999999523162842,
+   "VEL_CURRENT": 0.0034002524334937334,
+   "VEL_LIMIT_MAX": 260.0,
+   "VEL_LIMIT_MIN": -260.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.15000000596046448,
+   "VEL_PIDI": 0.0003000000142492354,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 2.5439999103546143,
+   "TAU_LIMIT_MIN": -2.5439999103546143,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 1.0290000438690186,
+   "TAU_PIDI": 0.0061599998734891415,
+   "readSeconds": 0.12
+  },
+  "6": {
+   "UUID": "/",
+   "SW_VERSION": "98bb7af2f850",
+   "HW_VERSION": "\u0011\u0017\u0006\u0011\u0017\u0006\u0011\u0017\u0006\u0004\u0001",
+   "MULTI_VERSION": "\u000b\ufffd3\ufffd",
+   "MOTION_DIR": 1,
+   "MOTION_ENABLE": 0,
+   "BRAKE_ENABLE": 0,
+   "ERROR_CODE": 0,
+   "POS_SMOOTH_CYC": 2,
+   "VEL_SMOOTH_CYC": 2,
+   "TAU_SMOOTH_CYC": 6,
+   "MECH_RATIO": 1.0,
+   "ELEC_RATIO": 1.0,
+   "CURR_LIMIT": 0.0,
+   "TEMP_DRIVER": 33.04954147338867,
+   "TEMP_MOTOR": 32.948612213134766,
+   "BUS_VOLT": 47.909706115722656,
+   "BUS_CURR": 0.0,
+   "POS_CURRENT": 112.80166625976562,
+   "POS_LIMIT_MAX": 18850.0,
+   "POS_LIMIT_MIN": -18850.0,
+   "POS_LIMIT_DIFF": 25.132741928100586,
+   "POS_PIDP": 1.7999999523162842,
+   "VEL_CURRENT": -1.6633917709896195e-07,
+   "VEL_LIMIT_MAX": 260.0,
+   "VEL_LIMIT_MIN": -260.0,
+   "VEL_LIMIT_DIFF": 0.0,
+   "VEL_PIDP": 0.15000000596046448,
+   "VEL_PIDI": 0.0003000000142492354,
+   "TAU_CURRENT": 0.0,
+   "TAU_LIMIT_MAX": 2.5439999103546143,
+   "TAU_LIMIT_MIN": -2.5439999103546143,
+   "TAU_LIMIT_DIFF": 0.0,
+   "TAU_PIDP": 1.0290000438690186,
+   "TAU_PIDI": 0.0061599998734891415,
+   "readSeconds": 0.12
+  }
+ }
+}
