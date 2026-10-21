@@ -137,16 +137,16 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .state-detail { color: var(--ink-2); font-size: 13px; }
   /* Lit state window. Each rung differs in brightness, not just hue:
      moving (lit amber) > alarm (solid red) > ready (lit green) > stopped (red tint) > motors off (dark). */
-  .readout-window[data-tone="moving"] { background: var(--amber); border-color: #ffd08a; }
-  .readout-window[data-tone="moving"] :is(.state-name, .state-detail) { color: var(--amber-ink); }
+  .readout-window[data-tone="moving"], .run-window[data-tone="moving"] { background: var(--amber); border-color: #ffd08a; }
+  :is(.readout-window, .run-window)[data-tone="moving"] :is(.state-name, .state-detail) { color: var(--amber-ink); }
   .readout-window[data-tone="alarm"] { background: #c62f25; border-color: #ff8073; }
   .readout-window[data-tone="alarm"] :is(.state-name, .state-detail) { color: #fff; }
-  .readout-window[data-tone="ready"] { background: #1a4a2d; border-color: #4f9c6b; }
-  .readout-window[data-tone="ready"] .state-name { color: #a6efbf; }
-  .readout-window[data-tone="ready"] .state-detail { color: #d3eedc; }
-  .readout-window[data-tone="stopped"] { background: #2b100d; border-color: #8c2f26; }
-  .readout-window[data-tone="stopped"] .state-name { color: var(--alarm); }
-  .readout-window[data-tone="stopped"] .state-detail { color: #f3c3bd; }
+  .readout-window[data-tone="ready"], .run-window[data-tone="ready"] { background: #1a4a2d; border-color: #4f9c6b; }
+  :is(.readout-window, .run-window)[data-tone="ready"] .state-name { color: #a6efbf; }
+  :is(.readout-window, .run-window)[data-tone="ready"] .state-detail { color: #d3eedc; }
+  .readout-window[data-tone="stopped"], .run-window[data-tone="stopped"] { background: #2b100d; border-color: #8c2f26; }
+  :is(.readout-window, .run-window)[data-tone="stopped"] .state-name { color: var(--alarm); }
+  :is(.readout-window, .run-window)[data-tone="stopped"] .state-detail { color: #f3c3bd; }
 
   .enable {
     grid-area: enable;
@@ -199,8 +199,8 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .desk {
     display: grid;
     grid-template-columns: minmax(400px, 1fr) minmax(0, 780px);
-    grid-template-areas: "monitor joints" "monitor tool";
-    grid-template-rows: auto 1fr;
+    grid-template-areas: "monitor joints" "monitor tool" "monitor program" "monitor teach" "monitor cell";
+    grid-template-rows: auto auto auto auto 1fr;
     gap: 14px;
     padding: 14px 16px;
     align-items: stretch;
@@ -369,6 +369,7 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .mode-key { min-width: 58px; }
   .mode-key:first-child { border-radius: 4px 0 0 4px; }
   .mode-key:last-child { border-left-width: 0; border-radius: 0 4px 4px 0; }
+  .mode-key:not(:first-child):not(:last-child) { border-left-width: 0; border-radius: 0; }
   /* Pressed in: the face sinks inside a rim that stays put, so the joined block keeps a straight outline. */
   .mode-key[aria-pressed="true"], .mode-key[aria-pressed="true"]:hover:not(:disabled) {
     background: linear-gradient(#25282c, #2d3136);
@@ -654,8 +655,156 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   #note[data-tone="bad"] { color: var(--alarm); font-weight: 600; }
   .hint { color: var(--ink-2); }
 
+  /* ---- Program, teach and cell: the machine-tending featureset ---- */
+  .program { grid-area: program; }
+  .teach { grid-area: teach; }
+  .cell { grid-area: cell; }
+  .program, .teach, .cell { grid-template-rows: none; }
+  .field {
+    height: 30px;
+    min-width: 0;
+    padding: 0 8px;
+    background: var(--well);
+    color: var(--ink);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.6);
+    font: 400 13px/1.4 var(--font);
+    font-variant-numeric: tabular-nums;
+  }
+  .field:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
+  input.field[type="number"] { width: 64px; }
+  input.field.bit { width: 52px; }
+  input.field.name { width: 132px; }
+  .field-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .field-row label { display: flex; align-items: center; gap: 6px; }
+  .field-row .legend { white-space: nowrap; }
+  .cue { font-size: 12px; color: var(--ink-2); }
+  .key.small { min-width: 46px; height: 30px; padding: 0 10px; font-size: 12px; font-weight: 600; }
+  .key.mini { min-width: 26px; height: 22px; padding: 0 6px; border-radius: 3px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+  .key[data-armed] { color: var(--alarm); }
+  .run-panel { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; align-items: stretch; }
+  .run-window {
+    display: grid;
+    align-content: center;
+    gap: 2px;
+    padding: 8px 12px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 4px;
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.5);
+    transition: background-color 160ms var(--ease), border-color 160ms var(--ease);
+  }
+  .run-window .state-name { font-size: 18px; }
+  .run-window .state-detail { overflow-wrap: anywhere; }
+  .run-keys { display: grid; grid-template-columns: repeat(3, minmax(76px, 1fr)); gap: 8px; align-content: start; }
+  .run-keys .key { height: 36px; padding: 0 12px; font-size: 13px; font-weight: 650; }
+  /* Run, Step and Dry run stay pressable when they can't go, unlit, and a press is refused with the reason, as
+     Move is. Run carries Move's amber lamp along its lower edge while a run can start. */
+  .run-keys .key[aria-disabled="true"] { color: var(--ink-2); }
+  .run-keys .key.go { color: var(--amber); font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em;
+                      border-color: #8a6420; box-shadow: inset 0 -3px 0 var(--amber), 0 2px 0 #0b0c0d; }
+  .run-keys .key.go[aria-disabled="true"] { color: var(--ink-2); border-color: var(--cap-edge);
+                                            box-shadow: 0 2px 0 #0b0c0d, 0 3px 6px rgb(0 0 0 / 0.35); }
+  .run-keys .key[aria-disabled="true"]:active {
+    background: linear-gradient(var(--cap-top), var(--cap));
+    color: var(--ink-2);
+    box-shadow: 0 0 0 #0b0c0d, inset 0 2px 4px rgb(0 0 0 / 0.3);
+  }
+  .well-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--well);
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.45);
+    max-height: 300px;
+    overflow: auto;
+  }
+  .well-list:empty::before { content: attr(data-empty); padding: 4px 6px; font-size: 13px; color: var(--ink-2); }
+  .well-list > li { flex: none; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 4px 6px 4px 10px;
+    background: #1b1d20;
+    border: 1px solid var(--seam);
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  .row .what { min-width: 0; overflow-wrap: anywhere; }
+  .row .what b { font-weight: 650; }
+  .row .what .cue { margin-left: 6px; }
+  .row .acts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: end; }
+  /* A step: its lamp (amber while it runs, grey while the run waits on it, red if it failed), then a flat button
+     that selects it (new steps go after the selected one), then its keys. */
+  .steps .row { grid-template-columns: 9px minmax(0, 1fr) auto; padding-left: 8px; }
+  .steps .row .led[data-on="moving"] { background: var(--amber); }
+  /* Held: the run waits on this step (paused, halted or stepped): a hollow amber lamp, as a commanded angle is a
+     hollow amber frame on a meter. */
+  .steps .row .led[data-on="held"] { background: transparent; box-shadow: inset 0 0 0 2px var(--amber); }
+  .steps .row:is([data-current="moving"], [data-current="held"]) .num { color: var(--amber); font-weight: 650; }
+  .steps .row[data-current="dead"] .num { color: var(--alarm); font-weight: 650; }
+  .steps .row.selected { background: var(--cap); border-color: var(--cap-edge); }
+  .steps .pick {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 2px;
+    border: 0;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  .steps .pick .num { flex: none; min-width: 34px; font-size: 12px; color: var(--ink-2); }
+  .steps .pick .text { min-width: 0; overflow-wrap: anywhere; }
+  .steps .row[data-depth="1"] .pick { padding-left: 16px; }
+  .steps .row[data-depth="2"] .pick { padding-left: 30px; }
+  .steps .row[data-depth="3"] .pick { padding-left: 44px; }
+  .steps .row.comment .text { color: var(--ink-2); }
+  .row .bad { color: var(--alarm); }
+  .events { max-height: 190px; font-size: 12px; gap: 1px; }
+  .events li { color: var(--ink-2); overflow-wrap: anywhere; }
+  .events li time { color: #8f8b83; margin-right: 8px; }
+  .events li.bad { color: var(--alarm); }
+  .split { display: grid; gap: 16px; }
+  .group { display: grid; gap: 8px; align-content: start; }
+  .group + .group { padding-top: 14px; border-top: 1px solid var(--seam); }
+  .group > .legend { margin-top: 2px; }
+  .freedrive {
+    position: relative;
+    overflow: hidden;
+    min-width: 170px;
+    padding: 8px 14px;
+    align-content: center;
+    gap: 2px;
+  }
+  .freedrive .fill {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 5px;
+    background: var(--amber);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 160ms var(--ease);
+  }
+  .freedrive.charging .fill { transform: scaleX(1); transition: transform 700ms linear; }
+  .freedrive .label { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+  .freedrive .sub { font-size: 11px; color: var(--ink-2); letter-spacing: 0.02em; }
+  /* On: the cap stays charcoal (keys light amber only while held) with its lamp and legend lit amber, as Enable's
+     on state lights its lamp green; the bridge's FREEDRIVE window carries the solid amber. */
+  .freedrive.on .label { color: var(--amber); }
+  .freedrive.on .label .led { background: var(--amber); }
+
   @media (max-width: 1240px) {
-    .desk { grid-template-columns: minmax(0, 1fr); grid-template-areas: "monitor" "joints" "tool"; grid-template-rows: none; }
+    .desk { grid-template-columns: minmax(0, 1fr); grid-template-areas: "monitor" "joints" "tool" "program" "teach" "cell"; grid-template-rows: none; }
     /* Short enough that the fader readouts still land in the first screenful of an app side panel. */
     .screen { min-height: 0; height: clamp(300px, 36vh, 500px); }
   }
@@ -668,6 +817,7 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
     .strips { grid-template-columns: repeat(3, minmax(92px, 1fr)); }
   }
   @media (max-width: 560px) {
+    .run-panel { grid-template-columns: minmax(0, 1fr); }
     .axes { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
     .joints .bank h2, .tool .bank h2, .detent { flex-basis: 100%; max-width: none; }
     /* Tall enough that the tool gizmo fits above a staged plan's bar, short enough that the bar's Move key stays
@@ -773,6 +923,148 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
     </div>
     <div class="axes" id="axes"></div>
   </section>
+
+  <section class="section program" aria-labelledby="programTitle">
+    <div class="bank">
+      <h2 id="programTitle">Program</h2>
+      <label class="field-row"><span class="legend">Program</span>
+        <select class="field" id="programSelect" aria-label="Program"></select></label>
+      <button class="key small" id="programDelete" type="button">Delete</button>
+      <label class="field-row"><span class="legend">New</span>
+        <input class="field name" id="programName" placeholder="name" aria-label="New program's name" spellcheck="false"></label>
+      <button class="key small" id="programCreate" type="button">Create</button>
+      <div id="overrideFader"></div>
+    </div>
+    <div class="run-panel">
+      <div class="run-window" id="runWindow" data-tone="idle" aria-live="polite">
+        <p class="state-name" id="runWord">NO RUN</p>
+        <p class="state-detail" id="runSentence">Pick a program, or name a new one and press Create.</p>
+      </div>
+      <div class="run-keys" role="group" aria-label="Run controls">
+        <button class="key go" id="runStart" type="button">Run</button>
+        <button class="key" id="runStepKey" type="button">Step</button>
+        <button class="key" id="runDry" type="button">Dry run</button>
+        <button class="key" id="runPause" type="button">Pause</button>
+        <button class="key" id="runStop" type="button">Stop run</button>
+        <button class="key" id="runReset" type="button">Reset</button>
+      </div>
+    </div>
+    <ol class="well-list steps" id="steps" aria-label="Steps" data-empty="No steps yet. Record targets in Teach with “add a move”, or add a step below."></ol>
+    <div class="field-row composer" id="composer" role="group" aria-label="Add a step after the selected one">
+      <span class="legend">Add</span>
+      <select class="field" id="stepType" aria-label="Step type">
+        <option value="joint">Joint move</option><option value="line">Straight move</option>
+        <option value="wait">Wait</option><option value="waitInput">Wait for input</option>
+        <option value="set">Set output</option><option value="pulse">Pulse output</option>
+        <option value="halt">Halt</option><option value="comment">Comment</option>
+      </select>
+      <select class="field" id="stepTarget" aria-label="Target"></select>
+      <label data-for="move"><span class="legend">Back</span><input class="field" id="stepBack" type="number" min="0" max="500" step="1" value="0" aria-label="Approach: mm back along the tool"><span class="cue">mm</span></label>
+      <label data-for="move"><span class="legend">Speed</span><input class="field" id="stepSpeed" type="number" min="1" max="1000" step="1" placeholder="default" aria-label="Speed (blank for the program's default)"><span class="cue" id="stepSpeedUnit">°/s</span></label>
+      <div class="mode-keys" id="stepIoLine" role="group" aria-label="On the tool or the controller">
+        <button class="key latch mode-key" type="button" data-value="tool" aria-pressed="true">Tool</button>
+        <button class="key latch mode-key" type="button" data-value="controller" aria-pressed="false">Controller</button>
+      </div>
+      <input class="field bit" id="stepIoBit" type="number" min="0" max="15" step="1" value="0" aria-label="Line number (0 to 15)">
+      <div class="mode-keys" id="stepValue" role="group" aria-label="Value">
+        <button class="key latch mode-key" type="button" data-value="1" aria-pressed="true">On</button>
+        <button class="key latch mode-key" type="button" data-value="0" aria-pressed="false">Off</button>
+      </div>
+      <label data-for="seconds"><input class="field" id="stepSeconds" type="number" min="0" step="0.1" value="1" aria-label="Seconds"><span class="cue">s</span></label>
+      <label data-for="timeout"><span class="legend">Timeout</span><input class="field" id="stepTimeout" type="number" min="0.1" step="1" value="30" aria-label="Timeout (s)"><span class="cue">s</span></label>
+      <input class="field" id="stepText" placeholder="message" aria-label="Message" spellcheck="false">
+      <button class="key small" id="stepAdd" type="button">Add step</button>
+    </div>
+    <p class="legend">Log</p>
+    <ol class="well-list events" id="events" aria-label="Run log" data-empty="Each run's events show here and go to cell/logs."></ol>
+  </section>
+
+  <section class="section teach" aria-labelledby="teachTitle">
+    <div class="bank">
+      <h2 id="teachTitle">Teach</h2>
+      <button class="key freedrive" id="freedriveKey" type="button" aria-describedby="freedriveSub">
+        <span class="label"><span class="led"></span><span id="freedriveLabel">Hold for freedrive</span></span>
+        <span class="sub" id="freedriveSub">Hold for 0.7 s</span>
+        <span class="fill"></span>
+      </button>
+      <div id="sensitivityFader"></div>
+    </div>
+    <div class="field-row" role="group" aria-label="Record a target where the arm is">
+      <span class="legend">Record</span>
+      <input class="field name" id="recordName" placeholder="target name" aria-label="Target name" spellcheck="false">
+      <div class="mode-keys" id="recordAs" role="group" aria-label="Record it as">
+        <button class="key latch mode-key" type="button" data-value="tool" aria-pressed="true">Tool pose</button>
+        <button class="key latch mode-key" type="button" data-value="joint" aria-pressed="false">Joints</button>
+      </div>
+      <label><span class="legend">In</span><select class="field" id="recordFrame" aria-label="Frame"></select></label>
+      <button class="key small" id="recordKey" type="button">Record here</button>
+    </div>
+    <div class="field-row" role="group" aria-label="Also add a move to the new target in the program">
+      <span class="legend">Then add</span>
+      <div class="mode-keys" id="recordAdd" role="group" aria-label="Add a move to it in the program">
+        <button class="key latch mode-key" type="button" data-value="none" aria-pressed="true">No move</button>
+        <button class="key latch mode-key" type="button" data-value="line" aria-pressed="false">Straight move</button>
+        <button class="key latch mode-key" type="button" data-value="joint" aria-pressed="false">Joint move</button>
+      </div>
+      <span class="cue" id="recordIntoText">to it in the program, after the selected step</span>
+    </div>
+  </section>
+
+  <section class="section cell" aria-labelledby="cellTitle">
+    <div class="bank">
+      <h2 id="cellTitle">Cell</h2>
+      <p class="cue" id="cellSummary">Tools, frames, targets and keep-out zones, saved in cell/cell.json.</p>
+    </div>
+    <div class="split">
+      <div class="group">
+        <p class="legend">Tools</p>
+        <ul class="well-list" id="tools" aria-label="Tools"></ul>
+        <div class="field-row" role="group" aria-label="New or changed tool">
+          <input class="field name" id="toolName" placeholder="tool name" aria-label="Tool name" spellcheck="false">
+          <label><span class="legend">Point</span><input class="field" id="toolX" type="number" step="0.1" value="0" aria-label="Tool point x (mm)"><input class="field" id="toolY" type="number" step="0.1" value="0" aria-label="Tool point y (mm)"><input class="field" id="toolZ" type="number" step="0.1" value="0" aria-label="Tool point z (mm)"><span class="cue">mm</span></label>
+          <label><span class="legend">Mass</span><input class="field" id="toolMass" type="number" step="0.01" min="0" max="10" value="0" aria-label="Payload (kg)"><span class="cue">kg</span></label>
+          <label><span class="legend">CoG</span><input class="field" id="toolCx" type="number" step="1" value="0" aria-label="Payload's centre of gravity x (mm)"><input class="field" id="toolCy" type="number" step="1" value="0" aria-label="Payload's centre of gravity y (mm)"><input class="field" id="toolCz" type="number" step="1" value="0" aria-label="Payload's centre of gravity z (mm)"><span class="cue">mm</span></label>
+          <label><span class="legend">Shape</span><input class="field" id="toolLength" type="number" step="1" min="0" value="0" aria-label="Shape: length along the tool from the flange (mm)"><input class="field" id="toolRadius" type="number" step="1" min="0" value="0" aria-label="Shape: radius (mm)"><span class="cue">mm long, radius</span></label>
+          <button class="key small" id="toolSave" type="button">Save tool</button>
+        </div>
+        <div class="field-row" role="group" aria-label="Find the tool point by touching one fixed point from four or more angles">
+          <span class="legend">Touch-fit</span>
+          <button class="key small" id="toolTouch" type="button">Touch</button>
+          <button class="key small" id="toolFit" type="button">Fit</button>
+          <button class="key small" id="toolTouchClear" type="button">Clear</button>
+          <span class="cue" id="toolTouchCue">Rest the tool point on one fixed spike from 4 or more angles, pressing Touch at each.</span>
+        </div>
+      </div>
+      <div class="group">
+        <p class="legend">Frames</p>
+        <ul class="well-list" id="frames" aria-label="Frames" data-empty="No frames yet: touch a fixture's origin, +X and XY with the tool point, then Fit."></ul>
+        <div class="field-row" role="group" aria-label="Calibrate a frame by touching three points">
+          <input class="field name" id="frameName" placeholder="frame name" aria-label="Frame name" spellcheck="false">
+          <label><span class="legend">In</span><select class="field" id="frameParent" aria-label="Parent frame"></select></label>
+          <button class="key small" id="touchOrigin" type="button">Origin</button>
+          <button class="key small" id="touchX" type="button">+X</button>
+          <button class="key small" id="touchXY" type="button">XY</button>
+          <button class="key small" id="frameFit" type="button">Fit</button>
+          <span class="cue" id="frameTouchCue">With the tool point, touch the fixture's origin, a point along its +X edge, and a point on its +Y side; then Fit.</span>
+        </div>
+      </div>
+      <div class="group">
+        <p class="legend">Targets</p>
+        <ul class="well-list" id="targets" aria-label="Targets" data-empty="No targets yet: move the arm there (freedrive or jog) and Record in Teach."></ul>
+      </div>
+      <div class="group">
+        <p class="legend">Keep-out zones</p>
+        <ul class="well-list" id="zones" aria-label="Keep-out zones" data-empty="No zones: the arm is checked against itself, its cart, the floor and the tool."></ul>
+        <div class="field-row" role="group" aria-label="New keep-out zone">
+          <input class="field name" id="zoneName" placeholder="zone name" aria-label="Zone name" spellcheck="false">
+          <label><span class="legend">In</span><select class="field" id="zoneFrame" aria-label="Zone's frame"></select></label>
+          <label><span class="legend">Centre</span><input class="field" id="zoneX" type="number" step="1" value="0" aria-label="Centre x (mm)"><input class="field" id="zoneY" type="number" step="1" value="0" aria-label="Centre y (mm)"><input class="field" id="zoneZ" type="number" step="1" value="0" aria-label="Centre z (mm)"></label>
+          <label><span class="legend">Size</span><input class="field" id="zoneW" type="number" step="1" min="1" value="100" aria-label="Size x (mm)"><input class="field" id="zoneD" type="number" step="1" min="1" value="100" aria-label="Size y (mm)"><input class="field" id="zoneH" type="number" step="1" min="1" value="100" aria-label="Size z (mm)"><span class="cue">mm</span></label>
+          <button class="key small" id="zoneSave" type="button">Save zone</button>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer class="console-line">
@@ -801,6 +1093,7 @@ const REPEAT_EVERY_MS = 250;
 const POLL_MS = 150;
 const MAX_WAITING_PRESSES = 2;
 const LEDS_PER_STEP = 4;
+const RUN_MOVING = ["running", "pausing", "stopping"];  // a program's run states in which the arm may move
 
 const $ = (id) => document.getElementById(id);
 const settings = loadSettings();
@@ -1378,6 +1671,24 @@ function clearPlan(text) {
   render();
 }
 
+// Stage a pose made elsewhere (a target, from the Cell section) as the plan: the shadow arm, the path check and
+// the plan bar show it, and Move sends it, as for a drag. Says why and returns false when it can't be staged now.
+function stageJoints(joints, text) {
+  if (!dragAllowed()) {
+    say(!CONFIG.model ? "Planning is off because the arm model didn't load."
+      : canJog ? "Wait for the arm to settle, then plan." : "Hold Enable before planning a move.", "bad");
+    return false;
+  }
+  cancelDrags();
+  const actual = measuredPose();
+  const next = joints.map((q, i) => (Math.abs(q - actual[i]) < 0.01 ? null : q));
+  plan = next.some(Number.isFinite) ? next : null;
+  planSentAt = 0;
+  say(plan ? text : "The arm is already there.", plan ? "ok" : "wait");
+  render();
+  return Boolean(plan);
+}
+
 // What dragging in the 3D view moves: each joint's ring, or the gizmo at the tool. Remembered on this PC.
 function syncDragMode() {
   const tool = dragMode === "tool";
@@ -1610,6 +1921,8 @@ $("stopKey").addEventListener("keydown", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== " " && event.key !== "Escape") return;
+  // Typing a space into a text field types it; STOP, Esc and the hardware E-stop still stop.
+  if (event.key === " " && event.target.matches && event.target.matches("input[type=text], input:not([type]), textarea")) return;
   event.preventDefault();
   event.stopPropagation();
   if (event.repeat) return;
@@ -1712,6 +2025,11 @@ function describe(s) {
   if (!s.enabled) return ["MOTORS OFF", "Hold Enable to switch the motors on.", "idle"];
   if (s.state === 4) return ["STOPPED", "The arm is stopped. Hold Enable to make it ready again.", "stopped"];
   if (s.state === 3) return ["PAUSED", "Press STOP to clear the paused move, then hold Enable.", "stopped"];
+  if (s.freedrive) return ["FREEDRIVE", "Guide the arm by hand. Record targets in Teach, then leave freedrive there.", "moving"];
+  if (s.run && RUN_MOVING.includes(s.run.state) && s.run.mode !== "dry") {
+    const what = s.run.manual ? "Moving to a target" : `Running ${s.run.program}`;
+    return [s.run.manual ? "MOVING" : "RUNNING", `${what}${s.run.step ? `: ${s.run.step}` : ""}. STOP ends it.`, "moving"];
+  }
   if (s.state === 1 || s.goal) {
     const queued = s.queued > 0 ? ` ${s.queued} more queued.` : "";
     return ["MOVING", `Heading for the commanded position.${queued}`, "moving"];
@@ -1725,6 +2043,11 @@ function describe(s) {
     }
     const names = joints.map((i) => `J${i + 1}`).join(", ");
     return ["READY", `${names} planned. Press Move to send ${joints.length > 1 ? "them" : "it"}, or Esc to clear.`, "ready"];
+  }
+  if (s.run && s.run.state === "paused" && !s.run.manual) {
+    const at = s.run.path ? ` at step ${s.run.path.map((i) => i + 1).join(".")}` : "";
+    return ["READY", `${s.run.program} is ${s.run.halt ? "halted" : "paused"}${at}: Resume or Step it in Program. `
+      + "You can jog first; it carries on from wherever the arm is.", "ready"];
   }
   return ["READY", "Click a key for one step, or drag in the 3D view or a joint's fader cap to plan a pose, then press Move.", "ready"];
 }
@@ -1747,7 +2070,8 @@ function render() {
   setText($("linkText"), live ? `Live · ${s.ip}${slow ? ` · status ${s.age.toFixed(1)} s old` : ""}`
     : s ? `No status from ${s.ip}` : settled ? "Jog server not answering" : "Connecting…");
 
-  canJog = live && !s.err && s.enabled && [0, 1, 2].includes(s.state) && !s.stopAlarm && !localStopAlarm;
+  canJog = live && !s.err && s.enabled && [0, 1, 2].includes(s.state) && !s.stopAlarm && !localStopAlarm
+    && !s.freedrive && !(s.run && RUN_MOVING.includes(s.run.state));
   if (!canJog && (fader || (view && view.isDragging()))) cancelDrags();  // the arm can't take a move now
   const goal = s && s.goal ? s.goal : null;
   const jointGoal = goal && goal.kind === "joint" ? goal.values : null;
@@ -1884,6 +2208,9 @@ async function poll() {
     }
   }
   render();
+  for (const listen of jogPanel.listeners) {
+    try { listen(status); } catch (e) { console.error(e); }  // a section's bug mustn't stop the polling
+  }
   setTimeout(poll, POLL_MS);
 }
 
@@ -1946,9 +2273,16 @@ if (CONFIG.model) {
     .catch(() => { /* the tool rows just won't show a planned pose */ });
 }
 
+// The program, teach and cell sections (web/featureset.js) build on these.
+const jogPanel = window.jogPanel = {
+  config: CONFIG, post, say, el, setText, refuse, stage: stageJoints,
+  status: () => status, view: () => view, settings: () => settings, listeners: [],
+};
+
 syncDragMode();
 render();
 poll();
 </script>
+<script type="module" src="/web/featureset.js"></script>
 </body>
 </html>

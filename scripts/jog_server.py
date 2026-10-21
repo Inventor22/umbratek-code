@@ -178,6 +178,7 @@ class Panel:
         self.pending_points = {}  # frame name -> {"parent", "tool", "origin", "x", "xy"} touched so far
         self.pending_poses = {}  # tool name -> flange poses (4x4) touching one point
         self.freedrive_since = None
+        self.teach_level = None  # the teach sensitivity this server last set for freedrive
         threading.Thread(target=self._read_reports, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
 
@@ -269,9 +270,10 @@ class Panel:
             out["goal"] = {"kind": "joint", "values": rounded(current[0].goal, 3), "program": True}
         run = self.runner.status()
         out["run"] = {k: run[k] for k in ("state", "mode", "manual", "program", "path", "step", "reason", "override",
-                                          "halt")}
+                                          "halt", "hit")}
         out["run"]["lastEvent"] = run["events"][-1] if run["events"] else None
         out["freedrive"] = frame["mode"] == 2
+        out["teachSensitivity"] = self.teach_level  # what this server last set for freedrive (None before)
         out["mode"] = frame["mode"]
         out["cellRevision"] = self.cell.revision
         out["tool"] = self.cell.data["active"]["tool"]
@@ -460,8 +462,9 @@ class Panel:
                         self.arm.set_motion_mode(2) not in arm.OK_CODES:
                     raise arm.ArmError("The controller refused freedrive.")
             self.freedrive_since = time.monotonic()
+            self.teach_level = int(level)
             return self._say(f"Freedrive on (sensitivity {level:g}): guide the arm by hand. Record targets as you go; "
-                             "Leave freedrive or STOP when done.")
+                             "leave freedrive or press STOP when done.")
         with self.lock:
             if self.arm.set_motion_mode(0) not in arm.OK_CODES:
                 raise arm.ArmError("The controller refused to leave freedrive. Press STOP.")
@@ -875,6 +878,17 @@ def cell_view(panel):
                 targets[name] = None
     out = {"ok": True, "cell": data, "framesInBase": frames, "targetsInBase": targets,
            "pending": {"frames": panel.pending_points, "tools": {k: len(v) for k, v in panel.pending_poses.items()}}}
+    scene = {"zones": [], "frames": [], "targets": []}  # what the 3D view draws (metres, base frame)
+    for o, (name, zone) in zip(cell.zone_obstacles(), data["zones"].items()):
+        scene["zones"].append({"name": name, "centre": o.centre, "axes": o.axes, "half": o.half})
+    for name in data["frames"]:
+        t = cell.frame_matrix(name)
+        scene["frames"].append({"name": name, "origin": [t[i][3] for i in range(3)], "x": [t[i][0] for i in range(3)],
+                                "y": [t[i][1] for i in range(3)]})
+    for name, pose in targets.items():
+        if pose is not None:
+            scene["targets"].append({"name": name, "p": [v / 1000.0 for v in pose["xyz"]]})
+    out["scene"] = scene
     if panel.model is not None:
         out["collision"] = panel.cell_model().collision_config()
     return out
@@ -981,6 +995,10 @@ def api_post(panel, path, body):
     if path == "/api/cell/target":
         return teach_target(panel, body)
     if path == "/api/cell/target/delete":
+        users = runnermod.programs_using(panel.programs, body.get("name"))
+        if users:
+            raise cellmod.CellError(f"Target {body.get('name')!r} is used by {', '.join(users)}; take it out of "
+                                    f"{'them' if len(users) > 1 else 'it'} first.")
         cell.delete_target(body.get("name"), rev)
         return dict(cell_view(panel), message=f"Target {body.get('name')} deleted.")
     if path == "/api/cell/zone":
@@ -1004,7 +1022,7 @@ def api_post(panel, path, body):
         getattr(runner, path.rsplit("/", 1)[1])()
         return {"ok": True, "run": runner.status()}
     if path == "/api/run/stop":
-        stopped = runner.stop("the operator pressed Stop")
+        stopped = runner.stop("Stop run was pressed")
         return {"ok": True, "run": runner.status(), "message": "Stopping the run." if stopped else "No run to stop."}
     if path == "/api/run/override":
         runner.set_override(body.get("percent"))

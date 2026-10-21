@@ -126,12 +126,13 @@ function buildArm(model, geometries, linkMaterial, baseMaterial) {
 }
 
 export async function createArmView(host, options) {
-  const {modelBase, urdfFile, tapes, limits, collision, cart, floorZ = 0} = options;
+  const {modelBase, urdfFile, tapes, limits, cart, floorZ = 0} = options;
+  let {collision} = options;
   const noop = () => {};
   const onPreview = options.onPreview || noop;
   const onRelease = options.onRelease || noop;
-  const checker = createChecker(collision);
-  const solver = createSolver(collision);
+  let checker = createChecker(collision);
+  let solver = createSolver(collision);
   let mode = options.mode === "tool" ? "tool" : "joints";  // what dragging in the view moves
 
   const urdfResponse = await fetch(modelBase + urdfFile, {cache: "no-store"});
@@ -277,6 +278,53 @@ export async function createArmView(host, options) {
   ghost.root.visible = false;
   scene.add(ghost.root);
   const probe = buildArm(model, geometries, null, null);  // for the flange's path; never drawn
+
+  // The cell's zones, frames and targets (setCell), drawn in neutral tones.
+  const cellGroup = new THREE.Group();
+  scene.add(cellGroup);
+  const zoneFill = new THREE.MeshBasicMaterial({color: 0xaaa69d, transparent: true, opacity: 0.07, depthWrite: false});
+  const zoneEdge = new THREE.LineBasicMaterial({color: 0x8f8b83, transparent: true, opacity: 0.8});
+  const frameInk = new THREE.LineBasicMaterial({color: COLOR.ink, depthTest: false, transparent: true});
+  const frameGrey = new THREE.LineBasicMaterial({color: 0x8f8b83, depthTest: false, transparent: true});
+  const dotCanvas = document.createElement("canvas");
+  dotCanvas.width = dotCanvas.height = 32;
+  const dotPen = dotCanvas.getContext("2d");
+  dotPen.fillStyle = "#0e0f10";
+  dotPen.beginPath();
+  dotPen.arc(16, 16, 15, 0, Math.PI * 2);
+  dotPen.fill();
+  dotPen.fillStyle = "#ece8df";
+  dotPen.beginPath();
+  dotPen.arc(16, 16, 10, 0, Math.PI * 2);
+  dotPen.fill();
+  const dotTexture = new THREE.CanvasTexture(dotCanvas);
+  dotTexture.colorSpace = THREE.SRGBColorSpace;
+  const targetDot = new THREE.SpriteMaterial({map: dotTexture, depthTest: false, depthWrite: false, transparent: true,
+                                              fog: false, sizeAttenuation: true});
+  // A frame's name, printed small in Printed Grey over a Well Black outline, a constant size on screen.
+  function textSprite(text, color) {
+    const canvas = document.createElement("canvas");
+    const pen = canvas.getContext("2d");
+    const font = "600 26px 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif";
+    pen.font = font;
+    canvas.width = Math.ceil(pen.measureText(text.toUpperCase()).width) + 12;
+    canvas.height = 40;
+    pen.font = font;
+    pen.textBaseline = "middle";
+    pen.lineWidth = 6;
+    pen.strokeStyle = "#0e0f10";
+    pen.strokeText(text.toUpperCase(), 6, 20);
+    pen.fillStyle = color;
+    pen.fillText(text.toUpperCase(), 6, 20);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture, depthTest: false, depthWrite: false,
+                                                              transparent: true, fog: false, sizeAttenuation: false}));
+    sprite.scale.set((canvas.width / canvas.height) * 0.022, 0.022, 1);
+    sprite.center.set(0, 0.5);
+    sprite.renderOrder = 10;
+    return sprite;
+  }
 
   // A straight joint-space move from `from` to `to`, checked for collisions as the server checks it, with
   // the flange's path for drawing, and how far the flange travels for each degree the lead joint turns, at its
@@ -604,6 +652,7 @@ export async function createArmView(host, options) {
   let shown = null;  // what the solid arm shows, easing toward `target`
   let goal = null;  // the server's commanded goal while the arm is moving
   let plan = null;  // staged targets per joint (deg, or null to stay with the real arm), built by dragging
+  let fault = null;  // where a faulted program step would have collided (setFault)
   let planCheck = {clear: true, hit: null, points: null, flangePerDeg: null};
   let planKey = "";  // what planCheck was worked out for
   let lastPlan = "";  // the staged plan last checked against the plan bar
@@ -643,6 +692,9 @@ export async function createArmView(host, options) {
     } else if (plan) {
       pose = withPlan(shown, plan);
       check = planCheck;
+    } else if (fault) {
+      pose = fault.pose;
+      check = {clear: false, hit: fault, points: null};
     } else if (goal) {
       pose = goal;
     }
@@ -1242,6 +1294,64 @@ export async function createArmView(host, options) {
       styleRings();
     },
     checkPath,
+    // The cell, from the server: its collision model (the active tool's shape and the keep-out zones join the
+    // check, as on the server), and the zones, frames and targets to draw. Zones are faint boxes with grey edges
+    // (red only when a plan would hit one), frames a grey x and y and their name, targets small light dots; none
+    // wear the gizmo's axis colours.
+    setCell(cell) {
+      if (cell && cell.collision) {
+        collision = cell.collision;
+        checker = createChecker(collision);
+        solver = createSolver(collision);
+        for (const overlay of highlights.values()) scene.remove(overlay);
+        highlights.clear();
+        planKey = null;  // re-check any staged plan against the new model
+      }
+      for (const child of [...cellGroup.children]) {
+        cellGroup.remove(child);
+        child.traverse((node) => {
+          if (node.geometry) node.geometry.dispose();
+          if (node.material && node.material.map) node.material.map.dispose();
+        });
+      }
+      for (const zone of (cell && cell.zones) || []) {
+        const geometry = new THREE.BoxGeometry(zone.half[0] * 2, zone.half[1] * 2, zone.half[2] * 2);
+        const box = new THREE.Mesh(geometry, zoneFill);
+        box.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), zoneEdge));
+        box.position.set(...zone.centre);
+        const [x, y, z] = zone.axes.map((axis) => new THREE.Vector3(...axis));
+        box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+        box.renderOrder = 2;
+        cellGroup.add(box);
+      }
+      for (const frame of (cell && cell.frames) || []) {
+        const group = new THREE.Group();
+        group.position.set(...frame.origin);
+        const along = (axis, length, material) => new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+          [new THREE.Vector3(), new THREE.Vector3(...axis).multiplyScalar(length)]), material);
+        group.add(along(frame.x, 0.07, frameInk), along(frame.y, 0.045, frameGrey));
+        group.add(textSprite(frame.name, "#aaa69d"));
+        group.children[2].position.set(...frame.x.map((v) => v * 0.085));
+        cellGroup.add(group);
+      }
+      for (const target of (cell && cell.targets) || []) {
+        const dot = new THREE.Sprite(targetDot);
+        dot.scale.set(0.012, 0.012, 1);
+        dot.position.set(...target.p);
+        dot.renderOrder = 9;
+        cellGroup.add(dot);
+      }
+      if (shown) updateGhost();
+      dirty = true;
+    },
+    // Where a program's step would have collided (the server's hit: pose, closest points, obstacle index), drawn
+    // as a blocked plan is: the red shadow arm at that pose, the contact mark and the red overlay. null clears it.
+    setFault(hit) {
+      const next = hit && Array.isArray(hit.pose) && hit.pose.length >= count ? hit : null;
+      if (JSON.stringify(next) === JSON.stringify(fault)) return;
+      fault = next;
+      if (shown) updateGhost();
+    },
     // What dragging in the view moves: "joints" (a ring per joint) or "tool" (the gizmo at the flange).
     setMode(next) {
       const wanted = next === "tool" ? "tool" : "joints";

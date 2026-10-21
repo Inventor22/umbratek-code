@@ -39,7 +39,11 @@ MAX_ORI_SPEED_DEG_S = 180.0
 
 
 class PlanError(Exception):
-    pass
+    """Why a move can't be planned; `hit` is utra_model's description of the collision, when that's why."""
+
+    def __init__(self, message, hit=None):
+        super().__init__(message)
+        self.hit = hit
 
 
 def capped_joint_speed(speed, travel):
@@ -106,7 +110,7 @@ class Planner:
                 raise PlanError(f"J{i + 1} would have to go to {g:.1f}\u00b0, outside {low:g}\u00b0 to {high:g}\u00b0.")
         hit = self.model.check_path(start, goal)
         if hit is not None:
-            raise PlanError(f"Not moving: {blocked(hit)}.")
+            raise PlanError(f"Not moving: {blocked(hit)}.", hit)
         travel = [abs(g - s) for s, g in zip(start, goal)]
         sent, limiting = capped_joint_speed(speed, travel)
         acc = min(max(100.0, sent / 0.3), self.joint_acc)
@@ -167,7 +171,7 @@ class Planner:
                                     f"need {rate:.0f}\u00b0/s at this speed (its top speed is {JOINT_RATED_DEG_S[j]:g}).")
             hit = self.model.check_path(q, nxt)
             if hit is not None:
-                raise PlanError(f"Not moving: {blocked(hit)} {along}.")
+                raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit)
             path.append(nxt)
             q = nxt
         segments = self._segments(t0, target, tool, path, speed)

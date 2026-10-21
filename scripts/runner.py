@@ -56,9 +56,17 @@ class Stopped(Exception):
 
 
 class Faulted(Exception):
-    def __init__(self, reason, path=None):
+    def __init__(self, reason, path=None, hit=None):
         super().__init__(reason)
-        self.reason, self.path = reason, path
+        self.reason, self.path, self.hit = reason, path, hit
+
+
+def drawable_hit(hit):
+    """A planner's collision, as the page draws it: the pose, the closest points (m) and the obstacle's index."""
+    if not hit:
+        return None
+    return {"part": hit["part"], "other": hit["other"], "obstacle": hit.get("obstacle"),
+            "pose": [round(v, 3) for v in hit["pose"]], "points": [[round(v, 5) for v in p] for p in hit["points"]]}
 
 
 def io_name(name, kind):
@@ -170,6 +178,27 @@ def kin_identity():
     return [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 
 
+def programs_using(programs, target):
+    """The saved programs with a move to `target`, as 'program <name>'."""
+    def uses(steps):
+        for s in steps if isinstance(steps, list) else []:
+            if not isinstance(s, dict):
+                continue
+            if s.get("type") == "move" and s.get("target") == target:
+                return True
+            if any(uses(s.get(key)) for key in ("steps", "then", "else")):
+                return True
+        return False
+    out = []
+    for name in programs.names():
+        try:
+            if uses(programs.load(name).get("steps")):
+                out.append(f"program {name}")
+        except (ProgramError, ValueError, OSError):
+            continue
+    return out
+
+
 class Programs:
     """Programs saved as cell/programs/<name>.json, each with a revision."""
 
@@ -239,6 +268,7 @@ class Runner:
         self.started_at = None
         self.estimate = None
         self.halt_message = ""
+        self.hit = None  # where a faulted run's step would have collided, for the 3D view
 
     # -- the status and log ----------------------------------------------------------------------------------------
     def status(self):
@@ -247,7 +277,7 @@ class Runner:
                     "program": self.program["name"] if self.program else None, "path": self.path,
                     "step": self.step_text, "reason": self.reason, "override": self.override,
                     "events": self.events[-40:], "log": os.path.relpath(self.log_path, self.log_folder) if self.log_path else None,
-                    "estimateS": self.estimate, "halt": self.halt_message}
+                    "estimateS": self.estimate, "halt": self.halt_message, "hit": self.hit}
 
     @property
     def busy(self):
@@ -288,7 +318,7 @@ class Runner:
             if self.state == "faulted":
                 raise ProgramError(f"The last run faulted ({self.reason}). Reset it first.")
             self.panel.check_can_run(dry=(mode == "dry"))
-            self.state, self.mode, self.reason, self.halt_message = "running", mode, "", ""
+            self.state, self.mode, self.reason, self.halt_message, self.hit = "running", mode, "", "", None
             self.program, self.manual, self.path, self.step_text = checked, manual, None, ""
             self.request = self.go = None
             self.events, self.estimate = [], None
@@ -343,6 +373,7 @@ class Runner:
             if self.busy:
                 raise ProgramError(f"The run is {self.state}; stop it first.")
             self.state, self.reason, self.path, self.step_text, self.halt_message = "idle", "", None, "", ""
+            self.hit = None
         self.log("operator", action="reset")
 
     def set_override(self, percent):
@@ -375,7 +406,7 @@ class Runner:
             self.log("run.stopped", reason=self.reason)
         except Faulted as e:
             with self.lock:
-                self.state, self.reason = "faulted", e.reason
+                self.state, self.reason, self.hit = "faulted", e.reason, drawable_hit(e.hit)
             self.log("run.faulted", reason=e.reason)
         except Exception as e:  # a bug: fault the run rather than die silently
             self.panel.stop("the program runner failed")
@@ -450,7 +481,7 @@ class Runner:
             except (ProgramError, cellmod.CellError, plannermod.PlanError) as e:
                 if self.virtual is None:
                     self.panel.stop(f"{where(path)} failed")
-                raise Faulted(f"{where(path)}: {e}", path)
+                raise Faulted(f"{where(path)}: {e}", path, getattr(e, "hit", None))
 
     def _pause_here(self, why, resume_same=False, halt=False):
         """Wait, paused, for resume, step or stop. Raises Stopped on stop."""

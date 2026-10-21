@@ -316,7 +316,19 @@ def scenario_moves():
         check("a line through the keep-out zone is refused before anything moves, naming the zone",
               s["run"]["state"] == "faulted" and "post zone" in s["run"]["reason"] and rig.log().count("MOVET_LINE:") == writes,
               s["run"])
+        hit = s["run"].get("hit") or {}
+        obstacles = rig.get("/api/cell")["collision"]["obstacles"]
+        box = obstacles[hit["obstacle"]] if isinstance(hit.get("obstacle"), int) else {}
+
+        def on_box(p):
+            d = np.array(p) - np.array(box["centre"])
+            return all(abs(float(d @ np.array(axis))) <= half + 1e-6 for axis, half in zip(box["axes"], box["half"]))
+
+        check("the faulted run reports where, for the 3D view: the zone's index in the page's collision model, a "
+              "contact point on the zone's box, and the pose", box.get("label") == "the post zone"
+              and any(on_box(p) for p in hit.get("points", [])) and len(hit.get("pose", [])) == 6, hit)
         rig.post("/api/run/reset")
+        check("and Reset clears it", rig.status()["run"].get("hit") is None, rig.status()["run"])
         rig.enable()
         rev = rig.get("/api/cell")["cell"]["revision"]
         rev = rig.post("/api/cell/zone/delete", {"name": "post", "revision": rev})["cell"]["revision"]
@@ -403,6 +415,7 @@ def scenario_controls():
         time.sleep(1.5)
         r = rig.post("/api/run/pause")
         s = rig.run_state("paused", timeout=10)
+        time.sleep(0.6)  # past the STOP's settling transient (0.5 s on the arm, as captured)
         held = rig.sim_joints()
         time.sleep(0.8)
         check("pause mid-line: the run pauses and the arm stops (controller state 4) and stays put",
@@ -544,6 +557,7 @@ def scenario_page():
         time.sleep(0.6)
         rig.post("/api/run/pause")
         rig.run_state("paused", timeout=10)
+        rig.wait(lambda s: s.get("state") == 4, 5)  # the pause's STOP shows in the status up to a frame later
         rig.enable()
         r = rig.post("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 2.0, "speed": 10.0})
         check("while paused, jogging is allowed", r["ok"] and r.get("moved"), r)
@@ -599,6 +613,10 @@ def scenario_teach():
         p, _ = tool_point_in(rig, frame_pose, tool, rig.sim_joints())
         check("the taught program runs, ending on the taught target within 0.1 mm", s["run"]["state"] == "done"
               and np.linalg.norm(p - np.array(got)[:3, 3] * 1000.0) < 0.1, (s["run"], p))
+        rev = rig.get("/api/cell")["cell"]["revision"]
+        r = rig.post("/api/cell/target/delete", {"name": "picked", "revision": rev})
+        check("a target a program moves to can't be deleted, naming the program", not r["ok"]
+              and "program taught" in r["message"] and "picked" in rig.get("/api/cell")["cell"]["targets"], r)
         rig.post("/api/freedrive", {"on": True, "sensitivity": 1})
         rig.wait(lambda s: s.get("freedrive"), 5)
         rig.post("/api/stop")

@@ -183,7 +183,7 @@ def scenario_assets():
         check("config lists the cart's meshes", [v["file"] for v in visuals] == ["meshes/frame.STL", "meshes/casters.STL",
                                                                                "meshes/controller.STL"], visuals)
         for path, kind in [("/web/arm_view.js", "text/javascript"), ("/web/collide.js", "text/javascript"),
-                           ("/web/ik.js", "text/javascript"),
+                           ("/web/ik.js", "text/javascript"), ("/web/featureset.js", "text/javascript"),
                            ("/vendor/three/build/three.module.js", "text/javascript"),
                            ("/vendor/three/build/three.core.js", "text/javascript"),
                            ("/vendor/three/examples/jsm/controls/OrbitControls.js", "text/javascript"),
@@ -201,6 +201,14 @@ def scenario_assets():
         size = os.path.getsize(os.path.join(ROOT, "scripts", "model", "utra6_1000", "meshes", "link6.STL"))
         code, _, body = fetch("/model/utra6_1000/meshes/link6.STL")
         check("mesh served byte for byte", len(body) == size, (len(body), size))
+        check("the page loads the program, teach and cell sections' module after its own script",
+              page.rfind('<script type="module" src="/web/featureset.js"></script>') > page.rfind("poll();"))
+        with open(os.path.join(ROOT, "scripts", "web", "featureset.js"), encoding="utf-8") as f:
+            wanted = sorted(set(re.findall(r'\$\("([A-Za-z]+)"\)', f.read())))
+        ids = re.findall(r'\sid="([A-Za-z]+)"', page)
+        missing = [i for i in wanted if ids.count(i) != 1]
+        check(f"every element the module looks up ({len(wanted)}) is in the page exactly once", wanted and not missing,
+              missing)
         import hashlib
         import jog_server
         check("config says three.js is here", config.get("three") is True, config.get("three"))

@@ -461,13 +461,48 @@ def live_registers():
         stop(sim)
 
 
+def live_morning_tools():
+    print("== the morning test plan's tools against the simulator: tau_check record, sensitivity")
+    sim, _ = start_sim(("--joints", "36.111,28.528,138.784,108.432,45.765,64.622"), "sim_morning.log")
+    try:
+        import subprocess
+        import tempfile
+        capture = os.path.join(TOOLS, "capture")
+        folder = tempfile.mkdtemp(prefix="morning-")
+
+        def tool(*args):
+            r = subprocess.run([sys.executable, *args], capture_output=True, text=True, timeout=60)
+            return r.returncode, r.stdout + r.stderr
+
+        code, text = tool(os.path.join(capture, "sensitivity.py"), "--ip", HOST)
+        check("sensitivity.py reads collision 0 and teach 0, as captured", code == 0
+              and "collision sensitivity 0, teach sensitivity 0" in text, text)
+        code, text = tool(os.path.join(capture, "sensitivity.py"), "--ip", HOST, "--collision", "4", "--teach", "2")
+        check("sets collision 4 and teach 2 and reads them back", code == 0
+              and "After:  collision sensitivity 4, teach sensitivity 2" in text, text)
+        code, text = tool(os.path.join(capture, "sensitivity.py"), "--ip", HOST, "--collision", "6")
+        check("refuses a level outside 0 to 5 without connecting", code != 0 and "0 to 5" in text, text)
+        path = os.path.join(folder, "rest.json")
+        code, text = tool(os.path.join(capture, "tau_check.py"), "record", path, "--ip", HOST, "--seconds", "1.5")
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        check("tau_check record: 13 to 17 frames in 1.5 s (10 Hz), the start pose, the simulator's rest tau",
+              code == 0 and 13 <= rec["frames"] <= 17
+              and max(abs(a - b) for a, b in zip(rec["joints"], (36.111, 28.528, 138.784, 108.432, 45.765, 64.622))) < 0.01
+              and max(abs(a - b) for a, b in zip(rec["tau"], utra_sim.REST_TAU)) < 0.05, (code, text, rec))
+        check("and the controller's settings from the config stream", rec.get("config", {}).get("collisionSensitivity") == 4
+              and rec["config"]["teachSensitivity"] == 2, rec.get("config"))
+    finally:
+        stop(sim)
+
+
 def main():
     rows, config, commands = fit_sim.load(CAPTURE_DIR)
     replay_joint_moves(rows, config, commands)
     replay_lines(rows, config, commands)
     replay_stop(rows, commands)
     replay_enable(rows, commands)
-    for scenario in (live_streams, live_motion, live_lines_and_pause, live_registers):
+    for scenario in (live_streams, live_motion, live_lines_and_pause, live_registers, live_morning_tools):
         try:
             scenario()
         except Exception as e:  # report and carry on

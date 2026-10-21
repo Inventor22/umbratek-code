@@ -424,8 +424,9 @@ class Arm:
             f = min(1.0, (now - started) / seconds) if seconds > 0 else 1.0
             f = f * f * (3 - 2 * f)
             q = [s + (g - s) * f for s, g in zip(start, goal)]
-            if f >= 1.0:
+            if f >= 1.0:  # done: the arm stays where the hand left it, whichever call notices first
                 self.hand = None
+                self.q = list(q)
             return q
         if self.current is None:
             return list(self.q)

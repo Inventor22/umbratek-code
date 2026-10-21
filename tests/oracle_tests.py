@@ -181,6 +181,47 @@ def main():
           worst_pos < 1e-9, worst_pos)
     check("and speed and acceleration never exceed their limits", worst_lim < 1e-9, worst_lim)
 
+    print("== tools/capture/tau_check.py: the torque a known load needs, against Pinocchio's generalized gravity")
+    sys.path.insert(0, os.path.join(ROOT, "tools", "capture"))
+    import argparse
+    import json
+    import tempfile
+    import tau_check
+    gmodel = pin.buildModelFromUrdf(URDF)
+    for i in range(len(gmodel.inertias)):
+        gmodel.inertias[i] = pin.Inertia.Zero()  # only the load's mass counts
+    gmodel.gravity.linear = np.array([0.0, 0.0, -tau_check.G])
+    flange_joint = gmodel.frames[flange_id].parentJoint
+    to_joint = gmodel.frames[flange_id].placement
+    worst = 0.0
+    cases = []
+    for _ in range(40):
+        q = random_joints()
+        mass = rng.uniform(0.2, 3.0)
+        at = [rng.uniform(-60, 60), rng.uniform(-60, 60), rng.uniform(0, 200)]
+        gmodel.inertias[flange_joint] = pin.Inertia(mass, to_joint.act(np.array(at) / 1000.0), np.zeros((3, 3)))
+        gdata = gmodel.createData()
+        expected = pin.computeGeneralizedGravity(gmodel, gdata, np.radians(q))
+        ours = tau_check.holding_torques(q, at, [0.0, 0.0, -mass * tau_check.G], model)
+        worst = max(worst, float(np.max(np.abs(np.array(ours) - expected))))
+        cases.append((q, at, mass, expected))
+    check("40 random poses, masses (0.2-3 kg) and points: the holding torques equal Pinocchio's within 1e-6 N m",
+          worst < 1e-6, worst)
+
+    # Synthetic recordings with a known scale (tau = 2.5 units per N m, the joint's sign) and noise: compare()
+    # must recover it, from Pinocchio's torques rather than its own.
+    q, at, mass, expected = max(cases, key=lambda c: sorted(np.abs(c[3]))[-2])  # two joints feel it well
+    base = [rng.uniform(-30, 30) for _ in range(6)]
+    folder = tempfile.mkdtemp(prefix="tau-")
+    for name, add in (("before", [0.0] * 6), ("after", list(2.5 * expected))):
+        with open(os.path.join(folder, name + ".json"), "w", encoding="utf-8") as f:
+            json.dump({"joints": q, "tau": [b + a + rng.gauss(0, 0.01) for b, a in zip(base, add)], "tauSd": [0.05] * 6}, f)
+    verdict = tau_check.compare(argparse.Namespace(
+        before=os.path.join(folder, "before.json"), after=os.path.join(folder, "after.json"), mass=mass, force=None,
+        at=",".join(str(v) for v in at)))
+    check("a recording made with tau = 2.5 x the torque: compare finds 2.5 within 2%, agreeing across joints",
+          abs(verdict.get("scale", 0) - 2.5) < 0.05 and verdict.get("spread", 1) < 0.05, verdict)
+
     failed = [n for n, ok in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} passed")
     return 1 if failed else 0
