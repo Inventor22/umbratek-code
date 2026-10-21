@@ -47,6 +47,7 @@ SUITES = {
     "panel": ("jog_server.py against the simulator", "test", ["panel_tests.py"], None, 900),
     "js": ("the panel's IK, and its collision check against the server's (Node)", "test", ["js_tests.py"], None, 600),
     "collide": ("collision geometry against dense sampling (NumPy)", "oracle", ["collide_tests.py"], None, 300),
+    "oracle": ("kinematics, poses and profiles against Pinocchio and SciPy", "oracle", ["oracle_tests.py"], None, 600),
     "paths": ("check_path against dense sampling along moves", "test", ["path_tests.py", "6"], ["path_tests.py", "2"], 1800),
     "capture": ("the real arm's capture: our kinematics and tools against its measurements", "test",
                 ["capture_tests.py"], None, 600),
