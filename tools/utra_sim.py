@@ -367,6 +367,7 @@ class Arm:
         self.outputs = {2: 0, 3: 0}
         self.velocity = [0.0] * AXIS
         self.accel = [0.0] * AXIS
+        self.nudge = [0.0] * AXIS
 
     # -- state ----------------------------------------------------------------------------------------------
     def queued(self):
@@ -699,7 +700,7 @@ class Arm:
     def control(self, request):
         """{"cmd": "state"} | {"cmd": "hand", "joints": [deg]*6, "seconds": s} | {"cmd": "input", "line": "tool" or
         "controller", "bit": 0-15, "value": 0 or 1} | {"cmd": "estop"} | {"cmd": "contact", "torque": x} |
-        {"cmd": "fault", "err": code}"""
+        {"cmd": "fault", "err": code} | {"cmd": "nudge", "joints": [deg]*6}"""
         with self.lock:
             now = time.monotonic()
             what = request.get("cmd")
@@ -741,6 +742,18 @@ class Arm:
                 return {"ok": True, "tripped": False}
             if what == "fault":
                 self.fault(int(request["err"]), "injected fault", now)
+                return {"ok": True}
+            if what == "nudge":  # the arm knocked off its path: every reported angle shifts, and stays shifted
+                delta = [math.radians(float(v)) for v in request["joints"]]
+                self.nudge = [a + b for a, b in zip(self.nudge, delta)]
+                self.q = [a + b for a, b in zip(self.q, delta)]
+                if self.current is not None:
+                    self.current.start = [a + b for a, b in zip(self.current.start, delta)]
+                    if isinstance(self.current, JointMotion):
+                        self.current.goal = [a + b for a, b in zip(self.current.goal, delta)]
+                    elif isinstance(self.current, LineMotion) and self.current.samples:
+                        self.current.samples = [[a + b for a, b in zip(s, delta)] for s in self.current.samples]
+                log(f"nudged by [{' '.join(f'{v:.2f}' for v in request['joints'])}] deg")
                 return {"ok": True}
             return {"ok": False, "why": f"unknown command {what!r}"}
 

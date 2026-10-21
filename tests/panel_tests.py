@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -72,13 +73,16 @@ class Rig:
     def __init__(self, name, sim_args=(), controller=None, three=None):
         controller = controller or HOST
         self.name, self.log_path = name, log_path(f"panel_{name}.log")
+        self.cell_dir = log_path(f"cell_{name}")
+        shutil.rmtree(self.cell_dir, ignore_errors=True)
         self.sim = None
         self.output = ""  # the server's console, once closed
         if controller == HOST:
             self.sim, _ = start_sim(sim_args, f"panel_{name}.log")
-        command = [PY, SERVER, controller, "--port", str(PORT)]
+        command = [PY, SERVER, controller, "--port", str(PORT), "--cell", self.cell_dir]
         if three is not None:
-            command = [PY, "-c", THREE_WRAPPER, os.path.dirname(SERVER), json.dumps(three), controller, "--port", str(PORT)]
+            command = [PY, "-c", THREE_WRAPPER, os.path.dirname(SERVER), json.dumps(three), controller, "--port", str(PORT),
+                       "--cell", self.cell_dir]
         self.server = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         self.token = None
         if wait_port(PORT, 10, host="127.0.0.1"):

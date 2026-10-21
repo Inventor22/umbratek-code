@@ -43,8 +43,18 @@ def main():
     xcheck_input = log_path("xcheck_cases.json")
     with open(xcheck_input, "w") as f:
         json.dump({"config": config, "cases": xcheck_cases(model)}, f)
+    # The same with a tool on the flange and two keep-out zones, as the cell adds them.
+    zones = [utra_model.Obstacle("the press zone", "box", [0.45, 0.1, 0.1], [[1, 0, 0], [0, 0.8, -0.6], [0, 0.6, 0.8]],
+                                 [0.2, 0.3, 0.25]),
+             utra_model.Obstacle("the rack zone", "box", [-0.2, -0.45, 0.2], [[0.6, 0.8, 0], [-0.8, 0.6, 0], [0, 0, 1]],
+                                 [0.15, 0.4, 0.5])]
+    celled = model.with_cell([(6, [0, 0, 0], [0, 0, 0.14], 0.035, "the tool"), (6, [0, 0.03, 0.14], [0, -0.03, 0.14],
+                                                                                0.02, "the tool")], zones)
+    xcheck_cell = log_path("xcheck_cell_cases.json")
+    with open(xcheck_cell, "w") as f:
+        json.dump({"config": celled.collision_config(), "cases": xcheck_cases(celled, seed=8)}, f)
     failures = 0
-    for script, arg in (("ik_tests.mjs", ik_input), ("xcheck.mjs", xcheck_input)):
+    for script, arg in (("ik_tests.mjs", ik_input), ("xcheck.mjs", xcheck_input), ("xcheck.mjs", xcheck_cell)):
         print(f"== node {script}")
         r = subprocess.run(["node", os.path.join(HERE, script), arg], cwd=ROOT, capture_output=True, text=True,
                            timeout=600)

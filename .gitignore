@@ -136,3 +136,6 @@ scripts/vendor/
 
 # Simulator and server logs written by the test suites
 tests/logs/
+
+# The cell (tools, frames, targets, zones), programs and run logs the jog panel keeps: the owner's own data
+cell/
