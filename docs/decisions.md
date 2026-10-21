@@ -161,3 +161,117 @@ Each is marked unverified in `tools/utra_sim.py` and gets a morning test:
 Recorded with their reasons in `docs/capabilities.md` section 4: fine points only, no fly-by zones or blends (D17);
 a UR-like tree of steps with PLCopen's step outcomes and Stop/Halt distinction (D18); behaviour trees' step results
 and Retry/Fallback adopted for later, their reactive ticking rejected (D19).
+
+## D20. Pause is a STOP, and Resume re-plans from wherever the arm is
+
+- **Decision:** Pause stops the arm with STOP (the measured stop, D7). Resume re-enables the motors if the arm is
+  stopped and waits for a status frame from after that, so the plan includes the enable shift (about 0.5 mm, D8). If
+  the interrupted step was a straight line, it first moves back onto the line ("regain"), then plans the rest of the
+  step from there.
+- **Alternatives:** the controller's own pause and resume (`set_motion_status(3)`, then 0), which would keep the
+  queued move and its path. Its behaviour on this firmware is unmeasured, and a paused controller can't take the
+  jogs that the owner may want between Pause and Resume.
+- **Why:** STOP is the one stop that was measured. Re-planning from the measured pose makes jogging while paused safe
+  and keeps every move checked. The cost is the enable shift and a short regain move on each resume.
+
+## D21. A faulted run must be reset; a stopped one needn't be
+
+- **Decision:** a run that faults (a step that can't be planned, the arm off its path, a controller error, an input
+  that never comes) stays FAULTED until Reset, and Run is refused until then. Stopped and finished runs can be run
+  again directly.
+- **Alternatives:** start over on Run, as with a stopped run.
+- **Why:** PLCopen's ErrorStop: a fault needs acknowledging, so a program isn't restarted into the same problem by a
+  reflex click. Stop is the operator's own choice and needs no acknowledgement.
+
+## D22. Program runs carry on without the page; moves started from the page don't
+
+- **Decision:** a program run is supervised by the server (its executor watches every move against its plan, the
+  status's freshness and the controller's errors) and ignores the page. A move started from the page (Move, or a
+  manual move through `/api/moveto`) stops if the page goes quiet for 1.5 s, as jogs always have.
+- **Alternatives:** both stop with the page (rules out unattended runs, the point of the featureset); neither does
+  (a closed laptop lid could leave a hand-started move running).
+- **Why:** the brief asks for programs that run "without the page open and with their own supervision"; a move
+  started by hand is watched by the person who started it, through the page.
+
+## D23. Tool jogs are planned and checked as straight lines
+
+- **Decision:** a tool step (X, Y, Z, roll, pitch, yaw) is now planned as the straight line the controller will drive
+  and checked against the arm, cart, floor, the tool in use and the keep-out zones. A step out of reach or through a
+  wrist singularity is refused before it's sent.
+- **Alternatives:** leave tool steps unchecked, as before (the controller worked out their joint angles, so the panel
+  couldn't check them).
+- **Why:** with zones and tools in the cell, an unchecked step could drive the tool into a fixture. A behaviour
+  change, in README.
+
+## D24. Calibration accuracy is judged statistically
+
+- **Decision:** with simulated touch noise, the frame and tool fits are judged on their RMS error, against what the
+  noise predicts (for example, the frame origin's RMS within 15% of sigma times the square root of 3, which it was:
+  0.172 against 0.173 mm), plus agreement with SciPy's fit of the same noisy points. Without noise they must be
+  exact (1e-9).
+- **Alternatives:** a worst-case bound per trial (the first version; it failed on rare but legitimate noise draws).
+- **Why:** a fit can't beat its data; the right test is that it uses the data as well as an independent fit does.
+
+## D25. The new panel sections are built from the desk's own parts
+
+- **Decision:** Program, Teach and Cell use only the existing vocabulary (DESIGN.md): charcoal keys, sunk wells, detented
+  faders, flat lamps, joined mode keys, the state window's tones. A step's state is its lamp, never a coloured side
+  stripe. Freedrive is held on like Enable, with an amber bar and lamp. The cell is drawn in the 3D view in neutral
+  tones, never the gizmo's axis colours. Faults stay in the dark red tint; only STOP and the bridge's alarm window are
+  solid red.
+- **Alternatives:** a conventional web admin layout (cards, tables, checkboxes, modals), which DESIGN.md and the
+  design review both reject.
+- **How it was checked:** two screenshot rounds at desktop, 900 and 420 px against the simulator; a design review in
+  a separate context (its eight material fixes all applied and verified in a second pass); the design detector,
+  whose remaining notes are values DESIGN.md already uses for the same jobs. The design skill's question round was
+  skipped because the brief says not to ask; the brief and DESIGN.md decided instead.
+
+## D26. A target's key stages a plan; straight moves to targets run as program steps
+
+- **Decision:** a target row's Plan key stages a joint move to the target (shadow arm, path check, plan bar), which
+  Move sends, as a drag does.
+- **Alternatives:** Joint and Line keys that move at once (the first version; it broke the panel's Stage-then-Move
+  rule); staging straight lines too (the plan bar and Move only do joint moves, and the 3D view's path is a joint
+  path).
+- **Why:** nothing on the page moves the arm on a single click except a jog step. A straight move to a target is a
+  program step (Step runs one).
+
+## D27. Space types in text fields
+
+- **Decision:** Space still stops the arm anywhere, except while typing in a text field, where it types a space.
+  STOP, Esc and the hardware E-stop still stop.
+- **Alternatives:** keep Space as STOP everywhere (no spaces in comments or halt messages); a different stop key.
+- **Why:** the new sections have text fields; a halt message needs spaces. Esc remains a one-key stop in a field.
+
+## D28. A target used by a program can't be deleted
+
+- **Decision:** deleting a target that any saved program moves to is refused, naming the programs.
+- **Alternatives:** delete it and let those programs fail their check at the next run or save; delete their steps
+  too.
+- **Why:** a program that silently loses a step is worse than a refused delete; the owner removes the step first.
+
+## D29. Program editing in the page covers the top level and repeats
+
+- **Decision:** the page adds, moves and deletes steps at the top level and inside repeats; ifs, their branches and
+  calls are written in the program's JSON (`scripts/runner.py` documents the format) and shown in the list.
+- **Alternatives:** a full tree editor.
+- **Why:** the jobs' programs are mostly flat sequences with I/O waits; a tree editor is a lot of UI for little use
+  tonight. The runner and its tests cover every step type.
+
+## D30. The morning's tools listen, or need the panel closed
+
+- **Decision:** `tools/capture/tau_check.py` only listens (status and config streams, alongside the panel);
+  `tools/capture/sensitivity.py` sets collision and teach sensitivity over the command connection, with the panel
+  closed.
+- **Alternatives:** settings in the panel's API.
+- **Why:** collision sensitivity is a safety setting whose levels are unknown; it gets a page control only once the
+  morning's test says what the levels do.
+
+## D31. Override starts at the server's value, 100%
+
+- **Decision:** the Override fader shows the server's override, which starts at 100% when the server starts. Programs
+  carry their own (slow) default speeds, and straight lines are capped at 250 mm/s unless the program says
+  `"fullSpeed": true`.
+- **Alternatives:** start at a slow override every time, as the jog speed faders do.
+- **Why:** a program's speeds are chosen when it's written; the override is for trying a program slower. The
+  reduced-speed cap is the standing guard. The test plan runs new programs at 25% first.

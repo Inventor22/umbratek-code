@@ -626,10 +626,101 @@ def scenario_teach():
         rig.close()
 
 
+def scenario_model():
+    print("== the program model and the runner's states: validation, a round trip, refusals by state, the log on a kill")
+    rig = Rig("model")
+    try:
+        rig.enable()
+        setup_cell(rig)
+        bad = [({"name": "bad1", "steps": [{"type": "jump"}]}, "step 1: unknown step"),
+               ({"name": "bad2", "steps": [{"type": "move", "kind": "line", "target": "nowhere"}]}, "step 1 (move)"),
+               ({"name": "bad3", "steps": [{"type": "repeat", "count": 2, "steps": [{"type": "wait", "seconds": -1}]}]},
+                "step 1.1 (wait)"),
+               ({"name": "bad4", "steps": [{"type": "set", "output": "tool.99", "value": 1}]}, "step 1 (set)"),
+               ({"name": "bad5", "steps": [{"type": "move", "kind": "line", "target": "home"}]}, "joint target"),
+               ({"name": "loopy", "steps": [{"type": "call", "program": "loopy"}]}, "loop back")]
+        for program, words in bad:
+            r = rig.post("/api/program", {"program": program})
+            check(f"refuses {json.dumps(program['steps'][0])[:70]}, saying where and why", not r["ok"]
+                  and words in r["message"] and program["name"] not in rig.get("/api/programs")["programs"], r)
+        save_program(rig, {"name": "sub", "steps": [{"type": "comment", "text": "called"}]})
+        every = {"name": "every", "speed": {"tcp": 40, "joint": 15}, "steps": [
+            {"type": "move", "kind": "joint", "target": "home"},
+            {"type": "move", "kind": "line", "target": "A", "offset": {"frame": "tool", "xyz": [0, 0, -30]}, "speed": 30},
+            {"type": "wait", "seconds": 0.5}, {"type": "wait", "input": "tool.1", "value": 1, "timeout": 5},
+            {"type": "set", "output": "controller.2", "value": 1}, {"type": "pulse", "output": "tool.0", "seconds": 0.2},
+            {"type": "if", "input": "tool.3", "value": 1, "then": [{"type": "comment", "text": "yes"}],
+             "else": [{"type": "halt", "message": "no"}]},
+            {"type": "repeat", "count": 2, "steps": [{"type": "comment", "text": "again"}]},
+            {"type": "call", "program": "sub"}, {"type": "halt", "message": "done?"}]}
+        r = rig.post("/api/program", {"program": every})
+        loaded = rig.get("/api/program?name=every")["program"]
+        check("a program with every kind of step saves, and loads back exactly as saved (with ids added)",
+              r["ok"] and loaded == r["program"] and len({s["id"] for s in loaded["steps"]}) == len(every["steps"]), loaded)
+        r2 = rig.post("/api/program", {"program": loaded, "revision": loaded["revision"]})
+        same = {k: v for k, v in r2.get("program", {}).items() if k != "revision"} == \
+            {k: v for k, v in loaded.items() if k != "revision"}
+        check("saving what was loaded changes nothing but the revision", r2["ok"] and same
+              and r2["program"]["revision"] == loaded["revision"] + 1, r2)
+        r3 = rig.post("/api/program", {"program": loaded, "revision": loaded["revision"]})
+        check("saving against an old revision is refused", not r3["ok"] and "changed since" in r3["message"], r3)
+
+        refusals = {"/api/run/pause": "Nothing to pause", "/api/run/resume": "Nothing to resume",
+                    "/api/run/step": "Step works on a paused run", "/api/run/reset": None}
+        for path, words in refusals.items():
+            r = rig.post(path)
+            if words:
+                check(f"with no run, {path} is refused, saying why", not r["ok"] and words in r["message"], r)
+        r = rig.post("/api/run/stop")
+        check("and stop says there's no run", r["ok"] and "No run" in r["message"], r)
+        save_program(rig, {"name": "slow", "steps": [{"type": "move", "kind": "joint", "target": "A", "speed": 6},
+                                                     {"type": "move", "kind": "joint", "target": "home", "speed": 6}]})
+        rig.post("/api/run/start", {"name": "slow"})
+        rig.wait(lambda s: s["run"]["state"] == "running" and s.get("state") == 1, 20, 0.05)
+        checks = [("/api/run/start", {"name": "slow"}, "under way"), ("/api/run/resume", {}, "Nothing to resume"),
+                  ("/api/run/step", {}, "Step works on a paused run"), ("/api/run/reset", {}, "stop it first"),
+                  ("/api/freedrive", {"on": True, "sensitivity": 1}, "A program is running"),
+                  ("/api/enable", {}, "A program is running"),
+                  ("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 1.0, "speed": 10.0}, "program is running")]
+        for path, body, words in checks:
+            r = rig.post(path, body)
+            check(f"while running, {path} is refused, saying why", not r["ok"] and words in r["message"], r)
+        rig.post("/api/run/pause")
+        rig.run_state("paused", timeout=10)
+        for path, body, words in [("/api/run/pause", {}, "Nothing to pause"), ("/api/run/start", {"name": "slow"}, "under way"),
+                                  ("/api/run/reset", {}, "stop it first")]:
+            r = rig.post(path, body)
+            check(f"while paused, {path} is refused, saying why", not r["ok"] and words in r["message"], r)
+        rig.post("/api/run/stop")
+        s = rig.run_state("stopped", timeout=10)
+        r = rig.post("/api/run/reset")
+        check("stop ends a paused run; reset then clears it", s["run"]["state"] == "stopped" and r["ok"]
+              and rig.status()["run"]["state"] == "idle", (s["run"], r))
+
+        rig.enable()
+        rig.post("/api/run/start", {"name": "slow"})
+        rig.wait(lambda s: s.get("state") == 1, 20, 0.05)
+        time.sleep(0.5)
+        log = rig.get("/api/run")["run"]["log"]
+        rig.stop_server()  # killed mid-move, as a crash would
+        with open(os.path.join(rig.cell_dir, "logs", log), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        try:
+            events = [json.loads(line)["event"] for line in lines]
+        except ValueError:
+            events = None
+        check("the server killed mid-run leaves a log of whole lines, from run.start to the move under way",
+              events is not None and events[0] == "run.start" and "move.sent" in events, lines[-3:])
+        rig.ctl(cmd="state")
+        rig.start_server()  # so close() can stop it
+    finally:
+        rig.close()
+
+
 def main():
     print(f"server runs on {PY}; the test on {sys.executable}")
     for fn in (scenario_cell_api, scenario_calibration, scenario_moves, scenario_runner, scenario_controls,
-               scenario_faults, scenario_page, scenario_teach):
+               scenario_faults, scenario_page, scenario_teach, scenario_model):
         try:
             fn()
         except Exception as e:  # report and carry on
