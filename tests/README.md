@@ -8,11 +8,14 @@ python tests/run_all.py            # every suite, three at a time; one line each
 python tests/run_all.py --quick    # the same with smaller samples in the slow oracle suites
 python tests/run_all.py panel      # one suite (python tests/run_all.py --list names them)
 python tests/run_all.py --python C:\Python312\python.exe   # run the code under test on another Python
+python tests/run_all.py --base 111 # beside another checkout's run: addresses from 127.0.0.111, panel ports from 8900
 ```
 
 `run_all.py` gives each suite that drives the simulator its own loopback address (127.0.0.11, 127.0.0.12, ...: the
-SDK always connects to port 502) and its own jog panel port, so suites run side by side. A suite passes when its
-script exits 0; each prints PASS or FAIL per check and a count at the end.
+SDK always connects to port 502) and its own jog panel port, so suites run side by side. A second checkout running
+its suites at the same time on this PC would take the same addresses; give one of them `--base 111` (127.0.0.111 up,
+panel ports from 8900). A suite passes when its script exits 0; each prints PASS or FAIL per check and a count at the
+end.
 
 ## The oracle environment
 
@@ -29,6 +32,12 @@ conda create -p .venv-oracle -c conda-forge --override-channels python=3.12 pino
 environment's `Library\bin` on PATH). Without it, those suites report SKIP and the run fails. To run an oracle
 script by hand, use `conda run -p .venv-oracle python tests/<script>.py`.
 
+## The brain's environment
+
+The twin's suite runs in the brain's own environment, `brain/.venv` (MuJoCo and NumPy; `brain/README.md` says how to
+make it, on Windows or in WSL2). `run_all.py` uses it, or the Python named by `UMBRATEK_BRAIN_PYTHON`; without either,
+the twin suite reports SKIP and the run fails. By hand: `brain\.venv\Scripts\python tests\twin_tests.py`.
+
 ## Suites
 
 | Suite | Script | What it checks |
@@ -41,6 +50,7 @@ script by hand, use `conda run -p .venv-oracle python tests/<script>.py`.
 | paths | `path_tests.py` | `check_path` against dense sampling along random moves. Slow in pure Python, so it samples 6 moves (2 with `--quick`). |
 | capture | `capture_tests.py` | The real arm's capture (`data/captures/2026-10-21`): our forward kinematics against the controller's pose in every one of its 2292 status frames and the quoted joint/pose pairs, the streams' timing and config, and `tools/capture/capture.py analyze` reproducing the committed summary. |
 | sim | `sim_tests.py` | The simulator's motion model replayed against the capture's 43 joint moves, 24 straight lines, STOP and enable shift; then the running simulator: 10 Hz state, port 30002 refused, the config stream on 30003, the start delay, STOP, the queue count, straight lines through a pause, faults, the tool offset, payload and sensitivity registers, GPIO, freedrive and collision detection. |
+| twin | `twin_tests.py` | The twin (`brain/twin`, in the brain's environment): its model against the spine's kinematics, collision shapes, cart, floor and limits, and a cell's tool, frames, zones and targets; obstacles and physics; the cameras' intrinsics, depth and true poses; its coupling to the simulator, on a virtual clock and live through the SDK and HTTP; and both captures replayed, every figure against its stated tolerance (`brain/README.md`). |
 
 ## The simulator
 
@@ -52,7 +62,9 @@ python scripts/jog_server.py 127.0.0.1   # then open http://127.0.0.1:8765
 `python tools/utra_sim.py --help` lists its options and the faults it can inject; `--host` picks another loopback
 address. How it moves is fitted to the capture (`python tools/capture/fit_sim.py` shows the fit; `docs/decisions.md`
 D6 to D12 say what's measured and what's assumed). Its control port, 30099, lets tests act as a hand, a machine's
-signals or the E-stop; see `Arm.control` in `tools/utra_sim.py`.
+signals or the E-stop; see `Arm.control` in `tools/utra_sim.py`. It keeps time with a high-resolution clock and timer
+(D50), so its 10 Hz frames leave 100 ms apart on Windows too. The twin (`python -m brain.twin serve`) serves the same
+ports from its own process, with the simulator inside it.
 
 ## The capture tools
 

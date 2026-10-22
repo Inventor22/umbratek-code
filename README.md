@@ -15,6 +15,7 @@ Code and experiments for controlling an [Umbratek UTRA 1000 6-DOF robotic arm](h
 | `notebooks/0 UTRA Tests.ipynb` | SDK motion demos: joint point-to-point, linear, blended linear, arcs, servo. |
 | `arduino/Chess Gripper/` | Servo calibration sketch for the chess-piece gripper (servo on pin 9, alternates 25° and 120°). |
 | `tools/utra_sim.py` | A stand-in for the NTRO controller, for trying the jog panel and `arm.py` offline and for the tests. |
+| `brain/twin/` | The twin: a MuJoCo model of the arm on its cart in the cell, generated from this repo's models and cell, whose joints follow `tools/utra_sim.py`. It serves the controller's ports, renders RGB-D cameras with known intrinsics and true poses, and takes obstacles. It runs in the brain's own environment (`brain/README.md`). |
 | `tools/capture/` | The tools that recorded the arm's status streams, settings and servo registers (with the owner present), and the morning test plan's tools: `tau_check.py` (what the joints' "tau" readings measure), `sensitivity.py` (the controller's collision and teach sensitivity), `record.py` (records the status and config streams, only listening, alongside the panel) and `teach_probe.py` (one controller write per run with read-backs, which worked out freedrive on 2026-10-21). |
 | `data/captures/` | What the real arm measured: raw streams, commands, settings and the analysis, one folder per capture. |
 | `tests/` | The test suites and their runner, `python tests/run_all.py` (see `tests/README.md`). |

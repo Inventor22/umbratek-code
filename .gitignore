@@ -139,3 +139,6 @@ tests/logs/
 
 # The cell (tools, frames, targets, zones), programs and run logs the jog panel keeps: the owner's own data
 cell/
+
+# Frames the twin's snapshot command writes by default (python -m brain.twin snapshot)
+twin-frames/
