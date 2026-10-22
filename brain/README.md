@@ -291,8 +291,9 @@ too, where the planner reaches its HTTP endpoint.
 
 `tests/planner_tests.py` (`python tests/run_all.py planner`, which runs it in WSL2 through `wsl.exe`) checks cuRobo's
 model against the spine's (kinematics, 6800 points on the capsules all inside their spheres, the base's ring, the
-self-collision pairs, the limits), the world sources (the twin's shapes, spheres and capsules in the spine's check, the
-map's bound against the true distance at 4000 points), and then plans:
+self-collision pairs, the margins, the limits), the world sources (the twin's shapes, spheres and capsules in the
+spine's check, the map's bounds against the true distance at 4000 points and beyond its grid, and the spine's slack
+rule held against the map on random moves, by exact distances to its voxels), and then plans:
 
 | What | Result |
 | ---- | ------ |

@@ -34,9 +34,13 @@ def oracle_python():
 
 
 def brain_python():
-    """The brain's environment (brain/.venv, or UMBRATEK_BRAIN_PYTHON, e.g. a venv on WSL2's own disk)."""
-    candidates = [os.environ.get("UMBRATEK_BRAIN_PYTHON") or "", os.path.join(ROOT, "brain", ".venv", "Scripts", "python.exe"),
-                  os.path.join(ROOT, "brain", ".venv", "bin", "python")]
+    """The brain's environment (brain/.venv, or UMBRATEK_BRAIN_PYTHON, e.g. a venv on WSL2's own disk; in Linux also
+    the venv brain/README.md describes, ~/.venvs/umbratek-brain). Only this platform's: run from WSL2, a Windows venv
+    under /mnt/c would run on Windows."""
+    own = [os.path.join(ROOT, "brain", ".venv", "Scripts", "python.exe")] if os.name == "nt" else [
+        os.path.join(ROOT, "brain", ".venv", "bin", "python"),
+        os.path.join(os.path.expanduser("~"), ".venvs", "umbratek-brain", "bin", "python")]
+    candidates = [os.environ.get("UMBRATEK_BRAIN_PYTHON") or ""] + own
     return next((p for p in candidates if p and os.path.isfile(p)), None)
 
 

@@ -718,16 +718,22 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
   mesh is its convex hull, as the twin collides it. `map` adds perception's map (`docs/world-map.md`): its ESDF goes to
   cuRobo less half a voxel, since cuRobo interpolates between voxel centres, where a lower bound can overstate the
   clearance; the spine's check is joined by the map's own, each capsule's core sampled every 4 mm along it and along
-  the move, against a bound that holds everywhere (the ESDF at the nearest voxel centre less the distance to it), with
-  the spine's slack rule. A map more than 2 s old, or whose arm isn't where the plan starts (after waiting for a newer
-  frame), fails the plan. Any source that can't answer fails the plan, saying why.
+  the move, against a lower bound that holds everywhere (the ESDF at the nearest voxel centre less the distance to it;
+  beyond the grid, through the point's projection onto the grid's box, as every obstacle is inside it). The spine's
+  slack rule (a move may start nearer than the margin and move away) is given only where an upper bound shows the start
+  surely is that near, and measured from that upper bound, as the map's bounds are loose by up to about two voxels.
+  A map more than 2 s old, or whose arm isn't where the plan starts (after waiting for a newer frame), fails the plan.
+  Any source that can't answer fails the plan, saying why.
 - **Alternatives:** the planner reading the twin's scene file (misses obstacles placed over HTTP, and where free ones
   have been pushed); obstacles from the request (the interface has no field for them; the spine doesn't know them);
   treating perception's unknown voxels as solid (everything outside the cameras' view would block); ignoring a
   source that fails (a plan blind to what's there).
 - **Why:** before perception exists, the twin's truth tests planning against obstacles the spine doesn't know about,
   and the same code path takes perception's map. Checked with a fake perception server that serves the contract: a
-  crate seen as 2 cm voxels is planned around, 58.7 mm from the true crate.
+  crate seen as 2 cm voxels is planned around, 58.7 mm from the true crate. A review found the first version of the
+  map's check fail open in two ways (the slack measured from a loose lower bound, and points just beyond the grid read
+  as clear); the suite now checks the rule against exact distances to the voxels on random moves over a slab (69 of
+  120 accepted, none nearer than the rule allows; the first version let through moves from 6.0 to 3.1 mm).
 
 ## D66. The planner's brain serves the stub's skill, and says it doesn't plan until it can
 
@@ -769,7 +775,9 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
 
 - The real arm hasn't run a planned path from this brain; that's for a session with the owner present.
 - Perception's map is tested with a fake server built from the contract, not perception's own yet. Map plans take
-  longer (1.7 to 2.3 s), most of it in the map's check, which samples in NumPy.
+  longer (1.6 to 2.3 s), most of it in the map's check, which samples in NumPy. Its bounds are loose by up to about two
+  voxels, so a move that starts within that of a mapped obstacle is refused unless it keeps the margin by the lower
+  bound: safe, but it may find no path where the true distances would allow one.
 - cuRobo's covering of the base grows it by up to 20 mm at mid-height, so a move with the wrist near the base may need
   the stub's search, or find nothing where the spine's check alone would pass.
 - A path is cut along cuRobo's route; it isn't the fewest segments possible. Waypoints anywhere (not only on the
