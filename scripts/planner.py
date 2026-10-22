@@ -36,6 +36,7 @@ FLIP_DEG = 5.0
 SEGMENT_TOLERANCE_MM = 0.1
 MAX_TOOL_SPEED_MM_S = 1000.0
 MAX_ORI_SPEED_DEG_S = 180.0
+TOOL_SPEED_SAMPLES = 16  # points along a joint move at which the tool point's speed is bounded (and both ends)
 
 
 class PlanError(Exception):
@@ -68,14 +69,17 @@ def blocked(hit, margin_mm=10):
 
 
 class Plan:
-    """What a move will do. kind is "joint" or "line"; segments are what's sent: for joint moves one (goal joints,
-    speed deg/s, acc deg/s^2), for lines one or more (flange pose for the controller, speed mm/s, acc mm/s^2).
-    path is the joints along the way (deg), for supervision; duration is the estimate in seconds."""
+    """What a move will do. kind is "joint" or "line"; segments are what's sent: for joint moves one or more (goal
+    joints, speed deg/s, acc deg/s^2), each from the one before (a path from the brain has several), for lines one or
+    more (flange pose for the controller, speed mm/s, acc mm/s^2). path is the joints along the way (deg), for
+    supervision; duration is the estimate in seconds, and segment_durations each segment's, when they're known."""
 
-    def __init__(self, kind, start, goal, path, segments, duration, text, tool=kin.IDENTITY, poses=None):
+    def __init__(self, kind, start, goal, path, segments, duration, text, tool=kin.IDENTITY, poses=None,
+                 segment_durations=None):
         self.kind, self.start, self.goal, self.path = kind, start, goal, path
         self.segments, self.duration, self.text, self.tool = segments, duration, text, tool
         self.poses = poses  # for lines: the tool point's pose at the start and the end (4x4)
+        self.segment_durations = segment_durations
 
     def summary(self):
         return {"kind": self.kind, "start": [round(v, 3) for v in self.start], "goal": [round(v, 3) for v in self.goal],
@@ -102,7 +106,9 @@ class Planner:
         self.tool_jerk = tool_jerk or TOOL_JERK_MM_S3
 
     # -- joint moves ---------------------------------------------------------------------------------------------
-    def joint(self, start, goal, speed, label="the joints"):
+    def joint(self, start, goal, speed, label="the joints", tool=None, tool_speed=None):
+        """A joint move. With `tool_speed` (mm/s) it's also slowed until the tool point (`tool`: flange <- tool point)
+        can't pass that speed anywhere on the way (tool_speed_per_deg_s)."""
         start, goal = [float(v) for v in start], [float(v) for v in goal]
         for i, g in enumerate(goal):
             low, high = DRAG_LIMITS_DEG[i]
@@ -113,13 +119,44 @@ class Planner:
             raise PlanError(f"Not moving: {blocked(hit)}.", hit)
         travel = [abs(g - s) for s, g in zip(start, goal)]
         sent, limiting = capped_joint_speed(speed, travel)
+        why = f", J{limiting + 1}'s top speed" if limiting is not None else ""
+        if tool_speed is not None:
+            per = self.tool_speed_per_deg_s(start, goal, tool if tool is not None else kin.IDENTITY)
+            cap = math.floor(tool_speed / per * 10) / 10 if per > 0 else sent
+            if cap < sent:
+                sent, why = max(cap, 0.1), f", keeping the tool point under {tool_speed:g} mm/s"
         acc = min(max(100.0, sent / 0.3), self.joint_acc)
         lead = max(travel)
         profile = motion_profile.double_s(lead, sent, acc, self.joint_jerk) if lead > 0 else None
         duration = (profile.duration if profile else 0.0) + START_DELAY_JOINT_S
-        why = f", J{limiting + 1}'s top speed" if limiting is not None else ""
         text = f"Joint move to {label} at {sent:g}\u00b0/s{why}, about {duration:.1f} s"
-        return Plan("joint", start, goal, [start, goal], [(goal, sent, acc)], duration, text)
+        plan = Plan("joint", start, goal, [start, goal], [(goal, sent, acc)], duration, text)
+        plan.limited = why[2:]  # what slowed it below the speed asked for, if anything
+        return plan
+
+    def tool_speed_per_deg_s(self, start, goal, tool=kin.IDENTITY):
+        """An upper bound on the tool point's speed (mm/s) for each deg/s of the leading joint, anywhere on a joint
+        move from start to goal (every joint turning in step): the sum of each joint's share of the turn times the
+        tool point's distance from that joint's axis, which no combination of the turns can exceed, taken at
+        TOOL_SPEED_SAMPLES points along the way and both ends."""
+        travel = [g - s for s, g in zip(start, goal)]
+        lead = max(abs(d) for d in travel)
+        if lead <= 0:
+            return 0.0
+        worst = 0.0
+        for k in range(TOOL_SPEED_SAMPLES + 1):
+            q = [s + d * k / TOOL_SPEED_SAMPLES for s, d in zip(start, travel)]
+            frames = self.model.frames(q)
+            t = kin.mul(frames[-1], tool)
+            p = [t[0][3], t[1][3], t[2][3]]
+            total = 0.0
+            for (_, _, axis, _), f, d in zip(self.model.joints, frames, travel):
+                z = [f[r][0] * axis[0] + f[r][1] * axis[1] + f[r][2] * axis[2] for r in range(3)]
+                arm = [p[r] - f[r][3] for r in range(3)]
+                along = sum(a * b for a, b in zip(arm, z))
+                total += abs(d) / lead * math.sqrt(max(sum(a * a for a in arm) - along * along, 0.0))
+            worst = max(worst, total)
+        return worst * 1000.0 * math.pi / 180.0
 
     def solve(self, seed, target, tool):
         """Joints (deg) putting the tool point at `target` (4x4), from `seed`; PlanError when it can't."""

@@ -12,6 +12,9 @@ moves, planned or stepped, are refused if on the way the arm would come within u
 itself, the cart it stands on or the floor (tool steps aren't checked: the controller works out their
 joint angles). The server listens on this PC only, stops the arm if the page goes quiet mid-move, and
 refuses to move when the arm's state is unknown. The physical E-stop is still the real safety.
+
+Programs may also have planned and learned steps, whose motion the brain proposes: a separate process on this PC that
+the server asks (--brain, docs/brain-interface.md), and whose every proposal the server checks before it runs.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import arm
+import brain_link
 import cell as cellmod
 import kinematics as kin
 import planner as plannermod
@@ -164,7 +168,7 @@ capped_joint_speed = plannermod.capped_joint_speed
 class Panel:
     """Owns the arm connection, the live status and the commanded goal."""
 
-    def __init__(self, ip, model=None, cell_dir=CELL_DIR):
+    def __init__(self, ip, model=None, cell_dir=CELL_DIR, brain=None):
         self.ip = ip
         self.model = model  # utra_model.ArmModel, or None when planned moves are off
         self.lock = threading.Lock()  # one SDK conversation at a time
@@ -175,12 +179,15 @@ class Panel:
         self.joint_acc_max = self._read_limit(self.arm.get_joint_maxacc, 180 / math.pi)
         self.tool_acc_max = self._read_limit(self.arm.get_tcp_maxacc, 1.0)
         self.frame, self.frame_at = None, 0.0
+        self.frame_seq = 0
+        self.latest = (0, None, 0.0)  # (sequence number, frame, when it came), set in one go for other threads
         self.goal_kind, self.goal = None, None
         self.sent_at = 0.0
         self.heard_at = time.monotonic()
         self.note, self.note_ok = "Connected to the controller.", True
         self.stop_alarm = False  # a stop we couldn't confirm; cleared once the arm is seen stopped
         self.closing = False
+        self.brain = brain  # brain_link.BrainLink, or None with --brain off
         # The machine-tending featureset: the cell (tools, frames, targets, zones), programs and their runner.
         self.cell = cellmod.Cell(cell_dir)
         self.programs = runnermod.Programs(cell_dir)
@@ -193,6 +200,8 @@ class Panel:
         self.teach_level = None  # the teach sensitivity this server last set for freedrive
         threading.Thread(target=self._read_reports, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
+        if self.brain is not None:
+            threading.Thread(target=self._watch_brain, daemon=True).start()
 
     @staticmethod
     def _read_limit(getter, scale):
@@ -225,7 +234,10 @@ class Panel:
             try:
                 while not self.closing:
                     frame = report.read()
-                    self.frame, self.frame_at = frame, time.monotonic()
+                    now = time.monotonic()
+                    self.frame_seq += 1
+                    self.latest = (self.frame_seq, frame, now)
+                    self.frame, self.frame_at = frame, now
                     if self.stop_alarm and (frame["status"] == 4 or not frame["enable"] & self.mask or frame["err"]):
                         self.stop_alarm = False
             except (OSError, ValueError, struct.error):
@@ -283,6 +295,8 @@ class Panel:
         age = time.monotonic() - self.frame_at if frame is not None else None
         out = {"ip": self.ip, "note": self.note, "noteOk": self.note_ok, "stopAlarm": self.stop_alarm,
                "live": age is not None and age <= LOST_S, "age": None if age is None else round(age, 2)}
+        out["brain"] = self.brain.status() if self.brain is not None else \
+            {"url": None, "ok": False, "error": "the brain is off (the server was started with --brain off)"}
         if frame is None:
             return out
         out.update({
@@ -406,14 +420,11 @@ class Panel:
         q = joints if joints is not None else self.current_joints()
         return kin.mul(self.model.frames(q)[-1], self.cell.tool_matrix(tool))
 
-    def plan_move(self, step, start, speed, ori_speed=60.0):
-        """A Plan for a program's move step (a joint or straight move to a target, with an optional offset)."""
+    def _target_for(self, step):
+        """The target a move step names, after the checks every move to it makes: (target, label)."""
         target = self.cell.target(step["target"])
-        p = self.planner()
         if "joints" in target:
-            if step["kind"] != "joint":
-                raise plannermod.PlanError(f"{step['target']!r} is a joint target; a straight line needs a tool target.")
-            return p.joint(start, target["joints"], speed, step["target"])
+            return target, step["target"]
         active = self.cell.data["active"]["tool"]
         if target["tool"] != active:
             raise plannermod.PlanError(f"{step['target']!r} was taught with the tool {target['tool']!r}, but the active "
@@ -421,12 +432,128 @@ class Panel:
         if target.get("unreachable"):
             raise plannermod.PlanError(f"{step['target']!r} became unreachable when its frame was recalibrated; "
                                        "teach it again.")
+        return target, step["target"] + (" (offset)" if step.get("offset") else "")
+
+    def plan_move(self, step, start, speed, ori_speed=60.0):
+        """A Plan for a program's move step (a joint or straight move to a target, with an optional offset)."""
+        if step["kind"] == "planned":
+            raise plannermod.PlanError("A planned move's path comes from the brain: run it as a program step.")
+        target, label = self._target_for(step)
+        p = self.planner()
+        if "joints" in target:
+            if step["kind"] != "joint":
+                raise plannermod.PlanError(f"{step['target']!r} is a joint target; a straight line needs a tool target.")
+            return p.joint(start, target["joints"], speed, step["target"])
         pose = self.cell.target_matrix(step["target"], step.get("offset"))
         tool = self.cell.tool_matrix()
-        label = step["target"] + (" (offset)" if step.get("offset") else "")
         if step["kind"] == "joint":
             return p.joint_to_pose(start, pose, tool, speed, seed=target.get("seed"), label=label)
         return p.line(start, pose, tool, speed, ori_speed, label=label)
+
+    # ---- what the brain is told, and asked ------------------------------------------------------------------------
+
+    def goal_joints(self, step, start):
+        """Where a planned move ends (deg): a joint target's joints, or a tool target's solved from the joints it was
+        taught at, so the arm arrives in the taught configuration. Returns (joints, label)."""
+        target, label = self._target_for(step)
+        if "joints" in target:
+            goal = [float(v) for v in target["joints"]]
+            for i, g in enumerate(goal):
+                low, high = DRAG_LIMITS_DEG[i]
+                if not low <= g <= high:
+                    raise plannermod.PlanError(f"J{i + 1} would have to go to {g:.1f}\u00b0, outside {low:g}\u00b0 to "
+                                               f"{high:g}\u00b0.")
+            return goal, label
+        pose = self.cell.target_matrix(step["target"], step.get("offset"))
+        return self.planner().solve(target.get("seed") or start, pose, self.cell.tool_matrix()), label
+
+    def observe(self, after=None, inputs=False, virtual=None):
+        """The arm's state for the brain: a fresh status frame's sequence number and arrival time (one that came after
+        `after`, if given), the measured joints (deg) and the active tool point's pose, with the digital inputs'
+        words if asked. A dry run's `virtual` joints stand in as state 0."""
+        if virtual is not None:
+            q = [float(v) for v in virtual]
+            return {"seq": 0, "at": time.monotonic(), "joints": q, "tool": kin.matrix_to_pose(self.tool_point(q), 4),
+                    "virtual": True}
+        deadline = time.monotonic() + STALL_WAIT_S
+        while True:
+            seq, frame, at = self.latest
+            now = time.monotonic()
+            if frame is not None and now - at <= FRESH_S and (after is None or at > after):
+                break
+            if now > deadline or self.closing:
+                raise MoveFailed("there's no fresh status from the controller to tell the brain")
+            time.sleep(0.02)
+        q = [math.degrees(v) for v in frame["joints"][:self.axis]]
+        if not arm.all_finite(q):
+            raise MoveFailed("the status report has unusable joint angles")
+        out = {"seq": seq, "at": at, "joints": q, "tool": kin.matrix_to_pose(self.tool_point(q), 4)}
+        if inputs:
+            out["inputs"] = self.input_words()
+        return out
+
+    def latest_joints(self):
+        """The latest measured joints (deg) and their age (s); (None, inf) before any status."""
+        _, frame, at = self.latest
+        if frame is None:
+            return None, math.inf
+        return [math.degrees(v) for v in frame["joints"][:self.axis]], time.monotonic() - at
+
+    def input_words(self):
+        """Every digital input, as a 16-bit word for the tool and one for the controller."""
+        out = {}
+        for line in ("tool", "controller"):
+            with self.lock:
+                st, values = (self.arm.get_tgpio_in if line == "tool" else self.arm.get_cgpio_in)()
+            if not isinstance(values, list) or len(values) < 2:
+                raise MoveFailed(f"couldn't read the {line}'s inputs (code {st})")
+            out[line] = int(values[1]) & 0xFFFF
+        return out
+
+    def world(self):
+        """What the spine knows of the cell, for the brain (mm, base frame): the active tool's point and shape, and
+        the keep-out zones as boxes."""
+        with self.cell.lock:
+            data = self.cell.data
+            name = data["active"]["tool"]
+            tool = data["tools"][name]
+            zones = [{"name": zone, "centre": [round(v * 1000.0, 3) for v in o.centre],
+                      "axes": [[round(v, 9) for v in axis] for axis in o.axes], "size": [round(h * 2000.0, 3) for h in o.half]}
+                     for o, zone in zip(self.cell.zone_obstacles(), data["zones"])]
+            return {"cellRevision": data["revision"], "marginMm": utra_model.MARGIN_M * 1000.0,
+                    "tool": {"name": name, "tcp": {"xyz": list(tool["tcp"]["xyz"]), "rpy": list(tool["tcp"]["rpy"])},
+                             "capsules": [dict(c) for c in tool["capsules"]]},
+                    "zones": zones}
+
+    def anchor_point(self, name):
+        """The centre of a learned step's region (mm, base frame): the tool point at the target `name`."""
+        target = self.cell.target(name)
+        if "joints" in target:
+            return kin.position(self.tool_point(target["joints"]))
+        return kin.position(self.cell.target_matrix(name))
+
+    def check_brain(self, plans, skills):
+        """Refuses (runner.ProgramError) unless the brain answers now, plans paths (if `plans`) and has `skills`."""
+        if self.brain is None:
+            raise runnermod.ProgramError("This program has planned or learned steps, but the brain is off (the server "
+                                         "was started with --brain off).")
+        known = self.brain.hello()
+        if not known["ok"]:
+            raise runnermod.ProgramError(f"This program has planned or learned steps, but {known['error']}. Start the "
+                                         "brain (python brain/stub/stub_brain.py), then try again.")
+        if plans and not known["planner"]:
+            raise runnermod.ProgramError(f"This program has planned moves, but the brain ({known['brain']}) doesn't "
+                                         "plan paths.")
+        missing = [k for k in skills if k not in known["skills"]]
+        if missing:
+            raise runnermod.ProgramError(f"The brain ({known['brain']}) has no skill called {', '.join(missing)}.")
+        return known
+
+    def _watch_brain(self):
+        """Asks the brain who it is every few seconds, so the panel shows whether it's there."""
+        while not self.closing:
+            self.brain.hello()
+            time.sleep(brain_link.HELLO_EVERY_S)
 
     def check_can_run(self, dry=False):
         """Refuses (ArmError) unless a run or a planned move may start now."""
@@ -1187,9 +1314,21 @@ def main(argv=None):
     parser.add_argument("ip", help="controller address, e.g. 192.168.2.1")
     parser.add_argument("--port", type=int, default=8765, help="local port (default 8765)")
     parser.add_argument("--cell", default=CELL_DIR, help="folder for the cell, programs and run logs (default cell/)")
+    parser.add_argument("--brain", default=brain_link.DEFAULT_URL,
+                        help=f"the brain's address, on this PC (default {brain_link.DEFAULT_URL}), or 'off'")
+    parser.add_argument("--brain-timeout", type=float, default=brain_link.PLAN_TIMEOUT_S,
+                        help=f"how long the brain may take to plan a path, s (default {brain_link.PLAN_TIMEOUT_S:g})")
     args = parser.parse_args(argv)
     if not 1024 <= args.port <= 65535:
         parser.error("--port must be between 1024 and 65535")
+    if not 0.5 <= args.brain_timeout <= 120:
+        parser.error("--brain-timeout must be between 0.5 and 120 s")
+    link = None
+    if args.brain != "off":
+        try:
+            link = brain_link.BrainLink(args.brain, args.brain_timeout)
+        except ValueError as e:
+            parser.error(f"--brain: {e}")
 
     try:
         model = utra_model.ArmModel()
@@ -1197,7 +1336,7 @@ def main(argv=None):
         print(f"Warning: couldn't load the arm model ({e}). The 3D view and planned moves are off.", file=sys.stderr)
         model = None
     try:
-        panel = Panel(args.ip, model, args.cell)
+        panel = Panel(args.ip, model, args.cell, link)
     except (arm.ArmError, cellmod.CellError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1230,6 +1369,7 @@ def main(argv=None):
         return 1
     server.daemon_threads = True
     print(f"Jog panel for {args.ip}: open http://127.0.0.1:{args.port}  (Ctrl+C to quit)")
+    print(f"Planned and learned steps ask the brain at {link.url}." if link else "The brain is off (--brain off).")
     limits = [f"joints {panel.joint_acc_max:.0f}\u00b0/s\u00b2" if panel.joint_acc_max else "",
               f"tool {panel.tool_acc_max:.0f} mm/s\u00b2" if panel.tool_acc_max else ""]
     if any(limits):
