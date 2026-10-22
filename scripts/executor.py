@@ -3,10 +3,11 @@
 Each segment of a plan is sent alone and followed on the 10 Hz status: the arm must stay near its planned path (within
 PATH_TOLERANCE_DEG of the joint-space line for joint moves, PATH_TOLERANCE_MM of the tool point's line for straight
 lines), arrive (state ready and within ARRIVAL_DEG of the goal, or ARRIVAL_MM of the tool point's goal), and do so
-within the plan's estimate x 1.5 + 2 s. A controller error, an unexpected stop or pause, status older than
-LOST_S, or a request to abort (pause or stop) stops the arm. Status older than FRESH_S holds judgement until it's
-fresh again (the Wi-Fi link stalls for about 3 s now and then). The controller's frame queue count isn't trusted: the
-capture's frames always read 0. Standard library only.
+within the plan's estimate x 1.5 + 2 s. A path from the brain is several joint segments, each judged from where the
+one before ended, and the next is sent only once the arm has arrived. A controller error, an unexpected stop or pause,
+status older than LOST_S, or a request to abort (pause or stop; checked before each segment is sent, too) stops the
+arm. Status older than FRESH_S holds judgement until it's fresh again (the Wi-Fi link stalls for about 3 s now and
+then). The controller's frame queue count isn't trusted: the capture's frames always read 0. Standard library only.
 """
 from __future__ import annotations
 
@@ -123,7 +124,7 @@ class Executor:
             self.current = (plan, i)
             if plan.kind == "joint":
                 goal, speed, acc = segment
-                start = plan.start
+                start = plan.start if i == 0 else plan.segments[i - 1][0]  # a path's segments run one from the next
                 send = lambda: self.panel.arm.moveto_joint_p2p([math.radians(v) for v in goal], math.radians(speed),
                                                                math.radians(acc), 0)
                 seg_goal_pose = None
@@ -132,13 +133,16 @@ class Executor:
                 start = None
                 send = lambda: self.panel.arm.moveto_cartesian_line(flange, speed, acc, 0)
                 seg_goal_pose = kin.mul(kin.from_controller_pose(flange), plan.tool)
+            why = should_abort()  # a STOP or pause asked for since the last segment: send nothing more
+            if why:
+                raise self._stop(why, Interrupted)
             with self.panel.lock:
                 ret = send()
             sent = time.monotonic()
             if ret not in OK_CODES:
                 raise self._stop(f"the controller rejected the move (code {ret})")
             on_event("move.sent", segment=i + 1, of=n, speed=speed)
-            budget = plan.duration * 1.5 + 2.0
+            budget = (plan.segment_durations[i] if plan.segment_durations else plan.duration) * 1.5 + 2.0
             seen_moving, first = False, None
             while True:
                 self.sleep(POLL_S)

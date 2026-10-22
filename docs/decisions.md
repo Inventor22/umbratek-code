@@ -362,3 +362,137 @@ Decided on the arm, 2026-10-21, before the program tests.
   every "ready" raised it again, freedrive was refused while it was flagged, and a move back was rejected. The
   procedure brought it back on the arm. It needs a person holding the joint and is rare, so it stays out of the
   panel; the README describes it.
+
+## D40 to D49: the spine and the brain
+
+Decided on 2026-10-21 (evening), building the spine's side of the spine, brain and twin architecture the owner
+approved: planned and learned steps, the interface to the brain (`docs/brain-interface.md`) and its safety shell.
+
+## D40. The brain proposes; the spine checks all of it and runs it as its own
+
+- **Decision:** the brain is a separate process that only answers the spine's questions: a path for a planned move, the
+  next burst of a learned skill. The safety shell (`scripts/safety.py`) checks each answer whole, and what passes
+  becomes an ordinary plan that the existing executor supervises, segment by segment. Nothing from the brain reaches
+  the controller any other way.
+- **Alternatives:** let the brain drive the controller itself (its own SDK connection: the controller serves only one,
+  and there'd be two safety models); let the brain stream setpoints the spine relays (no time to check them, and the
+  10 Hz status couldn't supervise them).
+- **Why:** one safety model, one connection, one supervisor. The brain can then be as clever, and as wrong, as it
+  likes: a buggy brain is refused, not obeyed (tested with one whose world model lost the keep-out zones).
+
+## D41. The brain is a server on this PC; the spine asks it, one question at a time
+
+- **Decision:** the brain serves HTTP on a loopback address (default `http://127.0.0.1:8770`); the spine is its only
+  client. The spine accepts only loopback addresses for it.
+- **Alternatives:** the spine as the server, the brain connecting to it (the brief's first sketch: "the brain reaches
+  the spine over localhost"); a message queue or gRPC (dependencies the spine can't have); shared memory.
+- **Why:** WSL2's default (NAT) networking forwards Windows' `localhost` to servers in WSL2, but WSL2 can reach a
+  Windows server only at the host's own address, not `localhost`. With the brain as the server, a brain in WSL2
+  bound to its own `127.0.0.1` is reached from Windows at `localhost` (checked: hello in 12 ms), with no
+  `.wslconfig` changes and nothing listening beyond loopback. It also means the brain can't speak unless asked, and
+  the spine opens no new port. HTTP and JSON are in both standard libraries and readable in a log. The link has no
+  authentication, hence loopback only; any local process could pose as the brain, which is why every reply is
+  treated as untrusted (D43).
+
+## D42. Protocol version 1: four messages, tied to their request and state
+
+- **Decision:** `hello`, `plan`, `act` and `end` (`scripts/brain_protocol.py`). Every message carries the version, its
+  type and the spine's id; replies to `plan` and `act` echo the sequence number of the status frame they were worked
+  out from. Replies of another version, to another request (by id) or from another state are refused as stale; so is
+  anything malformed, any number that isn't finite (Python's json would accept NaN, Infinity and 1e999), and anything
+  over 1 MiB. Unknown fields are ignored, so fields can be added within version 1. Each question has a deadline (plan
+  10 s, `--brain-timeout`; act 2 s; connecting 1 s).
+- **Alternatives:** timestamps instead of sequence numbers (the PC's and WSL2's clocks differ, and Windows'
+  monotonic clock ticks in 15.6 ms); a free-form reply (nothing to check against).
+- **Why:** small enough to implement in any language from one document, strict enough that a stale or garbled
+  reply can't pass as a fresh one. A refused connection to a closed port on Windows takes about 2 s (it retries the
+  SYN), so connecting has its own 1 s limit: on loopback a listening brain takes the connection at once.
+
+## D43. The shell checks a proposal whole, refuses it with every reason, and never runs part of it
+
+- **Decision:** before anything is sent: where it starts and ends (within 0.01° of the arm and the goal), joint limits
+  at every waypoint, the continuous collision check on every segment (as every move gets), speed caps, a burst's
+  length and region, and just before it runs, freshness (the status under 1 s old, the arm within 0.1° of where the
+  brain was told it was, the cell's revision unchanged). Every failed check is a reason; any reason refuses the whole
+  proposal, faults the run (stopping the arm, as other planning failures do) and is logged with the first collision
+  for the 3D view. A refusal isn't retried.
+- **Alternatives:** trim a path to its good prefix (runs part of what was refused); ask the brain again after a refusal
+  (a brain that proposes something unsafe is a bug; retrying hides it, and could loop); report the first reason only.
+- **Why:** "never partially execute a refused proposal" is simplest to guarantee by checking first and sending after.
+  All the reasons at once make a buggy brain quick to diagnose.
+
+## D44. A brain's path runs as fine-point joint moves, one per segment
+
+- **Decision:** each segment of a path (two consecutive waypoints) is one joint move, from rest to rest, sent once the
+  arm has arrived from the last and judged from where that one ended. Paths are capped at 64 waypoints and bursts at
+  10 more after their start.
+- **Alternatives:** blended moves or the controller's timed joint setpoints (`moveto_servo_joint`) for smooth motion.
+- **Why:** D17 stands: a blended corner's path is undefined, so it can't be checked, and the executor can only supervise
+  a move it can predict. A joint move between two waypoints is exactly the straight joint-space segment the
+  collision check covers. The cost is a stop at every waypoint, so a brain should send few; cuRobo's dense
+  trajectories will need thinning (wave 2). Revisit once blends are measured.
+
+## D45. What the brain proposes is held to 250 mm/s at the tool point
+
+- **Decision:** besides each joint's rated speed and the step's speed (and the brain's, if lower), every segment of a
+  brain's path or burst is slowed until the tool point can't pass 250 mm/s (1000 mm/s with `"fullSpeed": true`):
+  `planner.Planner.joint`'s new `tool_speed`, a bound from each joint's share of the turn times the tool point's
+  distance from its axis, taken at 17 points along the segment.
+- **Alternatives:** no cap for joint moves, as taught joint moves have none; refusing fast proposals.
+- **Why:** ISO 10218-1's reduced speed is the program runner's standing guard for straight lines (D31); a path the
+  brain chose through the cell deserves at least the same, and speed is a cap, not a reason to refuse. The bound
+  can't be exceeded by any combination of the joints' turns; sampled independently, the tool point stayed under it
+  (135 mm/s at most on the test path).
+
+## D46. A planned move's goal is the spine's, as taught; dry runs ask the brain too
+
+- **Decision:** the spine works out where a planned move ends: a joint target's joints, or a tool target (with its
+  offset, if the step has one) solved from the joints it was taught at, so in the taught configuration. The brain
+  plans only the path, which must end exactly there. A dry run asks the brain for each planned path, from where the
+  run would be, and checks it as a run would; a learned step is assumed to end where it began.
+- **Alternatives:** let the brain choose the goal's joints (a different configuration could fail the next taught
+  step's line); a dry run that skips planned moves (it couldn't say a path exists, or how long it takes).
+- **Why:** the next taught step starts where the planned one ends, as taught. A learned step's end can't be known
+  without running it.
+
+## D47. Learned steps: a region, short bursts, at most 10 Hz, a time limit and a check
+
+- **Decision:** a learned step names its skill and the target it works near; the tool point must stay within `within`
+  mm of it (default 100, at most 500), sampled every 0.1° of turn. A burst is at most 10 waypoints after its start,
+  15° of turn for any joint and 50 mm of tool point travel. The skill is asked for its next burst once the last has
+  run and a newer status frame shows the result, never sooner than 0.1 s after the last request (timed with
+  `perf_counter`: `monotonic()` ticks in 15.6 ms on Windows). It may also hold still (up to 1 s), finish or give up.
+  The step has a time limit (default 60 s); when the skill says it's done, the step's optional check (an input) must
+  read true. The brain is told how each episode ended.
+- **Alternatives:** trust the skill's "done"; let a policy stream continuously (unsupervisable at 10 Hz, D44); no
+  region (collisions are checked anyway, but a learned skill wandering the whole cell is not what "the variable part"
+  means).
+- **Why:** the brain only proposes; the spine decides, including whether the job got done. The region keeps a
+  learned skill local to its taught target, so a recalibrated frame moves it with the target.
+
+## D48. STOP wins
+
+- **Decision:** a STOP abandons a question to the brain at once (its reply, if it comes, is dropped: the next question
+  has a new id), the executor checks for a STOP or pause before each segment, and a run that's been stopped ends as
+  stopped whatever else went wrong meanwhile (a failure the STOP itself caused used to read as a fault). Pause
+  abandons the question too, and resume asks again, from wherever the arm is.
+- **Alternatives:** wait out the brain's deadline (up to 10 s of "stopping"); treat a late reply as valid if it still
+  fits.
+- **Why:** STOP stops the arm through the controller connection whatever the runner is doing; the run's state should
+  say so promptly and nothing from before the STOP should move it afterwards. A move reaching the controller in the
+  same instant as a STOP is discarded by it, as it's stopped (the simulator models this; on the arm it's
+  [unverified]).
+
+## D49. The stub brain is standard-library Python, reusing the spine's model
+
+- **Decision:** `brain/stub/stub_brain.py` speaks the interface with `scripts/brain_protocol.py` and plans with the
+  spine's own model and planner: straight there if clear, else up and over (the tool point raised 60 to 300 mm above
+  the start and goal), else random via points, within 60% of its deadline. One skill, `seek`, spirals the tool point
+  out until an input goes high. `--ignore-zones` plays a buggy brain. The tests (`tests/spine_tests.py`, suite `spine`)
+  run it as a separate process for the end-to-end program, and play misbehaving brains in-process with its answers.
+- **Alternatives:** a stub in the brain's own environment (NumPy and friends: its tests wouldn't run under the normal
+  interpreter, and the twin session owns that environment); a fake inside the spine (wouldn't cross a process
+  boundary).
+- **Why:** the stub exists to prove the interface and the shell, not to plan well. Using the spine's own collision
+  model, it agrees with the shell whenever it's told the truth, so every refusal in the tests is one a buggy brain
+  earned.
