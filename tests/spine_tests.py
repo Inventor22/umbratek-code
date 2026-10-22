@@ -33,7 +33,7 @@ import stub_brain  # noqa: E402
 import utra_model  # noqa: E402
 
 STUB = os.path.join(ROOT, "brain", "stub", "stub_brain.py")
-BRAIN_PORT = int(os.environ.get("UTRA_TEST_BRAIN_PORT") or HTTP_PORT + 100)
+BRAIN_PORT = int(os.environ.get("UTRA_TEST_BRAIN_PORT") or HTTP_PORT + 1000)  # clear of every suite's panel port
 BRAIN_URL = f"http://127.0.0.1:{BRAIN_PORT}"
 BASE = f"http://127.0.0.1:{HTTP_PORT}"
 MODEL = utra_model.ArmModel()
