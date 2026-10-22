@@ -52,6 +52,8 @@ SUITES = {
                  "oracle", ["feature_oracle_tests.py"], None, 900),
     "feature": ("the featureset on the server against the simulator: cell, calibration, moves, runner, teaching",
                 "oracle", ["feature_tests.py"], None, 1500),
+    "spine": ("planned and learned steps, the brain interface and the safety shell, against the simulator and the stub "
+              "brain", "test", ["spine_tests.py"], None, 900),
     "paths": ("check_path against dense sampling along moves", "test", ["path_tests.py", "6"], ["path_tests.py", "2"], 1800),
     "capture": ("the real arm's capture: our kinematics and tools against its measurements", "test",
                 ["capture_tests.py"], None, 600),
