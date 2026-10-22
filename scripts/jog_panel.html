@@ -954,13 +954,18 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
       <span class="legend">Add</span>
       <select class="field" id="stepType" aria-label="Step type">
         <option value="joint">Joint move</option><option value="line">Straight move</option>
+        <option value="planned">Planned move</option><option value="learned">Learned skill</option>
         <option value="wait">Wait</option><option value="waitInput">Wait for input</option>
         <option value="set">Set output</option><option value="pulse">Pulse output</option>
         <option value="halt">Halt</option><option value="comment">Comment</option>
       </select>
+      <select class="field" id="stepSkill" aria-label="Skill, from the brain"></select>
+      <span class="legend" data-for="near">Near</span>
       <select class="field" id="stepTarget" aria-label="Target"></select>
-      <label data-for="move"><span class="legend">Back</span><input class="field" id="stepBack" type="number" min="0" max="500" step="1" value="0" aria-label="Approach: mm back along the tool"><span class="cue">mm</span></label>
-      <label data-for="move"><span class="legend">Speed</span><input class="field" id="stepSpeed" type="number" min="1" max="1000" step="1" placeholder="default" aria-label="Speed (blank for the program's default)"><span class="cue" id="stepSpeedUnit">°/s</span></label>
+      <label data-for="back"><span class="legend">Back</span><input class="field" id="stepBack" type="number" min="0" max="500" step="1" value="0" aria-label="Approach: mm back along the tool"><span class="cue">mm</span></label>
+      <label data-for="learned"><span class="legend">Within</span><input class="field" id="stepWithin" type="number" min="5" max="500" step="5" value="100" aria-label="Region: how far the tool point may go from the target (mm)"><span class="cue">mm</span></label>
+      <label data-for="learned"><span class="legend">Up to</span><input class="field" id="stepLimit" type="number" min="1" max="3600" step="1" value="60" aria-label="Time limit (s)"><span class="cue">s</span></label>
+      <label data-for="speed"><span class="legend">Speed</span><input class="field" id="stepSpeed" type="number" min="1" max="1000" step="1" placeholder="default" aria-label="Speed (blank for the program's default)"><span class="cue" id="stepSpeedUnit">°/s</span></label>
       <div class="mode-keys" id="stepIoLine" role="group" aria-label="On the tool or the controller">
         <button class="key latch mode-key" type="button" data-value="tool" aria-pressed="true">Tool</button>
         <button class="key latch mode-key" type="button" data-value="controller" aria-pressed="false">Controller</button>

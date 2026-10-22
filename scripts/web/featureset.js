@@ -269,6 +269,11 @@ function whyNotStart(s, mode) {
   if (r.state === "paused") return `${r.program} is paused: Resume or Step it, or Stop run to start again.`;
   if (!RUN_ENDED.includes(r.state)) return r.state === "faulted" ? "The last run faulted: press Reset first."
     : `${r.manual ? "A move" : r.program} is under way: wait, or Stop run.`;
+  const brain = s && s.brain;
+  if (brain && brain.ok === false && needsBrain(program.steps)) {
+    return brain.url ? `${program.name} needs the brain, which isn't answering at ${brain.url}: start it `
+      + "(python brain/stub/stub_brain.py)." : `${program.name} needs the brain, which is off (--brain off).`;
+  }
   if (mode === "dry") return s && s.live ? null : "There's no status from the controller.";
   return ready(s) ? null : whyNotReady(s);
 }
@@ -291,7 +296,8 @@ function renderRun(s) {
   const r = runOf(s);
   let [word, sentence, tone] = runWords(s);
   const have = Boolean(program && program.steps.length);
-  if (have && RUN_ENDED.includes(r.state) && !ready(s)) sentence += ` ${whyNotReady(s)}`;
+  const why = have && RUN_ENDED.includes(r.state) ? whyNotStart(s, "dry") || (ready(s) ? null : whyNotReady(s)) : null;
+  if (why) sentence += ` ${why}`;
   setText($("runWord"), word);
   setText($("runSentence"), sentence);
   $("runWindow").dataset.tone = tone;
@@ -393,7 +399,7 @@ document.addEventListener("visibilitychange", () => {
 function describeStep(s) {
   switch (s.type) {
     case "move": {
-      let text = `${s.kind === "line" ? "Straight move" : "Joint move"} to ${s.target}`;
+      let text = `${s.kind === "line" ? "Straight move" : s.kind === "planned" ? "Planned move" : "Joint move"} to ${s.target}`;
       const o = s.offset;
       if (o && o.frame === "tool" && !o.xyz[0] && !o.xyz[1] && o.xyz[2] < 0 && !(o.rpy || []).some(Boolean)) {
         text += `, ${fix(-o.xyz[2], 0)} mm back along the tool`;
@@ -401,6 +407,12 @@ function describeStep(s) {
         text += `, offset ${triple(o.xyz, 0)} mm in the ${o.frame === "tool" ? "tool's" : "target's"} frame`;
       }
       if (s.speed !== undefined) text += ` at ${fix(s.speed, 0)} ${s.kind === "line" ? "mm/s" : "°/s"}`;
+      return text;
+    }
+    case "learned": {
+      let text = `Learned skill ${s.skill} near ${s.near}, within ${fix(s.within, 0)} mm, up to ${fix(s.seconds, 0)} s`;
+      if (s.speed !== undefined) text += ` at ${fix(s.speed, 0)} °/s`;
+      if (s.check) text += `, then ${s.check.input} = ${s.check.value}`;
       return text;
     }
     case "wait":
@@ -434,12 +446,29 @@ function flatten(steps, path = [], depth = 0, editable = true, out = []) {
   return out;
 }
 
+// What the brain does for a step ("" for steps it has no part in).
+function brainPart(s) {
+  if (s.type === "learned") return "the brain acts";
+  return s.type === "move" && s.kind === "planned" ? "the brain plans the path" : "";
+}
+
+// A step's problem, shown in Alarm Red: a target that's gone or out of reach, or a brain it needs that isn't there.
 function stepProblem(s) {
-  if (s.type !== "move" || !cell) return "";
-  const target = cell.cell.targets[s.target];
+  const name = s.type === "move" ? s.target : s.type === "learned" ? s.near : null;
+  if (!name || !cell) return "";
+  const target = cell.cell.targets[name];
   if (!target) return "no such target";
   if (target.unreachable) return "out of reach since its frame moved";
+  const brain = status && status.brain;
+  if (!brainPart(s) || !brain || brain.ok === null || brain.ok === undefined) return "";
+  if (!brain.ok) return "brain not answering";
+  if (s.type === "learned" && !(s.skill in (brain.skills || {}))) return `the brain has no skill ${s.skill}`;
   return "";
+}
+
+// Whether a program's own steps (not the programs it calls) need the brain.
+function needsBrain(steps) {
+  return steps.some((s) => brainPart(s) || needsBrain([...(s.steps || []), ...(s.then || []), ...(s.else || [])]));
 }
 
 function renderSteps() {
@@ -464,6 +493,7 @@ function renderSteps() {
     pick.append(el("span", "num", pathText(x.path)), el("span", "text", describeStep(x.s)));
     const problem = stepProblem(x.s);
     if (problem) pick.lastChild.append(el("span", "cue bad", ` ${problem}`));
+    else if (brainPart(x.s)) pick.lastChild.append(el("span", "cue", ` · ${brainPart(x.s)}`));
     const isSelected = samePath(x.path, selected);
     li.classList.toggle("selected", isSelected);
     pick.setAttribute("aria-pressed", String(isSelected));
@@ -573,7 +603,8 @@ function insertStep(step) {
 
 // ---- Program: adding a step ----
 const SHOWN = {
-  joint: ["stepTarget", "move"], line: ["stepTarget", "move"], wait: ["seconds"],
+  joint: ["stepTarget", "back", "speed"], line: ["stepTarget", "back", "speed"], planned: ["stepTarget", "back", "speed"],
+  learned: ["near", "stepTarget", "stepSkill", "learned", "speed"], wait: ["seconds"],
   waitInput: ["stepIoLine", "stepIoBit", "stepValue", "timeout"], set: ["stepIoLine", "stepIoBit", "stepValue"],
   pulse: ["stepIoLine", "stepIoBit", "seconds"], halt: ["stepText"], comment: ["stepText"],
 };
@@ -581,33 +612,52 @@ const SHOWN = {
 function renderComposer() {
   const type = $("stepType").value;
   const shown = SHOWN[type];
-  for (const id of ["stepTarget", "stepIoLine", "stepIoBit", "stepValue", "stepText"]) $(id).hidden = !shown.includes(id);
+  for (const id of ["stepTarget", "stepSkill", "stepIoLine", "stepIoBit", "stepValue", "stepText"]) {
+    $(id).hidden = !shown.includes(id);
+  }
   for (const node of $("composer").querySelectorAll("[data-for]")) node.hidden = !shown.includes(node.dataset.for);
   setText($("stepSpeedUnit"), type === "line" ? "mm/s" : "°/s");
   $("stepSpeed").max = type === "line" ? "1000" : "120";
   $("stepSpeed").placeholder = program ? fix(program.speed[type === "line" ? "tcp" : "joint"], 0) : "";
   $("stepText").placeholder = type === "halt" ? "what the operator should do" : "note";
+  $("stepTarget").setAttribute("aria-label", type === "learned" ? "Near target" : "Target");
   const targets = cell ? Object.entries(cell.cell.targets) : [];
   fillSelect($("stepTarget"), targets.filter(([, t]) => type !== "line" || !t.joints)
     .map(([name, t]) => [name, t.joints ? `${name} (joints)` : name]), type === "line" ? "No tool targets yet" : "No targets yet");
+  const brain = status && status.brain;
+  const skills = brain && brain.ok ? Object.keys(brain.skills || {}) : [];
+  fillSelect($("stepSkill"), skills.map((name) => [name, name]), brain && brain.ok ? "The brain has no skills" : "No brain");
   const r = runOf(status);
   const busy = Boolean(program) && RUN_BUSY.includes(r.state) && r.program === program.name;
   $("stepAdd").disabled = !program || busy;
   setText($("stepAdd"), selected ? `Add after ${pathText(selected)}` : "Add at the end");
 }
 
+// The step the add row describes, or {why} it can't be added yet.
 function composedStep() {
   const type = $("stepType").value;
   const io = `${ioLine.value}.${Math.round(num("stepIoBit"))}`;
   const value = Number(ioValue.value);
+  const speed = $("stepSpeed").value.trim() ? num("stepSpeed") : undefined;
   switch (type) {
     case "joint":
-    case "line": {
-      if (!$("stepTarget").value) return null;
+    case "line":
+    case "planned": {
+      if (!$("stepTarget").value) return {why: "Record a target first (Teach), then add a move to it."};
       const step = {type: "move", kind: type, target: $("stepTarget").value};
       const back = num("stepBack");
       if (back > 0) step.offset = {frame: "tool", xyz: [0, 0, -back]};
-      if ($("stepSpeed").value.trim()) step.speed = num("stepSpeed");
+      if (speed !== undefined) step.speed = speed;
+      return step;
+    }
+    case "learned": {
+      if (!$("stepTarget").value) return {why: "Record a target first (Teach): a learned step works near one."};
+      if (!$("stepSkill").value) {
+        return {why: "Start the brain (python brain/stub/stub_brain.py) to list its skills, then add a learned step."};
+      }
+      const step = {type: "learned", skill: $("stepSkill").value, near: $("stepTarget").value, within: num("stepWithin"),
+        seconds: num("stepLimit")};
+      if (speed !== undefined) step.speed = speed;
       return step;
     }
     case "wait": return {type: "wait", seconds: num("stepSeconds")};
@@ -625,8 +675,8 @@ const ioValue = choice("stepValue");
 $("stepAdd").addEventListener("click", (event) => {
   const step = composedStep();
   if (!program) return;
-  if (!step) {
-    P.say("Record a target first (Teach), then add a move to it.", "bad");
+  if (step.why) {
+    P.say(step.why, "bad");
     P.refuse(event.currentTarget);
     return;
   }
@@ -652,7 +702,15 @@ function eventText(e) {
     case "io.wait": return `${at}: waiting for ${e.input} = ${e.value}`;
     case "io.waited": return `${at}: ${e.input} came after ${e.seconds} s`;
     case "io.set": return `${at}: ${e.output} set to ${e.value}`;
-    case "dry.assumed": return `${at}: assumed ${e.input} = ${e.value} (dry run)`;
+    case "dry.assumed":
+      return e.skill ? `${at}: assumed ${e.skill} ends where it began (dry run)` : `${at}: assumed ${e.input} = ${e.value} (dry run)`;
+    case "brain.plan": return `${at}: ${e.text}${e.note ? ` (the brain: ${e.note})` : ""}`;
+    case "brain.refused": return `${at}: ${e.reason}`;
+    case "skill.start": return `${at}: ${e.skill} starts, within ${e.within} mm of ${e.near}, for up to ${e.seconds} s`;
+    case "skill.burst": return `${at}: burst ${e.tick + 1}: ${e.text}`;
+    case "skill.hold": return `${at}: ${e.seconds} s still, as the skill asked`;
+    case "skill.done": return `${at}: ${e.skill} done after ${e.bursts} burst${e.bursts === 1 ? "" : "s"}${e.note ? `: ${e.note}` : ""}`;
+    case "skill.end": return `${at}: ${e.skill} ended (${e.outcome})`;
     case "dry.would-set": return `${at}: would set ${e.output} to ${e.value} (dry run)`;
     case "dry.would-pulse": return `${at}: would pulse ${e.output} for ${e.seconds} s (dry run)`;
     case "dry.halt": return `${at}: would halt: ${e.message} (dry run)`;
@@ -669,7 +727,7 @@ function eventText(e) {
   }
 }
 
-const BAD_EVENTS = ["run.faulted", "run.stopped", "step.interrupted"];
+const BAD_EVENTS = ["run.faulted", "run.stopped", "step.interrupted", "brain.refused"];
 
 async function refreshEvents(s) {
   if (!s || !s.run) return;
@@ -1010,8 +1068,9 @@ function onStatus(s) {
   renderTeach(s);
   markCurrent();
   refreshEvents(s);
-  // Keys whose state follows the run and the arm's readiness: redraw the lists when either changes.
-  const keys = `${r.state}|${r.program}|${ready(s)}|${Boolean(s && s.live)}`;
+  // Keys whose state follows the run, the arm's readiness and the brain: redraw the lists when any changes.
+  const brain = (s && s.brain) || {};
+  const keys = `${r.state}|${r.program}|${ready(s)}|${Boolean(s && s.live)}|${brain.ok}|${Object.keys(brain.skills || {})}`;
   if (keys !== keysShown) {
     keysShown = keys;
     if (program) renderSteps();
