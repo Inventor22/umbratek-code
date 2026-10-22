@@ -765,6 +765,13 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
   (only `127.0.0.1` crosses into WSL2, and its ports are the owner's; the suites use other loopback addresses).
 - **Why:** one command runs every suite, and inside WSL2 every address is free. The boundary is crossed by hand
   instead, on a port of its own (D68).
+- **Later, 2026-10-22:** with a VPN on, WSL2's DNS doesn't answer reverse lookups of loopback addresses other than
+  `127.0.0.1`, and gives up after 10 s. Python's `http.server` makes one when it binds (`socket.getfqdn`, only to keep
+  the name), so the twin's HTTP port opened 11 s after it started, past the twin suite's wait, and perception's map
+  11 s after it did. Every HTTP server (the jog panel, the stub, the planner, the twin, perception) is now built on
+  `scripts/loopback_http.py`, `http.server`'s `ThreadingHTTPServer` without that lookup. The planner's suite makes
+  each in its own environment with `socket`'s lookups recorded instead of made, and fails if one asks; and it fails if
+  any other module of `scripts/`, `tools/` or `brain/` uses `http.server`'s own server classes.
 
 ## D68. How the planner is validated: random moves, the twin end to end, the camera's chain, a control, the boundary
 

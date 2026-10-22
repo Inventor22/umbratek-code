@@ -21,7 +21,7 @@ import math
 import queue
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from .model import CameraSpec, Obstacle, SceneError
 
 PORT = 30100
 WAIT_S = 10.0
+loopback_http = repo.spine("loopback_http")
 
 
 class TwinServer:
@@ -39,7 +40,7 @@ class TwinServer:
         self.jobs = queue.Queue()
         self.t, self.controller = None, {}
         handler = type("Handler", (_Handler,), {"server_ref": self})
-        self.httpd = ThreadingHTTPServer((host, port), handler)
+        self.httpd = loopback_http.Server((host, port), handler)
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="twin-http", daemon=True)
         self.thread.start()

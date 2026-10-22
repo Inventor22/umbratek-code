@@ -75,6 +75,12 @@ Windows the jog panel, `scripts/arm.py` and the spine reach its controller ports
 (checked: `python scripts/arm.py status 127.0.0.1` on Windows reads the twin served from WSL2). Only `127.0.0.1` is
 forwarded, not the other loopback addresses the test suites use.
 
+With a VPN on, WSL2's DNS may not answer a reverse lookup of a loopback address other than `127.0.0.1`, and gives up
+after 10 s. Python's `http.server` makes one when it binds, so every HTTP server here (the jog panel, the brains, the
+twin and perception) is built on `scripts/loopback_http.py`, which doesn't: before it, the twin's HTTP port opened
+11 s after it started on `127.0.0.53`. The planner's suite checks that none asks (`tests/planner_tests.py`,
+`unit_servers`).
+
 `tests/run_all.py` runs the twin's suite with `brain/.venv` (or the Python named by `UMBRATEK_BRAIN_PYTHON`, for
 example the WSL2 venv); without one, the suite is reported SKIP and the run fails, as the oracle suites do.
 

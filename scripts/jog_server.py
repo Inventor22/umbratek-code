@@ -32,12 +32,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import arm
 import brain_link
 import cell as cellmod
 import kinematics as kin
+import loopback_http
 import planner as plannermod
 import runner as runnermod
 import utra_model
@@ -1362,8 +1363,8 @@ def main(argv=None):
     with open(PAGE, encoding="utf-8") as f:
         page = f.read().replace("__TOKEN__", token).replace("__CONFIG__", json.dumps(config))
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port),
-                                     make_handler(panel, token, page.encode("utf-8"), args.port, three))
+        server = loopback_http.Server(("127.0.0.1", args.port),
+                                      make_handler(panel, token, page.encode("utf-8"), args.port, three))
     except OSError as e:
         print(f"Error: cannot listen on 127.0.0.1:{args.port} ({e}). Try --port.", file=sys.stderr)
         return 1
