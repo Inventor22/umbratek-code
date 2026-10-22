@@ -216,3 +216,91 @@ the suite so a better model shows up:
   0.92 s. The tool's position is right (within 0.26 mm); the joints lag mid-turn by up to 3.4 degrees.
 - **STOP at other speeds.** The STOP model is built from the one stop at 30 deg/s. At 10 deg/s (MT-2), the arm ran
   on 0.17 degrees after STOP, the model 0.06.
+
+## The planner (`brain/planner/`)
+
+A brain that plans planned moves with NVIDIA's cuRobo (cuRoboV2) on the GPU, in WSL2. It serves the interface
+(`docs/brain-interface.md`) itself, so the spine on Windows reaches it at `http://127.0.0.1:<port>` as it reaches the
+stub, through WSL2's localhost forwarding. The stub stays the fallback that needs nothing installed.
+`docs/decisions.md` D60 to D69 say why it is the way it is.
+
+A planned move, from where the arm is to the goal the spine set:
+
+1. **Straight there**, if the spine's own continuous check (`utra_model.check_path`, with the world's obstacles added)
+   passes: one segment is the fastest the controller runs.
+2. **Otherwise cuRobo**: its graph search (a roadmap of collision-free straight joint moves), or its trajectory
+   optimiser when that finds nothing, around the cart, the floor, the keep-out zones and the obstacles, with the arm
+   and tool as spheres covering their capsules, grown by 12 mm (the spine's 10 plus 2). A start or goal nearer than
+   that to something (the spine lets a move start that close if it moves away) gets a short move away first.
+3. **Cut to a few joint moves**: the controller stops at every waypoint (D44), so from each kept waypoint the planner
+   takes the farthest point along cuRobo's path that one straight joint move reaches. It screens the candidates
+   together on the GPU, and the move it keeps has passed the spine's check with the obstacles added.
+4. If cuRobo finds nothing in time, the stub's search (up and over, random via points) against the same world.
+
+Every move it sends has passed the spine's check, so the spine accepts it. The spine doesn't know about the obstacles,
+so keeping the margin from them is the planner's job, and that same check does it.
+
+- **One model of the arm.** cuRobo's arm is generated when the planner starts, from the repo's own files: Umbratek's
+  URDF with the planning limits (the spine's, within the controller's) and the rated speeds; spheres covering every
+  capsule of `collision.json` and the base's cylinder; exactly the pairs of links the spine's check compares; and a
+  link on the flange for the active tool's capsules, which come with each request. Its kinematics match the spine's
+  to 0.0002 mm.
+- **What it plans around** (`--world`): `request` (the default): the tool and keep-out zones each request carries,
+  with the arm and its cart from the repo. `twin[=URL]`: as well, the twin's true obstacles, read from its `GET /state`
+  for every plan (default `http://127.0.0.1:30100`). `map[=URL]`: as well, perception's obstacle map
+  (`docs/world-map.md`, default `http://127.0.0.1:8780`); its ESDF goes to cuRobo grown by half a voxel, and every
+  move is checked against a bound that holds between voxel centres too. A source that doesn't answer fails the plan,
+  saying why; it's never ignored.
+- **Learned steps** go to the stub's scripted skill, `seek`, so programs with learned steps run with this brain too.
+- **Starting.** It listens at once and says it doesn't plan (`hello`) until cuRobo is loaded and warmed up: about
+  2.5 s and 12 s. The first start on a PC compiles cuRobo's kernels, a minute or two, cached in `~/.cache/warp`.
+  It holds about 0.7 GB of the GPU.
+- `GET /v1/stats` lists its recent plans and how long each took.
+
+### The planner's environment
+
+In WSL2 (Ubuntu 24.04): its Python 3.12, PyTorch 2.12.1 with CUDA 13 and cuRoboV2 at a pinned commit, in a venv of
+its own beside the twin's (`brain/planner/requirements.txt`), from the repo's root:
+
+```
+python3 -m venv ~/.venvs/umbratek-planner
+~/.venvs/umbratek-planner/bin/python -m pip install -r brain/planner/requirements.txt
+```
+
+No CUDA toolkit is needed: cuRobo compiles its kernels when they're first used, and the Windows driver provides CUDA
+inside WSL2 (don't install a Linux NVIDIA driver there). Planning around the twin needs the twin's environment in WSL2
+too, and port 502 for it (above).
+
+### Running it
+
+From the repo's root in WSL2 (`python` meaning `~/.venvs/umbratek-planner/bin/python`):
+
+```
+python -m brain.planner check                  # the environment, cuRobo's model against the spine's, three timed plans
+python -m brain.planner serve                  # http://127.0.0.1:8770, where the jog server looks by default
+python -m brain.planner serve --world twin     # around the twin's obstacles, with python -m brain.twin serve running
+```
+
+On Windows, `python scripts/jog_server.py <controller>` then finds it at `http://127.0.0.1:8770`; on another port
+(`serve --port 8790`), give the jog server `--brain http://127.0.0.1:8790`. Only `127.0.0.1` crosses from Windows into
+WSL2, so a twin the planner plans around runs in WSL2 too, where the planner reaches its HTTP endpoint.
+
+### How it's verified
+
+`tests/planner_tests.py` (`python tests/run_all.py planner`, which runs it in WSL2 through `wsl.exe`) checks cuRobo's
+model against the spine's (kinematics, 6800 points on the capsules all inside their spheres, the base's ring, the
+self-collision pairs, the limits), the world sources (the twin's shapes, spheres and capsules in the spine's check, the
+map's bound against the true distance at 4000 points), and then plans:
+
+| What | Result |
+| ---- | ------ |
+| 48 random blocked moves above a table, around a crate, a pole, a ball and a tube | all planned, by graph search, in 2.2 segments on average (at most 4); every one accepted by the spine's shell (`safety.check_path`); 12.1 mm from the obstacles and the table at the least, sampled every 0.5 deg |
+| Their planning times | median 0.69 s, 90% within 0.94 s, the worst 1.08 s: on average 0.07 s checking the straight way, 0.25 s in cuRobo, 0.37 s cutting its path (3.2 moves through the spine's check) |
+| A keep-out zone the spine sent, a start 11 mm from a wall, a mesh obstacle, a fake perception map | planned and accepted; a goal inside an obstacle, or past a limit, gets no path, saying why |
+| The twin, the planner brain and the jog server as processes: taught, planned, taught around the twin's crate, out and back, the crate moved, then a pole, a ball, a tube | 6 runs done, every plan accepted, no contact in the twin (sampled 178 to 351 times a run), the tool on its target to 0.001 mm |
+| Their planning times | the brain 1.16 s median, 1.55 s at most (with reading the twin's state); the spine, from starting the planned step to accepting its path, 1.19 s median and 1.63 s at most, against its 10 s deadline |
+| The control: the same program with a brain blind to the crate (`--world request`) | the spine accepts its straight path, and the twin sees the arm hit the crate |
+
+Across the boundary, by hand: the spine and the simulator on Windows, the planner in WSL2 on `127.0.0.1:8790`, the
+spine suite's taught, planned, taught program around its keep-out zone, out and back six times: all done, nothing
+refused, the brain 0.67 to 1.19 s, the spine from starting the step to accepting the path 1.23 to 1.90 s.
