@@ -4,7 +4,8 @@ checks of paths and bursts. Then the jog server against the simulator, with the 
 as a separate process, or a brain played by this test on its own port (the stub's answers, which it can delay or
 spoil): a taught, planned, taught program end to end; a brain whose paths go through a keep-out zone; stale, malformed
 and dangerous replies, each refused with nothing sent; learned skills inside and beyond their region; STOP while the
-brain thinks and while its path runs; and programs that need a brain that isn't there. Standard library only.
+brain thinks and while its path runs; programs that need a brain that isn't there; and runs of one program started
+within the same second, each with a log of its own. Standard library only.
 Usage: python tests/spine_tests.py"""
 import json
 import math
@@ -989,8 +990,69 @@ def scenario_no_brain():
           and "loopback" in r.stderr, (r.returncode, r.stderr[-300:]))
 
 
+# ---- run logs ------------------------------------------------------------------------------------------------------
+
+def same_second_runs(rig, name, count, tries=5):
+    """Dry runs of program `name`, one straight after another, started just after a second begins, until `count` of
+    them started within one second (their logs' names say when, to the second): their logs, relative to cell/logs/."""
+    for _ in range(tries):
+        time.sleep(1.0 - time.time() % 1.0 + 0.02)
+        logs = []
+        for _ in range(count):
+            r = rig.post("/api/run/start", {"name": name, "mode": "dry"})
+            s = rig.run_state("done", "faulted", "stopped")
+            assert r["ok"] and s["run"]["state"] == "done", (r, s["run"])
+            logs.append(rig.get("/api/run")["run"]["log"])
+        if len({os.path.basename(log).split("-", 1)[0] for log in logs}) == 1:
+            break
+    return logs
+
+
+def scenario_run_logs():
+    print("== run logs: runs of one program started within the same second each get a log of their own")
+    import runner as runnermod
+    rig = Rig("logs", brain=None)
+    try:
+        rig.enable()
+        setup(rig)
+        save(rig, {"name": "plain", "steps": [{"type": "move", "kind": "joint", "target": "A"},
+                                              {"type": "move", "kind": "joint", "target": "home"}]})
+        logs = same_second_runs(rig, "plain", 3)
+        events = []
+        for log in logs:
+            with open(os.path.join(rig.cell_dir, "logs", log), encoding="utf-8") as f:
+                events.append([json.loads(line) for line in f])
+        names = [os.path.basename(log) for log in logs]
+        stamp = names[0].split("-", 1)[0]
+        starts = [next((e["t"][11:23] for e in ev if e["event"] == "run.start"), "?") for ev in events]
+        check(f"three dry runs of one program started within one second (at {', '.join(starts)}) get three logs: "
+              f"{', '.join(names)}", names == [f"{stamp}-plain.jsonl", f"{stamp}-plain~2.jsonl",
+                                               f"{stamp}-plain~3.jsonl"] and len(set(logs)) == 3, logs)
+        kinds = [[e["event"] for e in ev] for ev in events]
+        check("each log holds its own run only: one run.start, one run.done, and its own run's steps",
+              all(k.count("run.start") == 1 and k.count("run.done") == 1 and k[0] == "run.start" and k[-1] == "run.done"
+                  for k in kinds), kinds)
+        folder = os.path.join(rig.cell_dir, "race")
+        os.makedirs(folder)
+        barrier, made = threading.Barrier(8), []
+
+        def take():
+            barrier.wait()
+            made.append(runnermod.new_log(folder, stamp, "plain"))
+        threads = [threading.Thread(target=take) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        check("eight runs of one program starting at once in one folder (two panels on one cell folder, say) get eight "
+              "logs: each is created exclusively", len(set(made)) == 8 and sorted(os.listdir(folder)) == sorted(
+                  os.path.basename(p) for p in made), made)
+    finally:
+        rig.close()
+
+
 SCENARIOS = (unit_protocol, unit_link, unit_shell, scenario_end_to_end, scenario_blind_brain, scenario_bad_replies,
-             scenario_stop, scenario_learned, scenario_no_brain)
+             scenario_stop, scenario_learned, scenario_no_brain, scenario_run_logs)
 
 
 def main(names):

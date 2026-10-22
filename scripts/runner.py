@@ -28,11 +28,14 @@ and a STOP ends the run as stopped whatever the step was doing, waiting on the b
 The runner (docs/capabilities.md P2-P5): start (from the top or a chosen step; run, step or dry run), pause (STOP,
 then resume re-plans the interrupted step from wherever the arm is), resume, stop, step, reset, speed override. It
 runs in its own thread, so a run carries on with the page closed; manual moves started from the page instead stop if
-the page goes quiet. Every event goes to cell/logs/<date>/<time>-<program>.jsonl. Standard library only.
+the page goes quiet. Every event goes to cell/logs/<date>/<time>-<program>.jsonl, a file of each run's own: another
+run of the same program started in the same second gets <time>-<program>~2.jsonl, then ~3 and so on (new_log).
+Standard library only.
 """
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import math
 import os
@@ -335,6 +338,19 @@ class Programs:
 
 # ---- the runner ------------------------------------------------------------------------------------------------
 
+def new_log(folder, stamp, name):
+    """A new, empty run log in `folder`: <stamp>-<name>.jsonl, or, if another run of the program started in the same
+    second, <stamp>-<name>~2.jsonl, ~3 and so on ('~' is never in a program's name, so the name still reads back).
+    Created exclusively, so no two runs share a log, even two panels on one cell folder."""
+    for n in itertools.count(1):
+        path = os.path.join(folder, f"{stamp}-{name}{'' if n == 1 else f'~{n}'}.jsonl")
+        try:
+            with open(path, "x", encoding="utf-8"):
+                return path
+        except FileExistsError:
+            continue
+
+
 class Runner:
     """Runs one program (or one manual move) at a time, in its own thread."""
 
@@ -412,10 +428,11 @@ class Runner:
             self.request = self.go = None
             self.events, self.estimate = [], None
             self.started_at = time.monotonic()
-            self.run_tag, self.episodes = time.strftime("%H%M%S"), 0
-            folder = os.path.join(self.log_folder, time.strftime("%Y-%m-%d"))
+            now = time.localtime()
+            self.run_tag, self.episodes = time.strftime("%H%M%S", now), 0
+            folder = os.path.join(self.log_folder, time.strftime("%Y-%m-%d", now))
             os.makedirs(folder, exist_ok=True)
-            self.log_path = os.path.join(folder, f"{time.strftime('%H%M%S')}-{checked['name']}.jsonl")
+            self.log_path = new_log(folder, self.run_tag, checked["name"])
             self.thread = threading.Thread(target=self._run, args=(from_path,), daemon=True)
         self.log("run.start", program=checked["name"], mode=mode, override=self.override, manual=manual,
                  **({"from": ".".join(str(i + 1) for i in from_path)} if from_path else {}))
@@ -482,27 +499,29 @@ class Runner:
             if self.mode == "dry":
                 self.virtual = self.panel.current_joints()
             self._steps(self.program, self.program["steps"], [], depth=0)
+            # Each run's last event is written with the lock held, as its state changes: another run may start as
+            # soon as this one is done, stopped or faulted, and its events go to its own log.
             with self.lock:
                 self.state, self.path, self.step_text = "done", None, ""
                 if self.mode == "dry":
                     self.estimate = round(self.total, 1)
-            self.log("run.done", seconds=round(time.monotonic() - self.started_at, 2),
-                     **({"estimateS": round(self.total, 1)} if self.mode == "dry" else {}))
+                self.log("run.done", seconds=round(time.monotonic() - self.started_at, 2),
+                         **({"estimateS": round(self.total, 1)} if self.mode == "dry" else {}))
         except Stopped:
             if self.virtual is None:
                 self.panel.stop(self.reason or "the run was stopped")
             with self.lock:
                 self.state = "stopped"
-            self.log("run.stopped", reason=self.reason)
+                self.log("run.stopped", reason=self.reason)
         except Faulted as e:
             with self.lock:
                 self.state, self.reason, self.hit = "faulted", e.reason, drawable_hit(e.hit)
-            self.log("run.faulted", reason=e.reason)
+                self.log("run.faulted", reason=e.reason)
         except Exception as e:  # a bug: fault the run rather than die silently
             self.panel.stop("the program runner failed")
             with self.lock:
                 self.state, self.reason = "faulted", f"internal error: {e!r}"
-            self.log("run.faulted", reason=self.reason)
+                self.log("run.faulted", reason=self.reason)
 
     def _steps(self, program, steps, path, depth):
         for i, s in enumerate(steps):
