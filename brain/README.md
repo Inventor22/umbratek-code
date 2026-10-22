@@ -129,7 +129,7 @@ does.
 
 | Request | What it does |
 | ------- | ------------ |
-| `GET /state` | Time, joints, flange and tool pose, the controller's state, contacts, zone clearances, obstacles, and every camera's intrinsics and true pose. |
+| `GET /state` | Time, joints, flange and tool pose, the controller's state, contacts, zone clearances, obstacles (`obstacles`: where each is; `obstacleShapes`: its shape, size, whether it's fixed, and its mesh file), and every camera's intrinsics and true pose. |
 | `GET /cameras/<name>.npz` | A frame: `rgb`, `depth` (m), `segmentation`, `K`, `T_base_camera` and `meta` (JSON). |
 | `GET /cameras/<name>/rgb.png`, `/depth.png` | The colour image; depth as 16-bit millimetres. |
 | `POST /obstacles` | `{"add": {obstacle}}`, `{"move": {"name", "pose", "frame"}}` or `{"remove": "name"}`. |

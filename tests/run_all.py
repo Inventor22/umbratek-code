@@ -9,8 +9,9 @@
 
 Suites that drive the simulator each get their own loopback address (127.0.0.11, .12, ...) and panel port, so
 they run side by side (--jobs, default 3). Oracle suites need the oracle environment (.venv-oracle: NumPy, SciPy,
-OpenCV and Pinocchio, from conda-forge; see tests/README.md) and the twin's suite the brain's environment
-(brain/.venv: MuJoCo; see brain/README.md); without them they're reported SKIP, and the run fails.
+OpenCV and Pinocchio, from conda-forge; see tests/README.md), the twin's suite the brain's environment
+(brain/.venv: MuJoCo; see brain/README.md), and the planner's suite the planner's environment in WSL2 (cuRobo; see
+brain/README.md), which it runs in through wsl.exe; without them they're reported SKIP, and the run fails.
 Each suite's full output goes to tests/logs/<suite>.out.
 """
 import argparse
@@ -37,6 +38,28 @@ def brain_python():
     candidates = [os.environ.get("UMBRATEK_BRAIN_PYTHON") or "", os.path.join(ROOT, "brain", ".venv", "Scripts", "python.exe"),
                   os.path.join(ROOT, "brain", ".venv", "bin", "python")]
     return next((p for p in candidates if p and os.path.isfile(p)), None)
+
+
+PLANNER_PY = "${UMBRATEK_PLANNER_PYTHON:-$HOME/.venvs/umbratek-planner/bin/python}"  # in WSL2, brain/README.md
+PLANNER_ENV = ("UTRA_TEST_HOST", "UTRA_TEST_HTTP_PORT", "UTRA_TEST_LOGS/p", "PYTHONIOENCODING", "PYTHONUNBUFFERED",
+               "UMBRATEK_PLANNER_PYTHON")
+
+
+def planner_command(script_argv, env):
+    """The planner suite's command, or None without the planner's environment. It runs in WSL2 (cuRobo needs Linux
+    and the GPU): from Windows through wsl.exe (UMBRATEK_PLANNER_WSL names the distribution, else the default one),
+    the suite's settings passed by WSLENV; in Linux, directly."""
+    if os.name != "nt":
+        exe = os.environ.get("UMBRATEK_PLANNER_PYTHON") or os.path.expanduser("~/.venvs/umbratek-planner/bin/python")
+        return [exe, os.path.join(HERE, script_argv[0]), *script_argv[1:]] if os.path.isfile(exe) else None
+    wsl = ["wsl.exe"] + (["-d", os.environ["UMBRATEK_PLANNER_WSL"]] if os.environ.get("UMBRATEK_PLANNER_WSL") else [])
+    try:
+        found = subprocess.run(wsl + ["-e", "sh", "-c", f'test -x "{PLANNER_PY}"'], env=env, capture_output=True,
+                               timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        found = False
+    script = " ".join(["exec", f'"{PLANNER_PY}"', "tests/" + script_argv[0]] + script_argv[1:])
+    return wsl + ["--cd", ROOT, "-e", "sh", "-c", script] if found else None
 
 
 def oracle_env(env):
@@ -69,12 +92,20 @@ SUITES = {
     "sim": ("the simulator against the capture, and its registers and control port", "test", ["sim_tests.py"], None, 600),
     "twin": ("the twin (brain/twin): its model from the repo's sources, obstacles, cameras, its coupling to the "
              "simulator, both captures replayed", "brain", ["twin_tests.py"], None, 900),
+    "planner": ("the planner (brain/planner, in WSL2): cuRobo's model against the spine's, plans around obstacles "
+                "through the spine's shell, and taught-planned-taught programs around the twin's obstacles", "planner",
+                ["planner_tests.py"], None, 1800),
 }
 
 
 def run_suite(name, index, args, results):
     _, interpreter, script, quick, timeout = SUITES[name]
     argv = list(quick if args.quick and quick else script)
+    env = dict(os.environ, UTRA_TEST_HOST=f"127.0.0.{args.base + index}",
+               UTRA_TEST_HTTP_PORT=str(8800 + args.base - 11 + index),
+               UTRA_TEST_LOGS=LOGS, UTRA_TEST_PY=args.python or sys.executable, PYTHONIOENCODING="utf-8",
+               PYTHONUNBUFFERED="1")
+    command = None
     if interpreter == "oracle":
         exe = oracle_python()
         if exe is None:
@@ -85,20 +116,24 @@ def run_suite(name, index, args, results):
         if exe is None:
             results[name] = ("SKIP", 0.0, "no brain environment (brain/.venv): see brain/README.md")
             return
+    elif interpreter == "planner":
+        env["WSLENV"] = ":".join([v for v in (os.environ.get("WSLENV"),) if v] + list(PLANNER_ENV))
+        del env["UTRA_TEST_PY"]  # the planner suite runs the jog server on its own (WSL2's) Python
+        command = planner_command(argv, env)
+        if command is None:
+            results[name] = ("SKIP", 0.0, "no planner environment (in WSL2, ~/.venvs/umbratek-planner): see "
+                                          "brain/README.md")
+            return
     else:
         exe = sys.executable
-    env = dict(os.environ, UTRA_TEST_HOST=f"127.0.0.{args.base + index}",
-               UTRA_TEST_HTTP_PORT=str(8800 + args.base - 11 + index),
-               UTRA_TEST_LOGS=LOGS, UTRA_TEST_PY=args.python or sys.executable, PYTHONIOENCODING="utf-8",
-               PYTHONUNBUFFERED="1")
     if interpreter == "oracle":
         env = oracle_env(env)
     out_path = os.path.join(LOGS, f"{name}.out")
     t0 = time.monotonic()
     with open(out_path, "w", encoding="utf-8") as out:
         try:
-            code = subprocess.run([exe, os.path.join(HERE, argv[0]), *argv[1:]], cwd=ROOT, env=env, stdout=out,
-                                  stderr=subprocess.STDOUT, timeout=timeout).returncode
+            code = subprocess.run(command or [exe, os.path.join(HERE, argv[0]), *argv[1:]], cwd=ROOT, env=env,
+                                  stdout=out, stderr=subprocess.STDOUT, timeout=timeout).returncode
         except subprocess.TimeoutExpired:
             code = "timeout"
     took = time.monotonic() - t0
@@ -123,7 +158,7 @@ def main():
         parser.error(f"--base must be 1 to {254 - len(SUITES)}")
     if args.list:
         for name, (what, interpreter, *_rest) in SUITES.items():
-            print(f"  {name:<10} {what}{f' [{interpreter}]' if interpreter in ('oracle', 'brain') else ''}")
+            print(f"  {name:<10} {what}{f' [{interpreter}]' if interpreter in ('oracle', 'brain', 'planner') else ''}")
         return 0
     names = args.suites or list(SUITES)
     unknown = [n for n in names if n not in SUITES]
