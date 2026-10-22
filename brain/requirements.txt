@@ -1,0 +1,11 @@
+# The brain's environment: everything with heavy dependencies lives here, apart from the spine's standard-library
+# Python. For now that's the twin (brain/twin: MuJoCo); wave 2 adds the planner (cuRobo, in WSL2) and perception.
+#
+#   Windows:  py -3.12 -m venv brain\.venv
+#             brain\.venv\Scripts\python -m pip install -r brain\requirements.txt
+#   WSL2:     python3 -m venv ~/.venvs/umbratek-brain
+#             ~/.venvs/umbratek-brain/bin/python -m pip install -r brain/requirements.txt
+#
+# brain/README.md has the details (rendering backends, ports in WSL2).
+mujoco==3.16.0
+numpy==2.5.4

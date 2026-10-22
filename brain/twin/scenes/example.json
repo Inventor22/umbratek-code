@@ -1,0 +1,17 @@
+{
+ "about": "An example cell for the twin: a table in front of the cart, a part on it that can be knocked over, a fixture on the table's far corner, a camera on a post looking down at the table, and one on the flange. The table's size and place are illustrative, not measured: give the real ones (or a cell folder with frames) once they're known. Sizes in mm, poses {xyz mm, rpy deg} in the arm's base frame unless 'frame' names a cell frame. See brain/README.md.",
+ "obstacles": [
+  {"name": "table", "shape": "box", "size": [700, 900, 30], "pose": {"xyz": [650, 0, -115], "rpy": [0, 0, 0]},
+   "rgba": [0.66, 0.6, 0.52, 1]},
+  {"name": "fixture", "shape": "box", "size": [120, 160, 80], "pose": {"xyz": [820, -280, -60], "rpy": [0, 0, 20]},
+   "rgba": [0.35, 0.38, 0.42, 1]},
+  {"name": "part", "shape": "cylinder", "size": [25, 60], "pose": {"xyz": [560, 150, -70], "rpy": [0, 0, 0]},
+   "fixed": false, "mass": 0.15, "rgba": [0.8, 0.45, 0.2, 1]}
+ ],
+ "cameras": [
+  {"name": "overhead", "width": 640, "height": 480, "fx": 615, "fy": 615,
+   "pose": {"eye": [600, 0, 900], "target": [620, 0, -100], "up": [1, 0, 0]}},
+  {"name": "wrist", "mount": "flange", "width": 640, "height": 480, "fx": 385, "fy": 385,
+   "pose": {"xyz": [0, 75, 30], "rpy": [0, 0, 0]}}
+ ]
+}

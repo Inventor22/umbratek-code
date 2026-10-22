@@ -154,12 +154,14 @@ class Control:
 
 
 def frames(seconds):
+    """Status frames for `seconds`, each with its arrival time from the high-resolution clock (time.monotonic()
+    follows the ~15.6 ms system tick on Windows before Python 3.13, too coarse to time 100 ms gaps)."""
     report = armcli.StatusReport(HOST)
-    out, t0 = [], time.monotonic()
+    out, t0 = [], time.perf_counter()
     try:
-        while time.monotonic() - t0 < seconds:
+        while time.perf_counter() - t0 < seconds:
             f = report.read()
-            f["t"] = time.monotonic()
+            f["t"] = time.perf_counter()
             out.append(f)
     finally:
         report.close()
@@ -238,12 +240,12 @@ def live_motion():
                 base = last["joints"][0]
                 target = list(last["joints"])
                 target[0] += math.radians(2.0 if k % 2 == 0 else -2.0)
-                t0 = time.monotonic()
+                t0 = time.perf_counter()
                 arm.moveto_joint_p2p(target, math.radians(10), math.radians(100), 0)
                 while True:
                     f = report.read()
                     if abs(math.degrees(f["joints"][0] - base)) > 0.02:
-                        latencies.append((time.monotonic() - t0) * 1000)
+                        latencies.append((time.perf_counter() - t0) * 1000)
                         break
                 while f["status"] == 1 or abs(math.degrees(f["joints"][0] - target[0])) > 0.01:
                     f = report.read()

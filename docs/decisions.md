@@ -496,3 +496,133 @@ approved: planned and learned steps, the interface to the brain (`docs/brain-int
 - **Why:** the stub exists to prove the interface and the shell, not to plan well. Using the spine's own collision
   model, it agrees with the shell whenever it's told the truth, so every refusal in the tests is one a buggy brain
   earned.
+
+## D50 to D59: the twin
+
+Decided on 2026-10-21 (evening), building the twin of the spine, brain and twin architecture the owner approved: a
+simulated arm and cell that accepts the same commands as the real arm (`brain/README.md`). D50 is the simulator's
+timing, which the twin is built on.
+
+## D50. The simulator keeps time with a high-resolution clock and timer
+
+- **Decision:** `tools/utra_sim.py` reads time from `time.perf_counter()` and, on Windows before Python 3.11, sleeps on
+  a high-resolution waitable timer (`CreateWaitableTimerExW` with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`, through
+  ctypes); elsewhere `time.sleep` already is one. Its status and config streams keep an absolute 100 ms schedule,
+  starting it afresh rather than sending a burst if the process was starved for more than a period. The sim suite
+  times the frames it receives with `perf_counter` too.
+- **Alternatives:** `timeBeginPeriod(1)` (1 ms granularity at best, for the whole process); spinning through the last
+  milliseconds (a busy core per stream, with three suites at once); requiring Python 3.13, whose `monotonic()` is
+  high-resolution on Windows (the repo supports 3.8 up).
+- **Why:** on Python 3.9 under Windows, `time.monotonic()` and `time.sleep()` both follow the 15.6 ms system tick,
+  so frames came 63 to 140 ms apart and the suite's "frame gaps 85 to 115 ms" check failed under load; and every
+  angle the simulator reported was worked out at a time up to 15.6 ms stale (0.5 deg at 30 deg/s), which the twin,
+  sampling the simulator, would have inherited. On this PC, ten seconds of frames timed at the receiver: before,
+  77 to 125 ms apart (5th to 95th percentile 92.7 to 111.2) idle, and a 5th percentile of 78 ms under load; after,
+  99.4 to 100.5 ms idle and 96.3 to 105.1 ms with 20 busy processes on 16 threads. On Linux and macOS nothing
+  changes. The command-to-motion latency the suite measures went from a median of 109 to 100 ms, inside D6's 94 to
+  109: the coarse tick had been starting moves up to 15.6 ms late.
+
+## D51. The twin is MuJoCo, in the brain's own environment
+
+- **Decision:** MuJoCo 3.16 (CPU physics, OpenGL rendering) with NumPy, pinned in `brain/requirements.txt`, in
+  `brain/.venv` (Python 3.12) on Windows and a venv on the Linux disk in WSL2; the spine stays standard-library
+  Python. `tests/run_all.py` runs the twin's suite with that environment and fails a run without it, as it does for
+  the oracle environment (D2).
+- **Alternatives:** NVIDIA's Newton 1.x (GPU physics on Warp, ray-traced tiled cameras, URDF, MJCF and USD import,
+  Windows and Linux); Isaac Sim (out of scope: it needs 16 GB of VRAM, the RTX 3080 Ti has 12).
+- **Why:** the twin is one arm in one cell, run in real time beside a 10 Hz controller, with a few cameras. MuJoCo
+  does that on the CPU, deterministically, renders colour, depth and segmentation through OpenGL with little VRAM
+  (5 ms for a 640 x 480 RGB-D frame), installs as one wheel, and runs the same on Windows (GLFW) and in WSL2 (EGL,
+  or WSLg's display), all checked by the suite on both. Newton's strength is thousands of environments in parallel
+  on the GPU, for training learned skills; its cameras need CUDA, and its API has moved quickly (1.0 in March 2026,
+  1.7 by October). Newton reads MJCF and uses MuJoCo Warp as a solver, so the generated model (`python -m brain.twin
+  export`) is the way to it when learned skills need parallel simulation. That route isn't tried yet.
+
+## D52. The twin's model is generated from the repo's sources every time it loads
+
+- **Decision:** `brain/twin/model.py` writes the MJCF in memory on every load, from: `scripts/utra_model.py`'s reading
+  of Umbratek's URDF (joint transforms and axes) and the URDF's meshes; the collision capsules of `collision.json`
+  and the cart URDF's boxes, where `utra_model` puts them; the floor at the top of the cart model's floor box; the
+  joint limits `tools/utra_sim.py` enforces; and, given a cell folder, its tool, keep-out zones, frames and targets
+  through `scripts/cell.py`. Nothing generated is committed. Numbers are written as Python's shortest round-trip
+  text, so the links sit where `utra_model` puts them to 1e-15 m. Geom groups 0 to 2 (the world, the arm, the tool)
+  are what cameras see; 3 (collision shapes), 4 (zones) and 5 (frames and targets) are for the viewer. The arm's
+  inertia comes from its capsules at water's density: the URDF's masses are placeholders (1e-5 kg), and the arm's
+  joints are set from the controller (D53), so its inertia only matters as something that pushes.
+- **Alternatives:** commit a generated MJCF (two copies of the cell and the arm to keep in step); MuJoCo's own URDF
+  import (loses the capsules, the cart's labelled boxes and the cell, and needs the mesh paths rewritten).
+- **Why:** one source of truth. The twin can't drift from the spine's collision model, and recalibrating a cell frame
+  moves the twin's zones, targets and obstacles with it.
+
+## D53. The twin's arm follows `tools/utra_sim.py`, and the twin serves the controller's ports
+
+- **Decision:** each step, the twin sets its arm's joints to the simulator's (`Arm.joints_at(t)`). `python -m
+  brain.twin serve` hosts the simulator in the twin's process (`utra_sim.serve()` and `run()`, split out of its
+  `main()`) on the usual ports, so the jog panel, `arm.py`, the SDK and the brain drive it as they drive the
+  controller. Replays and tests run the same `Arm` on a virtual clock (`Arm(a, now=...)`), fed the register writes
+  the SDK sends, encoded by the SDK's own `hex_data`. Free obstacles are stepped with the arm moving steadily between
+  samples, so it pushes them; the physics never moves the arm.
+- **Alternatives:** position actuators tracking the simulator (a lag and overshoot of the twin's own, unmeasured);
+  the twin as a separate process polling the simulator's control port (a second clock and network jitter between
+  them); a motion model of the twin's own (a second model of the arm to fit and keep in step).
+- **Why:** the simulator is the model fitted to the real arm. The twin adds geometry, physics and cameras around it,
+  no motion of its own: its joints are the simulator's exactly (0 rad apart at every step on the virtual clock, and,
+  live, on the joint path the status stream reports).
+
+## D54. The twin is verified by replaying both captures, against stated tolerances; what that found
+
+- **Decision:** `brain/twin/replay.py` sends both captures' commands to the simulator again, as the jog panel and the
+  program runner built them (from the arm's measured state, which the controller's target registers mirror), and
+  compares every status frame with the twin's joints and its tool pose. Each move's start is also fitted within
+  +/-150 ms, and the offsets are reported and bounded: they're what the captures can't time (commands crossed Wi-Fi
+  in 12 to 45 ms; the run logs stamp a move once the controller has replied). A replay restarts from the measured
+  joints at each Enable; a STOP is checked with the stopped move's start fitted to the frames before it; frames that
+  Wi-Fi delivered in a burst after a stall are left out (their arrival isn't when they were sent). Every figure and
+  its tolerance, with the reason for it, is in `verify()`; `brain/README.md` has the table. All 25 pass.
+- **Found, and pinned by the suite as known limits:**
+  - Turns. A line that mostly turns the tool is paced by `ROT_MM_PER_RAD` (1 rad as 100 mm), marked unverified in
+    D11. The arm turned 10 deg in about 1.2 s at 10 mm/s and 0.85 s at 25 mm/s; the simulator takes 1.9 and 0.92 s.
+    The tool's position is right (0.26 mm); the joints lag mid-turn by up to 3.4 deg. One model fits both speeds:
+    the turn paced by the controller's own configured rotational limits (4 rad/s^2, 8 rad/s^3, from its config
+    stream) at a speed of v/50 rad/s for v mm/s, which gives 1.19 and 0.89 s. Not adopted yet: it rests on four
+    moves of one size. Measure turns of 5, 30 and 90 deg at 10, 25 and 100 mm/s, then refit.
+  - STOP at another speed. D7 scales the overrun with speed (6.39 ms of travel, from the one stop at 30 deg/s). MT-2
+    stopped at 10 deg/s and ran on 0.168 deg, against the model's 0.064. Two stops (0.192 deg at 30 deg/s, 0.168 at
+    10) look more like a near-constant distance than a constant time; two points aren't a model.
+  - The controller itself. In 6 frames of the slow Taught run its reported pose and joints were a cycle apart (0.7
+    to 0.9 mm at 10 mm/s), and long lines ran about 0.25% faster than the speed sent (52.02 s against 52.15 s over
+    520 mm).
+- **Alternatives:** compare at the logged times only (the captures' timing then dominates: 0.24 deg at the 95th
+  percentile for the first capture's joint moves, against 0.07 with the timing fitted); refit the simulator now (it
+  changes the controller model under every spine suite, on thin evidence).
+- **Why:** it separates what the model gets wrong from what the captures can't time, and states each tolerance with
+  its reason, so a change to the simulator or the twin that moves a figure shows up with an explanation to check.
+
+## D55. Simulated cameras: ideal RGB-D in OpenCV's conventions, also served over HTTP
+
+- **Decision:** a camera has pinhole intrinsics in pixels (any fx, fy, cx, cy; MuJoCo's own camera intrinsics, whose
+  principal point is an offset from the image centre with the opposite sign to OpenCV's), a mount (the cell, a cell
+  frame, or an arm link) and a pose in OpenCV's frame. A frame has colour, z-depth in metres (0 for no data,
+  including outside near to far), segmentation by geom, K and the camera's true pose, and saves as PNGs (depth as
+  uint16 millimetres) with a JSON file. Multisampling is off, so depth and segmentation are exact at every pixel.
+  While `serve` runs, `GET /state`, `GET /cameras/<name>.npz` and `POST /obstacles` and `/cameras` answer on the
+  twin's loopback address, port 30100; requests with an Origin header, and POSTs that aren't JSON, are refused.
+- **Alternatives:** cameras set only by field of view (square pixels, centred: can't match a calibrated camera);
+  sensor noise now (it belongs in perception's tests, with the real camera's figures); a socket protocol of the
+  twin's own (curl and a browser couldn't look); ROS (not on this PC).
+- **Why:** perception code, nvblox included, expects OpenCV's frame, depth along z in metres, and uint16 millimetre
+  depth images; wave 2 builds against these and swaps in the real camera's driver later. The suite checks the
+  conventions rather than trusting them: known points project within 0.12 px through an off-centre K with fx != fy,
+  and depth back-projects onto known surfaces within 0.1 mm.
+
+## D56. Obstacles: fixed ones are mocap bodies, free ones have a free joint; scenes use the cell's conventions
+
+- **Decision:** a fixed obstacle is a MuJoCo mocap body, moved by setting its pose, without a rebuild; a free one has
+  a free joint, a mass and a box's inertia, falls, and is pushed by the arm. Adding or removing one rebuilds the
+  model and keeps the arm's and the free obstacles' state. Scene files give sizes in millimetres and poses as
+  `{"xyz": [mm], "rpy": [deg]}` in the base frame or a cell frame, as the cell does; a mesh obstacle collides as its
+  convex hull.
+- **Alternatives:** obstacles as zones in the cell (zones are rules for the spine's check, not things a camera can
+  see or the arm can push); rebuilding the model for every move of an obstacle.
+- **Why:** perception and planning need obstacles the cameras see and the arm can hit, placed the way the owner
+  places everything else in the cell.

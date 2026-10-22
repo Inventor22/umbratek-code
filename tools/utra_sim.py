@@ -43,6 +43,10 @@ readings are the capture's mean values at rest plus a term in acceleration: illu
 
 The control port (HOST:30099, JSON lines, the simulator's alone) lets tests act on the arm: move it by hand in
 freedrive, set inputs, read outputs, press the E-stop, bump it, or read its whole state. See control().
+
+Time comes from a high-resolution clock and timer (clock, sleep; see D50), so frames leave 100 ms apart and report the
+arm where it is at that instant, on Windows as elsewhere. serve() and run() let another process host the simulator
+(the twin, brain/twin, does); an Arm can also run on a virtual clock (Arm(a, now=...)), ticked by its owner.
 """
 import argparse
 import json
@@ -100,6 +104,75 @@ LINE_SAMPLE_MM = 1.0
 
 def log(msg):
     print(f"[sim {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# ---- time: a high-resolution clock and timer -----------------------------------------------------------------
+# The status stream is paced at 10 Hz and every reported angle is worked out from the clock, so both need better
+# than the ~15.6 ms system tick that time.monotonic() (before Python 3.13) and time.sleep() (before 3.11) follow on
+# Windows: with them, frames came 63 to 140 ms apart, and an angle could be read up to a tick late (0.5 deg at
+# 30 deg/s). perf_counter() is monotonic and high-resolution everywhere (QueryPerformanceCounter on Windows,
+# CLOCK_MONOTONIC on Linux). On Windows before 3.11, sleeps wait on a high-resolution waitable timer, as 3.11's own
+# time.sleep() does; elsewhere time.sleep() already is one (docs/decisions.md, D50).
+clock = time.perf_counter
+
+
+def _sleeper():
+    if sys.platform != "win32" or sys.version_info >= (3, 11):
+        return time.sleep
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateWaitableTimerExW.restype = wintypes.HANDLE
+    kernel32.CreateWaitableTimerExW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD)
+    kernel32.SetWaitableTimer.restype = wintypes.BOOL
+    kernel32.SetWaitableTimer.argtypes = (wintypes.HANDLE, ctypes.POINTER(ctypes.c_longlong), wintypes.LONG,
+                                          wintypes.LPVOID, wintypes.LPVOID, wintypes.BOOL)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    high_resolution, all_access, infinite = 0x00000002, 0x001F0003, 0xFFFFFFFF
+    timers, timers_lock = [], threading.Lock()  # one timer per sleeping thread, reused
+
+    def sleep(seconds):
+        if seconds <= 0:
+            time.sleep(0)
+            return
+        with timers_lock:
+            timer = timers.pop() if timers else kernel32.CreateWaitableTimerExW(None, None, high_resolution, all_access)
+        if not timer:  # no high-resolution timers before Windows 10 1803: the system tick it is
+            time.sleep(seconds)
+            return
+        try:
+            due = ctypes.c_longlong(-max(1, round(seconds * 1e7)))  # relative, in 100 ns units
+            if kernel32.SetWaitableTimer(timer, ctypes.byref(due), 0, None, None, False):
+                kernel32.WaitForSingleObject(timer, infinite)
+            else:
+                time.sleep(seconds)
+        finally:
+            with timers_lock:
+                timers.append(timer)
+
+    return sleep
+
+
+sleep = _sleeper()
+
+
+def sleep_until(deadline):
+    left = deadline - clock()
+    if left > 0:
+        sleep(left)
+
+
+def next_tick(tick, period):
+    """Sleeps until `tick` + `period` and returns that time: an absolute schedule, so periods don't drift. If the
+    process was starved of CPU for more than a period, the schedule starts afresh rather than catching up in a
+    burst of frames."""
+    tick += period
+    now = clock()
+    if tick < now - period:
+        tick = now
+    sleep_until(tick)
+    return tick
 
 
 def wrap(angle):
@@ -350,8 +423,9 @@ def invert(T):
 # ---- the controller ------------------------------------------------------------------------------------------
 
 class Arm:
-    def __init__(self, a):
+    def __init__(self, a, now=None):
         self.a = a
+        self.now = now or clock  # the time source: the high-resolution clock, or a twin's virtual one
         self.lock = threading.RLock()
         self.uuid = b"SIMUTRA6100000001"
         self.sw = b"V1.0.SIM  20211218  "
@@ -371,7 +445,7 @@ class Arm:
         self.received = 0.0  # when the last motion command arrived
         self.ready_at = None  # when the arm was last set ready
         self.report_connections, self.nan_joints = 0, False
-        self.started = time.monotonic()
+        self.started = self.now()
         self.config = {"tcp_jerk": a.tcp_jerk, "tcp_maxacc": a.tcp_maxacc, "rot_maxacc": 4.0, "rot_jerk": 8.0,
                        "joint_jerk": math.radians(a.joint_jerk), "joint_maxacc": math.radians(a.joint_maxacc),
                        "tcp_offset": [0.0] * 6, "payload": [0.0] * 4, "gravity": [0.0, 0.0, -1.0],
@@ -562,7 +636,7 @@ class Arm:
             log(f"{motion.label}: discarded")
             return
         self.queue.append(motion)
-        self.received = time.monotonic()
+        self.received = self.now()
 
     def joint_move(self, label, goal, speed, acc):
         for j, g in enumerate(goal):
@@ -570,7 +644,7 @@ class Arm:
             if not low <= g <= high:
                 log(f"{label}: J{j + 1} target {math.degrees(g):.1f} deg past its limit")
                 if self.enable and not self.err and self.status in (0, 1, 2) and self.mode == 0:
-                    self.fault(23, f"{label}: joint limit", time.monotonic())
+                    self.fault(23, f"{label}: joint limit", self.now())
                 return
         acc = min(acc, self.config["joint_maxacc"]) if acc > 0 else self.config["joint_maxacc"]
         m = JointMotion(label, self.q, goal, speed, acc, self.config["joint_jerk"])
@@ -583,7 +657,7 @@ class Arm:
         if self.a.ik_fail:
             log(f"{label}: goal=[{' '.join(f'{g:.2f}' for g in shown)}] speed={speed:.1f} acc={acc:.1f}")
             if self.enable and not self.err:
-                self.fault(21, f"{label}: no inverse kinematics solution", time.monotonic())
+                self.fault(21, f"{label}: no inverse kinematics solution", self.now())
             return
         m = LineMotion(label, self.q, self.tool(), pose, speed, acc, self.config["tcp_jerk"])
         m.goal_pose, m.speed, m.acc, m.jerk = list(pose), speed, acc, self.config["tcp_jerk"]
@@ -592,7 +666,7 @@ class Arm:
     # -- the UTRC registers -----------------------------------------------------------------------------------
     def handle(self, rw, cmd, data):
         with self.lock:
-            now = time.monotonic()
+            now = self.now()
             if self.hand is not None:
                 self.q = self.joints_at(now)
             if rw == 0:
@@ -760,7 +834,7 @@ class Arm:
         "controller", "bit": 0-15, "value": 0 or 1} | {"cmd": "estop"} | {"cmd": "contact", "torque": x} |
         {"cmd": "fault", "err": code} | {"cmd": "nudge", "joints": [deg]*6}"""
         with self.lock:
-            now = time.monotonic()
+            now = self.now()
             what = request.get("cmd")
             if what == "state":
                 q = self.joints_at(now)
@@ -866,18 +940,18 @@ def serve_report(conn, arm):
         if arm.report_connections == arm.a.drift_on_connect:
             arm.q[0] += math.radians(5)
             log(f"injected +5 deg drift on J1 at report connection {arm.report_connections}")
-    next_at = time.monotonic()
+    next_at = clock()
     with conn:
         try:
             while True:
                 if arm.a.stall_every:
-                    phase = (time.monotonic() - arm.started) % arm.a.stall_every
+                    phase = (arm.now() - arm.started) % arm.a.stall_every
                     if phase >= arm.a.stall_every - arm.a.stall_for:  # the controller's Wi-Fi stall
-                        time.sleep(0.02)
-                        next_at = time.monotonic()
+                        sleep(0.02)
+                        next_at = clock()
                         continue
                 with arm.lock:
-                    now = time.monotonic()
+                    now = arm.now()
                     q = arm.joints_at(now)
                     pose = arm.pose(q)
                     joints = [math.nan] * AXIS if arm.nan_joints else q
@@ -885,14 +959,13 @@ def serve_report(conn, arm):
                                         arm.enable, arm.err, arm.warn, arm.queued())
                     frame += struct.pack(f"<{AXIS}f6f{AXIS}f", *joints, *pose, *arm.tau())
                 conn.sendall(frame)
-                next_at += 0.1
-                time.sleep(max(0.0, next_at - time.monotonic()))
+                next_at = next_tick(next_at, 0.1)
         except OSError:
             pass
 
 
 def serve_config(conn, arm):
-    next_at = time.monotonic()
+    next_at = clock()
     with conn:
         try:
             while True:
@@ -902,8 +975,7 @@ def serve_config(conn, arm):
                                         c["joint_maxacc"], c["joint_jerk"], *c["tcp_offset"], *c["payload"],
                                         *c["gravity"], c["collis_sens"], c["teach_sens"])
                 conn.sendall(frame)
-                next_at += 0.1
-                time.sleep(max(0.0, next_at - time.monotonic()))
+                next_at = next_tick(next_at, 0.1)
         except OSError:
             pass
 
@@ -928,12 +1000,17 @@ def serve_control(conn, arm):
             pass
 
 
-def listen(host, port, handler, arm, single=False, limit=0):
+def bind(host, port):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # Exclusive on Windows, where SO_REUSEADDR would let a second simulator share the port and steal connections.
     srv.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR), 1)
     srv.bind((host, port))
     srv.listen(8)
+    return srv
+
+
+def listen(srv, handler, arm, single=False, limit=0):
+    port = srv.getsockname()[1]
     serving = None
     clients = []
     while True:
@@ -956,7 +1033,7 @@ def listen(host, port, handler, arm, single=False, limit=0):
         clients.append(serving)
 
 
-def main():
+def make_parser():
     p = argparse.ArgumentParser(description="A stand-in for the UTRA arm's NTRO controller.")
     p.add_argument("--host", default="127.0.0.1", help="loopback address to serve on (default 127.0.0.1)")
     p.add_argument("--joints", type=lambda s: [float(v) for v in s.split(",")], default=[0, -30, 50, -10, 90, 0],
@@ -991,24 +1068,42 @@ def main():
     faults.add_argument("--estop-after", type=float, default=0.0, help="press the hardware E-stop N s after start")
     faults.add_argument("--stall-every", type=float, default=0.0, help="pause the status report every N s...")
     faults.add_argument("--stall-for", type=float, default=3.1, help="...for this long, like the real controller over Wi-Fi")
-    a = p.parse_args()
-    arm = Arm(a)
-    threading.Thread(target=listen, args=(a.host, 502, serve_cmd, arm, not a.multi_client), daemon=True).start()
+    return p
+
+
+def serve(a, now=None):
+    """Binds the simulator's ports on a.host (OSError if one is taken), serves them from daemon threads and returns
+    the Arm. Something must then advance it with arm.tick(), as run() does. `now` is the arm's time source (the
+    high-resolution clock unless given)."""
+    arm = Arm(a, now)
+    ports = [(502, serve_cmd, not a.multi_client, 0)]
     if not a.no_report:
-        threading.Thread(target=listen, args=(a.host, 30001, serve_report, arm, False, a.report_clients), daemon=True).start()
-    threading.Thread(target=listen, args=(a.host, 30003, serve_config, arm), daemon=True).start()
-    threading.Thread(target=listen, args=(a.host, CONTROL_PORT, serve_control, arm), daemon=True).start()
+        ports.append((30001, serve_report, False, a.report_clients))
+    ports += [(30003, serve_config, False, 0), (CONTROL_PORT, serve_control, False, 0)]
+    bound = [(bind(a.host, port), handler, single, limit) for port, handler, single, limit in ports]
+    for srv, handler, single, limit in bound:
+        threading.Thread(target=listen, args=(srv, handler, arm, single, limit), daemon=True).start()
     log(f"listening on {a.host}:502{'' if a.no_report else ', :30001'}, :30003 and control :{CONTROL_PORT} ({vars(a)})")
-    started = last = time.monotonic()
+    return arm
+
+
+def run(arm, a):
+    """Advances the arm every 5 ms, for ever."""
+    started = last = arm.now()
     while True:
-        time.sleep(0.005)
-        now = time.monotonic()
+        sleep(0.005)
+        now = arm.now()
         arm.tick(now, now - last)
         last = now
         if a.estop_after and now - started > a.estop_after and arm.err != 1:
             with arm.lock:
                 arm.estop(now)
             a.estop_after = 0.0
+
+
+def main(argv=None):
+    a = make_parser().parse_args(argv)
+    run(serve(a), a)
 
 
 if __name__ == "__main__":
