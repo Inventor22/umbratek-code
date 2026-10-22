@@ -282,8 +282,10 @@ python -m brain.planner serve --world twin     # around the twin's obstacles, wi
 ```
 
 On Windows, `python scripts/jog_server.py <controller>` then finds it at `http://127.0.0.1:8770`; on another port
-(`serve --port 8790`), give the jog server `--brain http://127.0.0.1:8790`. Only `127.0.0.1` crosses from Windows into
-WSL2, so a twin the planner plans around runs in WSL2 too, where the planner reaches its HTTP endpoint.
+(`serve --port 8790`), give the jog server `--brain http://127.0.0.1:8790`. WSL2 forwards a port only while Windows
+isn't using it itself: with the stub serving 8770 on Windows, Windows' `127.0.0.1:8770` stays the stub, so give the
+planner another port. Only `127.0.0.1` crosses from Windows into WSL2, so a twin the planner plans around runs in WSL2
+too, where the planner reaches its HTTP endpoint.
 
 ### How it's verified
 
@@ -295,10 +297,10 @@ map's bound against the true distance at 4000 points), and then plans:
 | What | Result |
 | ---- | ------ |
 | 48 random blocked moves above a table, around a crate, a pole, a ball and a tube | all planned, by graph search, in 2.2 segments on average (at most 4); every one accepted by the spine's shell (`safety.check_path`); 12.1 mm from the obstacles and the table at the least, sampled every 0.5 deg |
-| Their planning times | median 0.69 s, 90% within 0.94 s, the worst 1.08 s: on average 0.07 s checking the straight way, 0.25 s in cuRobo, 0.37 s cutting its path (3.2 moves through the spine's check) |
+| Their planning times | median 0.86 s, 90% within 1.14 s, the worst 1.23 s beside the other suites (0.69, 0.94 and 1.08 s run alone): on average 0.09 s checking the straight way, 0.29 s in cuRobo, 0.45 s cutting its path (3.2 moves through the spine's check) |
 | A keep-out zone the spine sent, a start 11 mm from a wall, a mesh obstacle, a fake perception map | planned and accepted; a goal inside an obstacle, or past a limit, gets no path, saying why |
-| The twin, the planner brain and the jog server as processes: taught, planned, taught around the twin's crate, out and back, the crate moved, then a pole, a ball, a tube | 6 runs done, every plan accepted, no contact in the twin (sampled 178 to 351 times a run), the tool on its target to 0.001 mm |
-| Their planning times | the brain 1.16 s median, 1.55 s at most (with reading the twin's state); the spine, from starting the planned step to accepting its path, 1.19 s median and 1.63 s at most, against its 10 s deadline |
+| The twin, the planner brain and the jog server as processes: taught, planned, taught around the twin's crate, out and back, the crate moved, then a pole, a ball, a tube | 6 runs done, every plan accepted, no contact in the twin (sampled 178 to 345 times a run), the tool on its target to 0.001 mm |
+| Their planning times | the brain 0.90 s median, 1.04 s at most (with reading the twin's state); the spine, from starting the planned step to accepting its path, 0.95 s median and 1.07 s at most, against its 10 s deadline |
 | The control: the same program with a brain blind to the crate (`--world request`) | the spine accepts its straight path, and the twin sees the arm hit the crate |
 
 Across the boundary, by hand: the spine and the simulator on Windows, the planner in WSL2 on `127.0.0.1:8790`, the

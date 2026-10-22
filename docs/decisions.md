@@ -694,9 +694,9 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
   verdict (it doesn't know the spine's slack rule or the exact capsules).
 - **Why:** fewer segments run faster, and a graph path is straight moves already: 2.2 segments on average around the
   suite's obstacles. The spine's own check as the gate means the spine accepts what the planner sends: 48 of 48 in the
-  suite, and every plan in the twin. Planning took 0.69 s median and 1.08 s at most, against the spine's 10 s deadline:
-  0.07 s for the straight check, 0.25 s in cuRobo, 0.37 s cutting (3.2 moves through the check, about 0.1 s each in
-  pure Python, the cost of using the spine's own code).
+  suite, and every plan in the twin. Planning took 0.86 s median and 1.23 s at most beside the other suites (0.69 and
+  1.08 s alone), against the spine's 10 s deadline: on average 0.09 s for the straight check, 0.29 s in cuRobo, 0.45 s
+  cutting (3.2 moves through the check, about 0.1 s each in pure Python, the cost of using the spine's own code).
 
 ## D64. A start or goal inside cuRobo's margin: a short move away first
 
