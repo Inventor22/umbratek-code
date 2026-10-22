@@ -108,8 +108,8 @@ SUITES = {
     "perception": ("perception (brain/perception): calibration and the obstacle map against the twin's cameras, and "
                    "the map's contract live", "perception", ["perception_tests.py"], None, 900),
     "planner": ("the planner (brain/planner, in WSL2): cuRobo's model against the spine's, plans around obstacles "
-                "through the spine's shell, and taught-planned-taught programs around the twin's obstacles", "planner",
-                ["planner_tests.py"], None, 1800),
+                "through the spine's shell, and taught-planned-taught programs around the twin's obstacles, and around "
+                "what the twin's camera shows through perception's map", "planner", ["planner_tests.py"], None, 1800),
 }
 
 

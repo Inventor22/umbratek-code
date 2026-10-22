@@ -718,22 +718,29 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
   mesh is its convex hull, as the twin collides it. `map` adds perception's map (`docs/world-map.md`): its ESDF goes to
   cuRobo less half a voxel, since cuRobo interpolates between voxel centres, where a lower bound can overstate the
   clearance; the spine's check is joined by the map's own, each capsule's core sampled every 4 mm along it and along
-  the move, against a lower bound that holds everywhere (the ESDF at the nearest voxel centre less the distance to it;
-  beyond the grid, through the point's projection onto the grid's box, as every obstacle is inside it). The spine's
-  slack rule (a move may start nearer than the margin and move away) is given only where an upper bound shows the start
-  surely is that near, and measured from that upper bound, as the map's bounds are loose by up to about two voxels.
+  the move. Each sample is judged first by a quick lower bound that holds everywhere (the ESDF at the nearest voxel
+  centre less the distance to it; beyond the grid, through the point's projection onto the grid's box, as every
+  obstacle is inside it), which can be 35 mm below the truth; where that would refuse, by the distance to the obstacle
+  voxels themselves, taken as cubes (those where the ESDF is negative, in a k-d tree: the nearest cube among the 32
+  nearest centres, exact near an obstacle's surface and a lower bound everywhere). The spine's slack rule (a move may
+  start nearer than the margin and move away) is measured from an upper bound on the start's distance and checked
+  with lower bounds along the move, so the slack is never overstated.
   A map more than 2 s old, or whose arm isn't where the plan starts (after waiting for a newer frame), fails the plan.
   Any source that can't answer fails the plan, saying why.
 - **Alternatives:** the planner reading the twin's scene file (misses obstacles placed over HTTP, and where free ones
   have been pushed); obstacles from the request (the interface has no field for them; the spine doesn't know them);
   treating perception's unknown voxels as solid (everything outside the cameras' view would block); ignoring a
-  source that fails (a plan blind to what's there).
+  source that fails (a plan blind to what's there); the quick bound alone (the first version: with perception's own
+  map, every path cuRobo found past a crate was refused, as the arm's start was 36 mm from the crate's voxels and the
+  bound said 15 mm).
 - **Why:** before perception exists, the twin's truth tests planning against obstacles the spine doesn't know about,
-  and the same code path takes perception's map. Checked with a fake perception server that serves the contract: a
-  crate seen as 2 cm voxels is planned around, 58.7 mm from the true crate. A review found the first version of the
+  and the same code path takes perception's map. Checked with a fake perception server that serves the contract (a
+  crate seen as 2 cm voxels is planned around, 49.6 mm from the true crate), and with perception's own map (D68). A
+  review found the first version of the
   map's check fail open in two ways (the slack measured from a loose lower bound, and points just beyond the grid read
-  as clear); the suite now checks the rule against exact distances to the voxels on random moves over a slab (69 of
-  120 accepted, none nearer than the rule allows; the first version let through moves from 6.0 to 3.1 mm).
+  as clear); the suite now checks the rule against exact distances to the voxels on random moves over a slab (101 of
+  120 accepted, none nearer than the rule allows; the first version let through moves from 6.0 to 3.1 mm), and the
+  distance to the cubes against brute force.
 
 ## D66. The planner's brain serves the stub's skill, and says it doesn't plan until it can
 
@@ -759,29 +766,38 @@ WSL2, around what the cell holds (`brain/README.md`, "The planner").
 - **Why:** one command runs every suite, and inside WSL2 every address is free. The boundary is crossed by hand
   instead, on a port of its own (D68).
 
-## D68. How the planner is validated: random moves, the twin end to end, a control, and the boundary by hand
+## D68. How the planner is validated: random moves, the twin end to end, the camera's chain, a control, the boundary
 
 - **Decision:** in-process, 48 random moves above a table whose straight way a crate, pole, ball or tube blocks, each
   path put through the spine's own shell (`safety.check_path`) and its clearance sampled every 0.5 deg; then the twin,
   the planner's brain and the jog server as separate processes running taught, planned, taught programs out and back
   around the twin's obstacles (moved, and changed for a pole, a ball, a tube), the twin's contacts sampled every
-  20 ms; then the same program with a brain blind to the obstacles (`--world request`). By hand, the spine and the
-  simulator on Windows and the planner in WSL2 on `127.0.0.1:8790`.
+  20 ms; then the same program with a brain blind to the obstacles (`--world request`). Then the chain, the camera
+  the only source: perception calibrates the twin's overhead camera by its own procedure (views of the board on the
+  flange; `tests/perception_tests.py calibration_fixed`), serves its map of what that camera sees, and the planner
+  plans on it (`--world map`) around a crate on the example scene's table, out and back; the crate is moved in the
+  twin and the next plan must be made on the map that shows the move; then the blind brain as the control. The twin
+  carries the active tool, built from the cell given before it starts, so its contacts include the tool's. By hand,
+  the spine and the simulator on Windows and the planner in WSL2 on `127.0.0.1:8790`.
 - **Why:** the requirement is that the spine accepts the plans and the twin reports no contact; the control shows
   the obstacle was in the way (the spine accepts the blind brain's straight path, and the twin sees the arm hit the
-  crate), so it's the planner that avoids it. The results are in `brain/README.md`.
+  crate), so it's the planner that avoids it. In the chain, the crate is no keep-out zone and no brain is told of it:
+  only the camera can. The results are in `brain/README.md`.
 
 ## D69. Known limits
 
-- The real arm hasn't run a planned path from this brain; that's for a session with the owner present.
-- Perception's map is tested with a fake server built from the contract, not perception's own yet. Map plans take
-  longer (1.6 to 2.3 s), most of it in the map's check, which samples in NumPy. Its bounds are loose by up to about two
-  voxels, so a move that starts within that of a mapped obstacle is refused unless it keeps the margin by the lower
-  bound: safe, but it may find no path where the true distances would allow one.
+- The real arm hasn't run a planned path from this brain; that's for a session with the owner present, as is a real
+  camera (perception's map has only seen the twin's ideal depth here).
+- The map counts unknown space as empty (`docs/world-map.md`). With one camera, the faces of an object turned away
+  from it are known only within perception's hidden band (15 cm behind what it sees): a tall object's far side, lower
+  down, is unknown, and a path may pass through it. The chain's crate (180 mm, under a camera looking down) is covered
+  where the arm goes; more cameras, or the occupancy's unknown state, are the way to be more cautious.
+- The map is read once per plan; what moves after that isn't planned around until the next plan.
 - cuRobo's covering of the base grows it by up to 20 mm at mid-height, so a move with the wrist near the base may need
   the stub's search, or find nothing where the spine's check alone would pass.
 - A path is cut along cuRobo's route; it isn't the fewest segments possible. Waypoints anywhere (not only on the
-  route) could cut more, at the cost of more checks.
+  route) could cut more, at the cost of more checks. Around the chain's crate, the graph search goes over its far side
+  (the tool 236 mm up), where a shorter way around exists.
 - The twin and the planner read the same `/state`; a free obstacle pushed after the plan is made isn't re-planned
   around (the spine's freshness checks are about the arm and the cell, not obstacles).
 
