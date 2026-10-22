@@ -1,7 +1,13 @@
 """Programs, and the runner that runs them on the server with its own supervision and an event log.
 
 A program is a tree of steps, saved as JSON in cell/programs/<name>.json:
-    move     {"kind": "joint" | "line", "target": name, "offset": {...}?, "speed": number?}  (offsets: cell.apply_offset)
+    move     {"kind": "joint" | "line" | "planned", "target": name, "offset": {...}?, "speed": number?}  (offsets:
+             cell.apply_offset). A planned move's path comes from the brain, solved afresh each run around what's in
+             the cell, and ends at the target's joints (as taught, so in the taught configuration).
+    learned  {"skill": name, "near": target, "within": mm, "seconds": s, "params": {...}?, "speed": deg/s?,
+              "check": {"input": ..., "value": 0 | 1}?}  The brain's skill acts in short bursts, at most 10 a second,
+             the tool point staying within `within` mm of the target `near`, until it says it's done (then `check`, if
+             given, must read true), gives up, or runs out of `seconds`.
     wait     {"seconds": s} or {"input": "tool.N" | "controller.N", "value": 0 | 1, "timeout": s}
     set      {"output": "tool.N" | "controller.N", "value": 0 | 1}
     pulse    {"output": ..., "seconds": s}
@@ -11,9 +17,13 @@ A program is a tree of steps, saved as JSON in cell/programs/<name>.json:
     comment  {"text": ...}
     halt     {"message": ...}  (pauses the run until the operator resumes)
 Every step has a stable "id". Moves name targets, so re-teaching a target or recalibrating its frame changes every
-move to it. Speeds: tool mm/s for lines, joint deg/s for joint moves, the program's defaults where a step has none,
-times the override; lines are capped at REDUCED_SPEED_MM_S (ISO 10218-1's reduced speed) unless the program says
-"fullSpeed": true.
+move to it. Speeds: tool mm/s for lines, joint deg/s for joint, planned and learned moves, the program's defaults
+where a step has none, times the override; lines, and whatever the brain proposes, are capped at REDUCED_SPEED_MM_S
+at the tool (ISO 10218-1's reduced speed) unless the program says "fullSpeed": true.
+
+What the brain proposes, the safety shell (safety.py) checks whole before anything moves, and refuses with its reasons
+if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,
+and a STOP ends the run as stopped whatever the step was doing, waiting on the brain included.
 
 The runner (docs/capabilities.md P2-P5): start (from the top or a chosen step; run, step or dry run), pause (STOP,
 then resume re-plans the interrupted step from wherever the arm is), resume, stop, step, reset, speed override. It
@@ -31,17 +41,24 @@ import tempfile
 import threading
 import time
 
+import brain_link
+import brain_protocol as bp
 import cell as cellmod
 import kinematics as kin
 import planner as plannermod
+import safety
 from executor import Interrupted, MoveFailed
 
-STEP_TYPES = ("move", "wait", "set", "pulse", "if", "repeat", "call", "comment", "halt")
+STEP_TYPES = ("move", "wait", "set", "pulse", "if", "repeat", "call", "comment", "halt", "learned")
+MOVE_KINDS = ("joint", "line", "planned")
 IO = re.compile(r"^(tool|controller)\.(\d{1,2})$")
 MAX_DEPTH = 6
 MAX_STEPS = 2000
 REDUCED_SPEED_MM_S = 250.0
 DEFAULT_SPEEDS = {"tcp": 50.0, "ori": 30.0, "joint": 20.0}
+LEARNED_WITHIN_MM, MAX_WITHIN_MM = 100.0, 500.0
+LEARNED_SECONDS = 60.0
+ACT_PERIOD_S = 0.1  # a learned skill is asked for its next burst at most 10 times a second
 POLL_S = 0.1
 PAGE_SILENT_S = 1.5
 EVENTS_KEPT = 300
@@ -121,8 +138,8 @@ def check_program(program, cell, load=None, depth=0, seen=None):
         try:
             if kind == "move":
                 o["kind"] = s.get("kind")
-                if o["kind"] not in ("joint", "line"):
-                    raise ProgramError(f"a move is 'joint' or 'line', not {o['kind']!r}")
+                if o["kind"] not in MOVE_KINDS:
+                    raise ProgramError(f"a move is 'joint', 'line' or 'planned', not {o['kind']!r}")
                 target = cell.target(s.get("target"))
                 o["target"] = s["target"]
                 if o["kind"] == "line" and "joints" in target:
@@ -166,6 +183,29 @@ def check_program(program, cell, load=None, depth=0, seen=None):
                 o["text"] = str(s.get("text", ""))[:500]
             elif kind == "halt":
                 o["message"] = str(s.get("message", "Halted."))[:500]
+            elif kind == "learned":
+                skill = s.get("skill")
+                if not isinstance(skill, str) or not bp.NAME.match(skill):
+                    raise ProgramError(f"Unsupported skill name: {skill!r}. Use up to 40 letters, digits, '_', '-' or "
+                                       "'.', starting with a letter.")
+                o["skill"] = skill
+                if s.get("params", {}) != {}:
+                    try:
+                        o["params"] = bp.params(s["params"])
+                    except bp.ProtocolError as e:
+                        raise ProgramError(str(e))
+                cell.target(s.get("near"))
+                o["near"] = s["near"]
+                o["within"] = number(s.get("within", LEARNED_WITHIN_MM), "region (mm)", 5, MAX_WITHIN_MM)
+                o["seconds"] = number(s.get("seconds", LEARNED_SECONDS), "time limit (s)", 1, 3600)
+                if s.get("speed") is not None:
+                    o["speed"] = number(s["speed"], "speed", 1, 120)
+                if s.get("check") is not None:
+                    check = s["check"]
+                    if not isinstance(check, dict):
+                        raise ProgramError(f"a check is an input and the value it must read, not {check!r}")
+                    io_name(check.get("input"), "input")
+                    o["check"] = {"input": check["input"], "value": int(number(check.get("value"), "input value", 0, 1))}
         except (ProgramError, cellmod.CellError) as e:
             raise ProgramError(f"{where(path)} ({kind}): {e}")
         return o
@@ -179,12 +219,13 @@ def kin_identity():
 
 
 def programs_using(programs, target):
-    """The saved programs with a move to `target`, as 'program <name>'."""
+    """The saved programs with a move to `target`, or a learned step near it, as 'program <name>'."""
     def uses(steps):
         for s in steps if isinstance(steps, list) else []:
             if not isinstance(s, dict):
                 continue
-            if s.get("type") == "move" and s.get("target") == target:
+            if (s.get("type") == "move" and s.get("target") == target) or \
+                    (s.get("type") == "learned" and s.get("near") == target):
                 return True
             if any(uses(s.get(key)) for key in ("steps", "then", "else")):
                 return True
@@ -196,6 +237,50 @@ def programs_using(programs, target):
                 out.append(f"program {name}")
         except (ProgramError, ValueError, OSError):
             continue
+    return out
+
+
+def brain_needs(steps, load, calls=0):
+    """What a checked program's steps (and the programs they call) need of the brain: (whether any move is planned,
+    the skills of its learned steps)."""
+    plans, skills = False, set()
+    for s in steps if isinstance(steps, list) else []:
+        if not isinstance(s, dict):
+            continue
+        plans = plans or (s.get("type") == "move" and s.get("kind") == "planned")
+        if s.get("type") == "learned" and isinstance(s.get("skill"), str):
+            skills.add(s["skill"])
+        for key in ("steps", "then", "else"):
+            p, k = brain_needs(s.get(key), load, calls)
+            plans, skills = plans or p, skills | k
+        if s.get("type") == "call" and calls < MAX_DEPTH:
+            try:
+                p, k = brain_needs(load(s.get("program")).get("steps"), load, calls + 1)
+            except (ProgramError, cellmod.CellError, ValueError, OSError):
+                continue
+            plans, skills = plans or p, skills | k
+    return plans, skills
+
+
+def brain_state(state):
+    """The arm's state as the brain is told it (brain_protocol.state)."""
+    out = {"seq": state["seq"], "ageS": round(max(0.0, time.monotonic() - state["at"]), 3),
+           "joints": [round(v, 4) for v in state["joints"]], "tool": state["tool"]}
+    if state.get("virtual"):
+        out["virtual"] = True
+    if "inputs" in state:
+        out["inputs"] = state["inputs"]
+    return out
+
+
+def brain_limits(burst=False):
+    """The limits the shell holds the brain to, so it can plan within them (docs/brain-interface.md)."""
+    out = {"joints": [list(v) for v in plannermod.DRAG_LIMITS_DEG], "ratedDegS": list(plannermod.JOINT_RATED_DEG_S)}
+    if burst:
+        out.update(burstMaxWaypoints=bp.MAX_BURST_WAYPOINTS, burstMaxJointDeg=safety.BURST_MAX_JOINT_DEG,
+                   burstMaxToolMm=safety.BURST_MAX_TOOL_MM, periodS=ACT_PERIOD_S, holdMaxS=bp.HOLD_MAX_S)
+    else:
+        out["maxWaypoints"] = bp.MAX_PLAN_WAYPOINTS
     return out
 
 
@@ -269,6 +354,7 @@ class Runner:
         self.estimate = None
         self.halt_message = ""
         self.hit = None  # where a faulted run's step would have collided, for the 3D view
+        self.run_tag, self.episodes = "", 0  # for learned skills' episode ids
 
     # -- the status and log ----------------------------------------------------------------------------------------
     def status(self):
@@ -312,6 +398,9 @@ class Runner:
         if from_path is not None and (not isinstance(from_path, list) or not all(isinstance(i, int) and i >= 0
                                                                                   for i in from_path)):
             raise ProgramError(f"Unsupported starting step: {from_path!r}.")
+        plans, skills = brain_needs(checked["steps"], self.programs.load)
+        if (plans or skills) and not self.busy:  # one question, so a run doesn't fault at its first brain step
+            self.panel.check_brain(plans, sorted(skills))
         with self.lock:
             if self.busy:
                 raise ProgramError(f"A run is under way ({self.state}); stop it first.")
@@ -323,6 +412,7 @@ class Runner:
             self.request = self.go = None
             self.events, self.estimate = [], None
             self.started_at = time.monotonic()
+            self.run_tag, self.episodes = time.strftime("%H%M%S"), 0
             folder = os.path.join(self.log_folder, time.strftime("%Y-%m-%d"))
             os.makedirs(folder, exist_ok=True)
             self.log_path = os.path.join(folder, f"{time.strftime('%H%M%S')}-{checked['name']}.jsonl")
@@ -477,8 +567,19 @@ class Runner:
                 self.log("step.done", id=s["id"], seconds=round(time.monotonic() - started, 2))
                 return
             except MoveFailed as e:
+                if self.request == "stop":  # STOP wins: whatever else went wrong meanwhile, the run ends stopped
+                    raise Stopped()
                 raise Faulted(f"{where(path)}: {e.reason}", path)
-            except (ProgramError, cellmod.CellError, plannermod.PlanError) as e:
+            except (safety.Refused, bp.ProtocolError) as e:
+                if self.request == "stop":
+                    raise Stopped()
+                self.log("brain.refused", id=s["id"], reason=str(e), reasons=getattr(e, "reasons", [str(e)]))
+                if self.virtual is None:
+                    self.panel.stop(f"{where(path)}: the brain's proposal was refused")
+                raise Faulted(f"{where(path)}: {e}", path, getattr(e, "hit", None))
+            except (ProgramError, cellmod.CellError, plannermod.PlanError, brain_link.BrainError) as e:
+                if self.request == "stop":
+                    raise Stopped()
                 if self.virtual is None:
                     self.panel.stop(f"{where(path)} failed")
                 raise Faulted(f"{where(path)}: {e}", path, getattr(e, "hit", None))
@@ -542,11 +643,17 @@ class Runner:
                 self.log("dry.halt", message=s["message"])
                 return
             raise HaltHere(s["message"])
+        if kind == "learned":
+            self._learned(program, s, path)
+            return
         if kind == "move":
             speed, capped = self._speed(program, s)
             if capped:
                 self.log("speed.capped", speed=REDUCED_SPEED_MM_S, reason="reduced speed: the program isn't marked "
                                                                          "for full speed")
+            if s["kind"] == "planned":
+                self._planned(program, s, speed)
+                return
             start = self.virtual if dry else self.panel.current_joints()
             if not dry and self.anchor is not None and self.anchor[0] == s["id"]:
                 start = self._regain(start, speed)
@@ -604,6 +711,142 @@ class Runner:
                 self.panel.write_output(s["output"], 0)
                 self.log("io.set", output=s["output"], value=0)
 
+    # -- steps the brain proposes ------------------------------------------------------------------------------------
+    def _tool_cap(self, program):
+        """The tool point's speed limit for what the brain proposes (mm/s): reduced speed unless marked full speed."""
+        return plannermod.MAX_TOOL_SPEED_MM_S if program.get("fullSpeed") else REDUCED_SPEED_MM_S
+
+    def _ask_brain(self, kind, fields):
+        """Ask the brain, waiting as long as its deadline allows but not a moment past a STOP or pause, which raise
+        Interrupted (a reply that comes later is dropped)."""
+        link = self.panel.brain
+        if link is None:
+            raise ProgramError("the brain is off (the server was started with --brain off)")
+        with self.lock:
+            shown = self.step_text
+            self.step_text = f"{shown} \u00b7 asking the brain"
+        try:
+            return link.ask(kind, fields, should_abort=self._abort)
+        except brain_link.Abandoned as e:
+            raise Interrupted(e.reason)
+        finally:
+            with self.lock:
+                self.step_text = shown
+
+    def _planned(self, program, s, speed):
+        """A planned move: the brain plans a path from where the arm is to the target's joints, around what's in the
+        cell; the shell checks all of it, then the executor runs it. A dry run asks the brain too, from where the run
+        would be, and checks the path just the same."""
+        panel = self.panel
+        state = panel.observe(virtual=self.virtual)
+        start = state["joints"]
+        goal, label = panel.goal_joints(s, start)
+        if max(abs(a - b) for a, b in zip(start, goal)) <= safety.GOAL_TOLERANCE_DEG:
+            self.log("move.planned", text=f"Already at {label}", durationS=0.0)
+            return
+        world = panel.world()
+        fields = {"state": brain_state(state),
+                  "goal": {"joints": [round(v, 4) for v in goal], "target": s["target"],
+                           "tool": kin.matrix_to_pose(panel.tool_point(goal), 4)},
+                  "world": world, "limits": brain_limits(), "timeoutS": panel.brain.plan_timeout if panel.brain else 0}
+        _, reply = self._ask_brain("plan", fields)
+        if not reply["ok"]:
+            raise ProgramError(f"the brain found no path to {label}: {reply['reason']}")
+        plan = safety.check_path(panel.planner(), reply["path"], start, speed, panel.cell.tool_matrix(),
+                                 self._tool_cap(program), label, goal=goal)
+        self.log("brain.plan", waypoints=len(reply["path"]), note=reply["note"], text=plan.text,
+                 durationS=round(plan.duration, 2))
+        if self.virtual is not None:
+            self.virtual = plan.goal
+            self.total += plan.duration
+            return
+        q, age = panel.latest_joints()
+        safety.check_still("plan", start, q, age, world["cellRevision"], panel.cell.revision)
+        panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+
+    def _learned(self, program, s, path):
+        """A learned step: the brain's skill acts in short bursts, each asked for with the arm's latest state (at most
+        ACT_PERIOD_S apart), checked whole by the shell and run by the executor, until the skill says it's done (then
+        the step's check, if any, must read true), gives up, or runs out of time. A dry run only makes sure the brain
+        has the skill, and takes the arm to end where it began."""
+        panel, skill = self.panel, s["skill"]
+        if self.virtual is not None:
+            panel.check_brain(False, [skill])
+            self.log("dry.assumed", skill=skill, note="assumed to end where it began")
+            return
+        speed = s.get("speed", program["speed"]["joint"]) * self.override / 100.0
+        tool = panel.cell.tool_matrix()
+        anchor = panel.anchor_point(s["near"])
+        self.episodes += 1
+        episode = f"{self.run_tag}-{re.sub(r'[^A-Za-z0-9_.:-]', '_', str(s['id']))[:40]}-{self.episodes}"
+        deadline = time.monotonic() + s["seconds"]
+        after, asked, tick, outcome, failure = None, 0.0, 0, "faulted", ""
+        self.log("skill.start", skill=skill, near=s["near"], within=s["within"], seconds=s["seconds"])
+        try:
+            while True:
+                why = self._abort()
+                if why:
+                    raise Interrupted(why)
+                self._check_live()
+                if time.monotonic() > deadline:
+                    outcome = "timeout"
+                    raise ProgramError(f"the skill {skill} didn't finish within {s['seconds']:g} s")
+                while True:  # at most 10 a second, by perf_counter (monotonic() ticks in 15.6 ms on Windows)
+                    wait = asked + ACT_PERIOD_S - time.perf_counter()
+                    if wait <= 0:
+                        break
+                    self._sleep_checking(wait)
+                state = panel.observe(after=after, inputs=True)
+                world = panel.world()
+                fields = {"skill": skill, "params": s.get("params", {}), "episode": episode, "tick": tick,
+                          "state": brain_state(state), "anchor": {"xyz": [round(v, 3) for v in anchor]},
+                          "withinMm": s["within"], "world": world, "limits": brain_limits(burst=True),
+                          "timeoutS": brain_link.ACT_TIMEOUT_S,
+                          "remainingS": round(max(0.0, deadline - time.monotonic()), 2)}
+                asked = time.perf_counter()
+                _, reply = self._ask_brain("act", fields)
+                action = reply["action"]
+                if action["kind"] == "done":
+                    check = s.get("check")
+                    if check:
+                        got = self._read_input(check["input"], path)
+                        if got != check["value"]:
+                            outcome = "failed"
+                            raise ProgramError(f"the skill {skill} said it was done, but {check['input']} reads {got}, "
+                                               f"not {check['value']}")
+                    outcome = "done"
+                    self.log("skill.done", skill=skill, bursts=tick, note=action["note"])
+                    return
+                if action["kind"] == "fail":
+                    outcome = "failed"
+                    raise ProgramError(f"the skill {skill} gave up: {action['reason']}")
+                if action["kind"] == "hold":
+                    self.log("skill.hold", tick=tick, seconds=action["seconds"])
+                    self._sleep_checking(action["seconds"])
+                else:
+                    what = f"burst {tick + 1}"
+                    plan = safety.check_path(panel.planner(), action["path"], state["joints"],
+                                             min(speed, action.get("speed", speed)), tool, self._tool_cap(program),
+                                             f"{skill}'s next pose", what=what, near=(anchor, s["near"]),
+                                             within=s["within"], burst=True)
+                    q, age = panel.latest_joints()
+                    safety.check_still(what, state["joints"], q, age, world["cellRevision"], panel.cell.revision)
+                    self.log("skill.burst", tick=tick, waypoints=len(action["path"]) - 1, text=plan.text)
+                    panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+                after = time.monotonic()
+                tick += 1
+        except BaseException as e:
+            if isinstance(e, Interrupted):
+                outcome = "stopped" if self.request == "stop" else "paused"
+            elif isinstance(e, (safety.Refused, bp.ProtocolError)):
+                outcome = "refused"
+            failure = str(e)[:bp.MAX_TEXT]
+            raise
+        finally:
+            if panel.brain is not None:
+                panel.brain.end({"episode": episode, "skill": skill, "outcome": outcome, "reason": failure})
+            self.log("skill.end", skill=skill, outcome=outcome, bursts=tick)
+
     def _regain(self, start, speed):
         """Before resuming an interrupted straight line: move straight back to the nearest point on it (the arm
         may have left it by the STOP's swing, the enable shift of about 0.5 mm, or a jog while paused), as RAPID's
@@ -645,7 +888,11 @@ def describe(s):
     kind = s["type"]
     if kind == "move":
         extra = " with an offset" if s.get("offset") else ""
+        if s["kind"] == "planned":
+            return f"Planned move to {s['target']}{extra}"
         return f"{'Straight line' if s['kind'] == 'line' else 'Joint move'} to {s['target']}{extra}"
+    if kind == "learned":
+        return f"Learned skill {s['skill']} near {s['near']}"
     if kind == "wait":
         return f"Wait {s['seconds']:g} s" if "seconds" in s else f"Wait for {s['input']} = {s['value']}"
     if kind == "set":
