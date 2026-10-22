@@ -497,8 +497,10 @@ def live():
         code, _ = http("/obstacles", {"add": {"name": "crate", "shape": "box", "size": [200, 200, 200],
                                               "pose": {"xyz": [400, -400, -630], "rpy": [0, 0, 0]}}})
         s = json.loads(http("/state")[1])
-        check("POST /obstacles adds one; /state lists it where it was put", code == 200 and abs(
-            s["obstacles"]["crate"]["xyz"][1] + 400) < 1e-6, s["obstacles"].get("crate"))
+        check("POST /obstacles adds one; /state lists it where it was put, with its shape and size", code == 200 and
+              abs(s["obstacles"]["crate"]["xyz"][1] + 400) < 1e-6 and s["obstacleShapes"]["crate"] == {
+                  "shape": "box", "size": [200, 200, 200], "fixed": True, "mesh": None},
+              (s["obstacles"].get("crate"), s.get("obstacleShapes", {}).get("crate")))
         code, _ = http("/obstacles", {"move": {"name": "crate", "pose": {"xyz": [400, 400, -630], "rpy": [0, 0, 0]}}})
         s = json.loads(http("/state")[1])
         check("moves it", code == 200 and abs(s["obstacles"]["crate"]["xyz"][1] - 400) < 1e-6)

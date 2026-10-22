@@ -2,8 +2,8 @@
 and place obstacles while it runs. It listens on the twin's loopback address only (port 30100 by default) and, like
 the jog panel, refuses requests from web pages (any with an Origin header, or for another Host).
 
-    GET  /state                       time, joints, tool pose, the controller's state, contacts, zones, obstacles,
-                                      cameras (intrinsics and true poses)
+    GET  /state                       time, joints, tool pose, the controller's state, contacts, zones, obstacles (where
+                                      each is, and its shape and size), cameras (intrinsics and true poses)
     GET  /cameras/<name>.npz          a frame: rgb, depth (m), segmentation, K, T_base_camera, meta (JSON)
     GET  /cameras/<name>/rgb.png      the colour image
     GET  /cameras/<name>/depth.png    depth, uint16 millimetres
@@ -21,7 +21,7 @@ import math
 import queue
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from .model import CameraSpec, Obstacle, SceneError
 
 PORT = 30100
 WAIT_S = 10.0
+loopback_http = repo.spine("loopback_http")
 
 
 class TwinServer:
@@ -39,7 +40,7 @@ class TwinServer:
         self.jobs = queue.Queue()
         self.t, self.controller = None, {}
         handler = type("Handler", (_Handler,), {"server_ref": self})
-        self.httpd = ThreadingHTTPServer((host, port), handler)
+        self.httpd = loopback_http.Server((host, port), handler)
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="twin-http", daemon=True)
         self.thread.start()
@@ -183,4 +184,6 @@ def state_of(twin, t, controller, clock=time.time):
             "flange": pose(twin.flange()), "tcp": pose(twin.tcp()), "controller": controller,
             "contacts": twin.contacts(), "zones": {k: list(v) for k, v in twin.zone_clearances().items()},
             "obstacles": {name: pose(twin.obstacle_pose(name)) for name in twin.built.obstacles},
+            "obstacleShapes": {o.name: {"shape": o.shape, "size": list(o.size), "fixed": o.fixed, "mesh": o.mesh}
+                               for o in twin.scene.obstacles},
             "cameras": cams}

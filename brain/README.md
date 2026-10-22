@@ -75,6 +75,12 @@ Windows the jog panel, `scripts/arm.py` and the spine reach its controller ports
 (checked: `python scripts/arm.py status 127.0.0.1` on Windows reads the twin served from WSL2). Only `127.0.0.1` is
 forwarded, not the other loopback addresses the test suites use.
 
+With a VPN on, WSL2's DNS may not answer a reverse lookup of a loopback address other than `127.0.0.1`, and gives up
+after 10 s. Python's `http.server` makes one when it binds, so every HTTP server here (the jog panel, the brains, the
+twin and perception) is built on `scripts/loopback_http.py`, which doesn't: before it, the twin's HTTP port opened
+11 s after it started on `127.0.0.53`. The planner's suite checks that none asks (`tests/planner_tests.py`,
+`unit_servers`).
+
 `tests/run_all.py` runs the twin's suite with `brain/.venv` (or the Python named by `UMBRATEK_BRAIN_PYTHON`, for
 example the WSL2 venv); without one, the suite is reported SKIP and the run fails, as the oracle suites do.
 
@@ -129,7 +135,7 @@ does.
 
 | Request | What it does |
 | ------- | ------------ |
-| `GET /state` | Time, joints, flange and tool pose, the controller's state, contacts, zone clearances, obstacles, and every camera's intrinsics and true pose. |
+| `GET /state` | Time, joints, flange and tool pose, the controller's state, contacts, zone clearances, obstacles (`obstacles`: where each is; `obstacleShapes`: its shape, size, whether it's fixed, and its mesh file), and every camera's intrinsics and true pose. |
 | `GET /cameras/<name>.npz` | A frame: `rgb`, `depth` (m), `segmentation`, `K`, `T_base_camera` and `meta` (JSON). |
 | `GET /cameras/<name>/rgb.png`, `/depth.png` | The colour image; depth as 16-bit millimetres. |
 | `POST /obstacles` | `{"add": {obstacle}}`, `{"move": {"name", "pose", "frame"}}` or `{"remove": "name"}`. |
@@ -323,3 +329,155 @@ without depth it doesn't feed the map.
 | A lens's distortion: voxels outside the view, mapped by another camera, after 4 frames | all kept | all |
 | A status stall and the burst after it; frames replayed to the end | not bracketed, so skipped; still served | |
 | Live over HTTP: the planner's request, cuRoboV2's indexing of the ESDF, long poll, an obstacle added to the twin | as the contract says; 0.6 s to show | |
+
+## The planner (`brain/planner/`)
+
+A brain that plans planned moves with NVIDIA's cuRobo (cuRoboV2) on the GPU, in WSL2. It serves the interface
+(`docs/brain-interface.md`) itself, so the spine on Windows reaches it at `http://127.0.0.1:<port>` as it reaches the
+stub, through WSL2's localhost forwarding. The stub stays the fallback that needs nothing installed.
+`docs/decisions.md` D60 to D69 say why it is the way it is.
+
+A planned move, from where the arm is to the goal the spine set:
+
+1. **Straight there**, if the spine's own continuous check (`utra_model.check_path`, with the world's obstacles added)
+   passes: one segment is the fastest the controller runs.
+2. **Otherwise cuRobo**: its graph search (a roadmap of collision-free straight joint moves), or its trajectory
+   optimiser when that finds nothing, around the cart, the floor, the keep-out zones and the obstacles, with the arm
+   and tool as spheres covering their capsules, grown by 12 mm (the spine's 10 plus 2). A start or goal nearer than
+   that to something (the spine lets a move start that close if it moves away) gets a short move away first.
+3. **Cut to a few joint moves**: the controller stops at every waypoint (D44), so from each kept waypoint the planner
+   takes the farthest point along cuRobo's path that one straight joint move reaches. It screens the candidates
+   together on the GPU, and the move it keeps has passed the spine's check with the obstacles added.
+4. If cuRobo finds nothing in time, the stub's search (up and over, random via points) against the same world.
+
+Every move it sends has passed the spine's check, so the spine accepts it. The spine doesn't know about the obstacles,
+so keeping the margin from them is the planner's job, and that same check does it.
+
+- **One model of the arm.** cuRobo's arm is generated when the planner starts, from the repo's own files: Umbratek's
+  URDF with the planning limits (the spine's, within the controller's) and the rated speeds; spheres covering every
+  capsule of `collision.json` and the base's cylinder; exactly the pairs of links the spine's check compares; and a
+  link on the flange for the active tool's capsules, which come with each request. Its kinematics match the spine's
+  to 0.0002 mm.
+- **What it plans around** (`--world`): `request` (the default): the tool and keep-out zones each request carries,
+  with the arm and its cart from the repo. `twin[=URL]`: as well, the twin's true obstacles, read from its `GET /state`
+  for every plan (default `http://127.0.0.1:30100`). `map[=URL]`: as well, perception's obstacle map
+  (`docs/world-map.md`, default `http://127.0.0.1:8780`); its ESDF goes to cuRobo grown by half a voxel, and every
+  move is checked against the distance to the map's obstacle voxels: a quick bound from the ESDF, and where that's in
+  doubt, the voxels' cubes themselves (exact near them). A source that doesn't answer fails the plan, saying why;
+  it's never ignored.
+- **Learned steps** go to the stub's scripted skill, `seek`, so programs with learned steps run with this brain too.
+- **Starting.** It listens at once and says it doesn't plan (`hello`) until cuRobo is loaded and warmed up: about
+  2.5 s and 12 s. The first start on a PC compiles cuRobo's kernels, a minute or two, cached in `~/.cache/warp`.
+  It holds about 0.7 GB of the GPU.
+- `GET /v1/stats` lists its recent plans: each one's path, how long it took (and fetching its world), and the map
+  revision it was made on.
+
+### The planner's environment
+
+In WSL2 (Ubuntu 24.04): its Python 3.12, PyTorch 2.12.1 with CUDA 13 and cuRoboV2 at a pinned commit, in a venv of
+its own beside the twin's (`brain/planner/requirements.txt`), from the repo's root:
+
+```
+python3 -m venv ~/.venvs/umbratek-planner
+~/.venvs/umbratek-planner/bin/python -m pip install -r brain/planner/requirements.txt
+```
+
+No CUDA toolkit is needed: cuRobo compiles its kernels when they're first used, and the Windows driver provides CUDA
+inside WSL2 (don't install a Linux NVIDIA driver there). Planning around the twin needs the twin's environment in WSL2
+too, and port 502 for it (above).
+
+### Running it
+
+From the repo's root in WSL2 (`python` meaning `~/.venvs/umbratek-planner/bin/python`):
+
+```
+python -m brain.planner check                  # the environment, cuRobo's model against the spine's, three timed plans
+python -m brain.planner serve                  # http://127.0.0.1:8770, where the jog server looks by default
+python -m brain.planner serve --world twin     # around the twin's obstacles, with python -m brain.twin serve running
+```
+
+On Windows, `python scripts/jog_server.py <controller>` then finds it at `http://127.0.0.1:8770`; on another port
+(`serve --port 8790`), give the jog server `--brain http://127.0.0.1:8790`. WSL2 forwards a port only while Windows
+isn't using it itself: with the stub serving 8770 on Windows, Windows' `127.0.0.1:8770` stays the stub, so give the
+planner another port. Only `127.0.0.1` crosses from Windows into WSL2, so a twin the planner plans around runs in WSL2
+too, where the planner reaches its HTTP endpoint.
+
+### How it's verified
+
+`tests/planner_tests.py` (`python tests/run_all.py planner`, which runs it in WSL2 through `wsl.exe`) checks cuRobo's
+model against the spine's (kinematics, 6800 points on the capsules all inside their spheres, the base's ring, the
+self-collision pairs, the margins, the limits), the world sources (the twin's shapes, spheres and capsules in the
+spine's check, the map's bounds against the true distance at 4000 points and beyond its grid, and the spine's slack
+rule held against the map on random moves, by exact distances to its voxels), and then plans. The twin carries the
+pointer tool, from the cell it's given before it starts, so its contacts include the tool's. The chain needs
+perception's environment in WSL2 too (`~/.venvs/umbratek-perception`, or `UMBRATEK_PERCEPTION_PYTHON`).
+
+| What | Result |
+| ---- | ------ |
+| 48 random blocked moves above a table, around a crate, a pole, a ball and a tube | all planned, by graph search, in 2.2 segments on average (at most 4); every one accepted by the spine's shell (`safety.check_path`); 12.1 mm from the obstacles and the table at the least, sampled every 0.5 deg |
+| Their planning times | median 0.76 s, 90% within 1.04 s, the worst 1.15 s, beside other suites: on average 0.08 s checking the straight way, 0.26 s in cuRobo, 0.41 s cutting its path (3.2 moves through the spine's check) |
+| A keep-out zone the spine sent, a start 11 mm from a wall, a mesh obstacle, a fake perception map | planned and accepted; a goal inside an obstacle, or past a limit, gets no path, saying why |
+| The twin, the planner brain and the jog server as processes: taught, planned, taught around the twin's crate, out and back, the crate moved, then a pole, a ball, a tube | 6 runs done, every plan accepted, no contact in the twin (sampled 176 to 347 times a run), the tool on its target to 0.001 mm |
+| Their planning times | the brain 0.87 s median, 0.97 s at most (with reading the twin's state); the spine, from starting the planned step to accepting its path, 0.91 s median and 0.99 s at most, against its 10 s deadline |
+| The control: the same program with a brain blind to the crate (`--world request`) | the spine accepts its straight path, and the twin sees the arm hit the crate (the flange and the tool) |
+| The chain, the camera the only source: perception calibrates the twin's overhead camera by its own procedure and maps what it sees; the planner plans on that map (`--world map`) around a crate on the table that's no keep-out zone and that no brain is told of; taught, planned, taught, out and back | the calibration 0.08 mm and 0.011 deg from the twin's camera; the crate in the map 1.2 s after perception serves it; 4 runs done, every plan accepted, no contact in the twin (sampled 194 to 282 times a run), the paths 44.1 to 48.8 mm from the true crate and table at the least, the tool on its target to 0.001 mm |
+| ... the crate moved 60 mm in the twin between runs | the map shows it moved 1.5 s later, nothing left where it was; the next plan is made on that map and goes around it |
+| Their planning times | the brain 1.46 s median, 1.55 s at most (fetching the map 0.24 s median); the spine, from starting the step to accepting the path, 1.51 s median and 1.60 s at most, against its 10 s deadline |
+| The chain's control: the brain without the map (`--world request`) | the spine accepts its straight path, and the twin sees the tool hit the crate |
+
+Across the boundary, by hand: the spine and the simulator on Windows, the planner in WSL2 on `127.0.0.1:8790`, the
+spine suite's taught, planned, taught program around its keep-out zone, out and back six times: all done, nothing
+refused, the brain 0.67 to 1.19 s, the spine from starting the step to accepting the path 1.23 to 1.90 s.
+
+## Try it: a camera, the map and the planner, around an obstacle in the twin
+
+On this PC: the jog panel on Windows; the twin, perception and the planner in WSL2, each in its environment (above),
+from the repo's root (`/mnt/c/Users/Dustin/Documents/Github/umbratek-code` in WSL2). Only `127.0.0.1` crosses from
+Windows into WSL2, and only on ports Windows isn't using itself, so:
+
+- **Stop the simulator on Windows** (`tools/utra_sim.py`, and the panel that drives it): the twin serves the same ports
+  (502, 30001, 30003, 30099), and while Windows' simulator holds them, Windows' `127.0.0.1` reaches it, not the twin.
+  The real arm's panel and the stub brain can stay.
+- **The planner serves on 8790**: while the stub holds `127.0.0.1:8770` on Windows, Windows' 8770 stays the stub's.
+
+Once, in WSL2: a calibration of the twin's overhead camera by perception's own procedure (16 views of a board the
+test moves with the flange), into `cell/perception/`:
+
+```
+PERCEPTION_CALIBRATIONS=cell/perception ~/.venvs/umbratek-perception/bin/python tests/perception_tests.py calibration_fixed
+```
+
+Then each in a WSL2 shell of its own, in this order (the planner reads the map's grid when it starts):
+
+```
+~/.venvs/umbratek-brain/bin/python -m brain.twin serve --scene brain/twin/scenes/example.json --viewer
+~/.venvs/umbratek-perception/bin/python -m brain.perception serve --twin http://127.0.0.1:30100 --camera overhead --status 127.0.0.1 --cell cell/twin
+~/.venvs/umbratek-planner/bin/python -m brain.planner serve --world map --port 8790
+```
+
+and on Windows a panel of its own, with a cell folder of its own:
+
+```
+python scripts\jog_server.py 127.0.0.1 --port 8767 --cell cell\twin --brain http://127.0.0.1:8790
+```
+
+`--viewer` opens MuJoCo's viewer on the Windows desktop through WSLg (checked): the arm, the example scene's table,
+fixture and part, and what's added. In the panel at `http://127.0.0.1:8767`, enable the arm and add two targets in the
+base frame either side of the table's middle, the flange pointing down: P at x 480, y -180, z 100 mm and Q at x 480,
+y 180, z 100, both rpy 180, 0, 0. A program: a planned move to P with an offset 50 mm up, a line move to P, a planned
+move to Q with an offset 50 mm up, a line move to Q (every move between them planned, so it can run again from Q).
+Run it once: with nothing in the way, both planned moves go straight. Then put a crate between P and Q, in WSL2:
+
+```
+curl -s -X POST http://127.0.0.1:30100/obstacles -H 'Content-Type: application/json' \
+  -d '{"add": {"name": "crate", "shape": "box", "size": [100, 100, 180], "pose": {"xyz": [480, 0, -10], "rpy": [0, 0, 0]}}}'
+```
+
+About a second later it's in perception's map (`http://127.0.0.1:8780/v1/map/occupied.json` lists its voxels); run
+the program and watch the arm go over it in the viewer, both ways. Move it with `{"move": {"name": "crate", "pose":
+{"xyz": [480, 60, -10], "rpy": [0, 0, 0]}}}` and run again; take it away with `{"remove": "crate"}`, and the planned
+moves go straight again. (Checked on this PC, on private addresses in WSL2: plans of 1.1 to 3.2 s, no contact in the
+twin.) The planner's shell prints each plan; `http://127.0.0.1:8790/v1/stats` lists them with their paths. With
+`--world twin` instead of `--world map`, the planner reads the twin's obstacles directly, with no camera. The twin
+builds the tool from its cell when it starts: once the panel has saved one in `cell/twin`, start the twin with
+`--cell cell/twin` to see it, and collide it, too.

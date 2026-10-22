@@ -27,13 +27,14 @@ import random
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(HERE)), "scripts")
 sys.path.insert(0, SCRIPTS)
 import brain_protocol as bp  # noqa: E402
 import kinematics as kin  # noqa: E402
+import loopback_http  # noqa: E402
 import planner as plannermod  # noqa: E402
 import utra_model  # noqa: E402
 
@@ -194,7 +195,7 @@ def summary(request, reply):
     return reply.get("brain", "")
 
 
-class Server(ThreadingHTTPServer):
+class Server(loopback_http.Server):
     daemon_threads = True
     allow_reuse_address = os.name != "nt"  # on Windows it would let a second server take the port over
 

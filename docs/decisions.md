@@ -627,6 +627,187 @@ timing, which the twin is built on.
 - **Why:** perception and planning need obstacles the cameras see and the arm can hit, placed the way the owner
   places everything else in the cell.
 
+## D60 to D69: the planner
+
+Decided on 2026-10-21 (night), building wave 2's planner: a brain that plans planned moves with cuRobo on the GPU, in
+WSL2, around what the cell holds (`brain/README.md`, "The planner").
+
+## D60. cuRoboV2 at a pinned commit, on PyTorch 2.12.1 with CUDA 13, in its own WSL2 venv
+
+- **Decision:** `nvidia-curobo` from cuRobo's main branch at `78fd485` (2026-09-10, after the v0.8.0 release), with
+  its `cu13` extra; PyTorch 2.12.1+cu130; Ubuntu 24.04's Python 3.12; in `~/.venvs/umbratek-planner`, beside the
+  twin's venv; all pinned in `brain/planner/requirements.txt`, which installs into a fresh venv from scratch (checked).
+- **Alternatives:** cuRobo v0.7.8 (the v1 API most examples use, but under NVIDIA's non-commercial licence, and its
+  extensions need `nvcc` and a CUDA toolkit to build); the v0.8.0 release (without main's later fixes, among them a
+  graph-planner bug that let colliding configurations into its roadmap, and attached geometry shared wrongly between
+  its solvers); CUDA 12.8's wheels; PyTorch 2.14 (newer than cuRobo's latest commit); one venv with the twin's.
+- **Why:** cuRoboV2 is Apache 2.0, and compiles its kernels when they're first used (cuda.core's NVRTC and Warp), so
+  WSL2 needs no CUDA toolkit: the Windows driver (616.64, CUDA 13.4) is enough. The 3080 Ti (compute 8.6) is
+  supported by CUDA 13. PyTorch 2.12.1 is a patch release from before cuRobo's last commits. Its own venv, because
+  two sessions installing into one at once can break it. The first start compiles kernels (about 70 s), cached in
+  `~/.cache/warp`; after that cuRobo loads in about 2.5 s and warms up in about 12 s, and holds about 0.7 GB of the
+  GPU.
+
+## D61. cuRobo's arm is generated from the repo's sources, its spheres covering the spine's capsules
+
+- **Decision:** `brain/planner/robot.py` writes Umbratek's URDF again with the planning limits (`planner.DRAG_LIMITS_DEG`
+  within `utra_sim.JOINT_LIMITS_RAD`), the rated joint speeds, an effort range (Umbratek's is 0, which cuRobo refuses)
+  and absolute mesh paths, into `~/.cache/umbratek-planner`; nothing generated is committed. Each capsule of
+  `collision.json`, where `utra_model` places it, becomes spheres along its core at most 0.4 radii apart, each of
+  radius sqrt(r^2 + (s/2)^2) for their spacing s, so their union covers the capsule (growing it by 1.0 mm at most).
+  The base's cylinder becomes a ring of 18 spheres of 30 mm, lowest point 1 mm above the mounting face, which with the
+  shoulder's spheres covers its side above 6 mm. cuRobo compares exactly the pairs of links the spine's check compares
+  (`utra_model.ArmModel.pairs`, its skip list included). A fixed link on the flange has 64 sphere slots, filled for
+  each request from the active tool's capsules.
+- **Alternatives:** cuRobo's sphere fitting to the meshes (a second collision model, to keep in step with the
+  capsules the spine checks); one sphere per capsule (far bigger than the capsule, or not covering it); cuRobo's own
+  self-collision defaults; the tool baked into the model (it changes with the cell).
+- **Why:** one source of truth, as the twin's (D52). Spheres that cover the capsules make cuRobo at least as cautious
+  as the spine, so what it finds the spine's check passes, first time. Checked by the suite: its flange within
+  0.0002 mm of the spine's at 300 random poses (float32), 6800 points on the capsules all inside their spheres, the
+  base's side covered, the same pairs.
+
+## D62. cuRobo keeps 12 mm: the spine's margin and 2 mm more
+
+- **Decision:** spheres are grown by the spine's margin (10 mm, `utra_model.MARGIN_M`) and 2 mm more for the world;
+  each link's self-collision padding takes back all but half of that, so two links keep 12 mm between them, not
+  24. cuRobo's world leaves out the cart parts its fixed spheres would always touch, grown so: the mounting plate
+  (the shoulder's capsule stands 10.4 mm above it by design) and a cap screw under it. The spine's own check, which
+  every move passes before it's sent (D63), checks them exactly.
+- **Alternatives:** the spine's 10 mm exactly (cuRobo checks samples of its spheres, so its paths would often fail the
+  spine's continuous check by a fraction of a millimetre); a larger margin (fewer tight paths).
+- **Why:** the spine's check is the gate, so cuRobo's margin only needs to make its paths pass it at the first try:
+  in the suite the least gap to an obstacle on a planned path is 12.1 mm.
+
+## D63. Straight if it can be; else cuRobo's graph search, its path cut into few moves, each through the spine's check
+
+- **Decision:** a planned move is straight if the spine's own continuous check passes with the world's obstacles
+  added. Otherwise cuRobo's graph search (straight joint moves between the nodes of a roadmap it checks), its
+  trajectory optimiser on every other attempt, up to 8 attempts in 80% of the spine's deadline. The route is then cut
+  greedily: from each kept waypoint, the farthest point along it that one straight joint move reaches, the candidates
+  screened together on the GPU (cuRobo's feasibility of samples no sphere moves more than 2 mm between), the move kept
+  confirmed by `utra_model.check_path` with the obstacles added. If cuRobo finds nothing, the stub's search (up and
+  over, random via points) against the same world. A path whose moves don't all pass the check is never sent.
+- **Alternatives:** cuRobo's `plan_cspace` (trajectory optimisation, three time-optimal refinements: 1.3 s a plan;
+  0.33 s without the refinements), whose smoothness is lost anyway once the path is cut into moves the controller runs
+  from rest to rest (D44); sending cuRobo's dense trajectory (up to 64 waypoints, each a stop); trusting cuRobo's
+  verdict (it doesn't know the spine's slack rule or the exact capsules).
+- **Why:** fewer segments run faster, and a graph path is straight moves already: 2.2 segments on average around the
+  suite's obstacles. The spine's own check as the gate means the spine accepts what the planner sends: 48 of 48 in the
+  suite, and every plan in the twin. Planning took 0.86 s median and 1.23 s at most beside the other suites (0.69 and
+  1.08 s alone), against the spine's 10 s deadline: on average 0.09 s for the straight check, 0.29 s in cuRobo, 0.45 s
+  cutting (3.2 moves through the check, about 0.1 s each in pure Python, the cost of using the spine's own code).
+
+## D64. A start or goal inside cuRobo's margin: a short move away first
+
+- **Decision:** when cuRobo finds the start (or goal) too near something, the planner moves the tool point 10 to
+  150 mm straight away from the nearest obstacle (from the spine's check's closest points), or up, or both, turned the
+  same way; keeps the first such pose cuRobo finds clear and the spine's check passes the move to; and plans from (or
+  to) there.
+- **Alternatives:** shrinking cuRobo's spheres for such plans (paths near the margin everywhere, which then fail the
+  check); refusing (the spine lets a move start nearer than the margin if it moves away, `utra_model.SLACK_M`, and a
+  taught pose can be that near).
+- **Why:** taught poses are often near things (a part on a table, the jaw of a vise). Checked: a start 10.8 mm from a
+  wall plans through a short move away.
+
+## D65. What the planner plans around: the request, the twin's truth, or perception's map
+
+- **Decision:** `--world request|twin[=URL]|map[=URL]`. Always the tool and keep-out zones of each request, and the arm
+  and cart from the repo. `twin` adds the twin's true obstacles, read from its `GET /state` for every plan; the twin's
+  `/state` now reports each obstacle's shape, size and mesh (`obstacleShapes`), as it reported only poses before. A
+  mesh is its convex hull, as the twin collides it. `map` adds perception's map (`docs/world-map.md`): its ESDF goes to
+  cuRobo less half a voxel, since cuRobo interpolates between voxel centres, where a lower bound can overstate the
+  clearance; the spine's check is joined by the map's own, each capsule's core sampled every 4 mm along it and along
+  the move. Each sample is judged first by a quick lower bound that holds everywhere (the ESDF at the nearest voxel
+  centre less the distance to it; beyond the grid, through the point's projection onto the grid's box, as every
+  obstacle is inside it), which can be 35 mm below the truth; where that would refuse, by the distance to the obstacle
+  voxels themselves, taken as cubes (those where the ESDF is negative, in a k-d tree: the nearest cube among the 32
+  nearest centres, exact near an obstacle's surface and a lower bound everywhere). The spine's slack rule (a move may
+  start nearer than the margin and move away) is measured from an upper bound on the start's distance and checked
+  with lower bounds along the move, so the slack is never overstated.
+  A map more than 2 s old, or whose arm isn't where the plan starts (after waiting for a newer frame), fails the plan.
+  Any source that can't answer fails the plan, saying why.
+- **Alternatives:** the planner reading the twin's scene file (misses obstacles placed over HTTP, and where free ones
+  have been pushed); obstacles from the request (the interface has no field for them; the spine doesn't know them);
+  treating perception's unknown voxels as solid (everything outside the cameras' view would block); ignoring a
+  source that fails (a plan blind to what's there); the quick bound alone (the first version: with perception's own
+  map, every path cuRobo found past a crate was refused, as the arm's start was 36 mm from the crate's voxels and the
+  bound said 15 mm).
+- **Why:** before perception exists, the twin's truth tests planning against obstacles the spine doesn't know about,
+  and the same code path takes perception's map. Checked with a fake perception server that serves the contract (a
+  crate seen as 2 cm voxels is planned around, 49.6 mm from the true crate), and with perception's own map (D68). A
+  review found the first version of the
+  map's check fail open in two ways (the slack measured from a loose lower bound, and points just beyond the grid read
+  as clear); the suite now checks the rule against exact distances to the voxels on random moves over a slab (101 of
+  120 accepted, none nearer than the rule allows; the first version let through moves from 6.0 to 3.1 mm), and the
+  distance to the cubes against brute force.
+
+## D66. The planner's brain serves the stub's skill, and says it doesn't plan until it can
+
+- **Decision:** `python -m brain.planner serve` listens at once, on 8770 by default as the stub does, and answers
+  `hello` with `"planner": false` (and "warming up") until cuRobo is loaded and warmed up. Learned steps go to the
+  stub's scripted `seek`. `GET /v1/stats` lists recent plans and their timings. hello never waits for a plan.
+- **Alternatives:** listening only once ready (the panel would show no brain for 15 s, or two minutes the first time);
+  a brain with no skills (programs with learned steps wouldn't start with it).
+- **Why:** it replaces the stub where it's run, and the spine won't start a run with planned steps until it plans.
+
+## D67. The planner's suite runs in WSL2, through wsl.exe from the runner on Windows
+
+- **Decision:** suite `planner` of `tests/run_all.py`: from Windows, `wsl.exe --cd <repo> -e sh -c 'exec
+  ~/.venvs/umbratek-planner/bin/python tests/planner_tests.py'`, the suite's address, ports and log folder passed by
+  `WSLENV` (the folder translated to its `/mnt/c` path); in Linux, directly; reported SKIP without the environment.
+  Inside WSL2 it runs the twin in the twin's venv on the suite's own loopback address (so port 502 needs
+  `net.ipv4.ip_unprivileged_port_start=0`, persisted on this PC in `/etc/sysctl.d/99-umbratek.conf`), the planner's
+  brain on the panel port + 1000, and the jog server in the planner's Python. `tests/simrig.py` gains
+  `start_sim(twin=True)` and `UTRA_TEST_TWIN=1`, which serve any suite's controller ports from the twin, and looks
+  for the twin's environment on its own platform only (in WSL2, a Windows venv under `/mnt/c` would run on Windows).
+- **Alternatives:** a planner suite run only by hand in WSL2; the spine's processes on Windows and the planner in WSL2
+  (only `127.0.0.1` crosses into WSL2, and its ports are the owner's; the suites use other loopback addresses).
+- **Why:** one command runs every suite, and inside WSL2 every address is free. The boundary is crossed by hand
+  instead, on a port of its own (D68).
+- **Later, 2026-10-22:** with a VPN on, WSL2's DNS doesn't answer reverse lookups of loopback addresses other than
+  `127.0.0.1`, and gives up after 10 s. Python's `http.server` makes one when it binds (`socket.getfqdn`, only to keep
+  the name), so the twin's HTTP port opened 11 s after it started, past the twin suite's wait, and perception's map
+  11 s after it did. Every HTTP server (the jog panel, the stub, the planner, the twin, perception) is now built on
+  `scripts/loopback_http.py`, `http.server`'s `ThreadingHTTPServer` without that lookup. The planner's suite makes
+  each in its own environment with `socket`'s lookups recorded instead of made, and fails if one asks; and it fails if
+  any other module of `scripts/`, `tools/` or `brain/` uses `http.server`'s own server classes.
+
+## D68. How the planner is validated: random moves, the twin end to end, the camera's chain, a control, the boundary
+
+- **Decision:** in-process, 48 random moves above a table whose straight way a crate, pole, ball or tube blocks, each
+  path put through the spine's own shell (`safety.check_path`) and its clearance sampled every 0.5 deg; then the twin,
+  the planner's brain and the jog server as separate processes running taught, planned, taught programs out and back
+  around the twin's obstacles (moved, and changed for a pole, a ball, a tube), the twin's contacts sampled every
+  20 ms; then the same program with a brain blind to the obstacles (`--world request`). Then the chain, the camera
+  the only source: perception calibrates the twin's overhead camera by its own procedure (views of the board on the
+  flange; `tests/perception_tests.py calibration_fixed`), serves its map of what that camera sees, and the planner
+  plans on it (`--world map`) around a crate on the example scene's table, out and back; the crate is moved in the
+  twin and the next plan must be made on the map that shows the move; then the blind brain as the control. The twin
+  carries the active tool, built from the cell given before it starts, so its contacts include the tool's. By hand,
+  the spine and the simulator on Windows and the planner in WSL2 on `127.0.0.1:8790`.
+- **Why:** the requirement is that the spine accepts the plans and the twin reports no contact; the control shows
+  the obstacle was in the way (the spine accepts the blind brain's straight path, and the twin sees the arm hit the
+  crate), so it's the planner that avoids it. In the chain, the crate is no keep-out zone and no brain is told of it:
+  only the camera can. The results are in `brain/README.md`.
+
+## D69. Known limits
+
+- The real arm hasn't run a planned path from this brain; that's for a session with the owner present, as is a real
+  camera (perception's map has only seen the twin's ideal depth here).
+- The map counts unknown space as empty (`docs/world-map.md`). With one camera, the faces of an object turned away
+  from it are known only within perception's hidden band (15 cm behind what it sees): a tall object's far side, lower
+  down, is unknown, and a path may pass through it. The chain's crate (180 mm, under a camera looking down) is covered
+  where the arm goes; more cameras, or the occupancy's unknown state, are the way to be more cautious.
+- The map is read once per plan; what moves after that isn't planned around until the next plan.
+- cuRobo's covering of the base grows it by up to 20 mm at mid-height, so a move with the wrist near the base may need
+  the stub's search, or find nothing where the spine's check alone would pass.
+- A path is cut along cuRobo's route; it isn't the fewest segments possible. Waypoints anywhere (not only on the
+  route) could cut more, at the cost of more checks. Around the chain's crate, the graph search goes over its far side
+  (the tool 236 mm up), where a shorter way around exists.
+- The twin and the planner read the same `/state`; a free obstacle pushed after the plan is made isn't re-planned
+  around (the spine's freshness checks are about the arm and the cell, not obstacles).
+
 ## D70 to D79: perception
 
 Decided on 2026-10-22, building perception for the brain (`brain/perception/`): an obstacle map from depth cameras,
