@@ -9,8 +9,9 @@
 
 Suites that drive the simulator each get their own loopback address (127.0.0.11, .12, ...) and panel port, so
 they run side by side (--jobs, default 3). Oracle suites need the oracle environment (.venv-oracle: NumPy, SciPy,
-OpenCV and Pinocchio, from conda-forge; see tests/README.md) and the twin's suite the brain's environment
-(brain/.venv: MuJoCo; see brain/README.md); without them they're reported SKIP, and the run fails.
+OpenCV and Pinocchio, from conda-forge; see tests/README.md), the twin's suite the brain's environment
+(brain/.venv: MuJoCo; see brain/README.md) and the perception suite perception's (brain/perception/.venv: MuJoCo,
+SciPy and OpenCV; see brain/README.md); without them they're reported SKIP, and the run fails.
 Each suite's full output goes to tests/logs/<suite>.out.
 """
 import argparse
@@ -39,6 +40,14 @@ def brain_python():
     return next((p for p in candidates if p and os.path.isfile(p)), None)
 
 
+def perception_python():
+    """Perception's environment (brain/perception/.venv, or UMBRATEK_PERCEPTION_PYTHON, e.g. a venv on WSL2's disk)."""
+    venv = os.path.join(ROOT, "brain", "perception", ".venv")
+    candidates = [os.environ.get("UMBRATEK_PERCEPTION_PYTHON") or "", os.path.join(venv, "Scripts", "python.exe"),
+                  os.path.join(venv, "bin", "python")]
+    return next((p for p in candidates if p and os.path.isfile(p)), None)
+
+
 def oracle_env(env):
     """The environment with the oracle environment activated: conda's DLLs (LAPACK and the like) load from its
     Library folders, which must be on PATH or NumPy's linear algebra crashes on Windows."""
@@ -48,8 +57,8 @@ def oracle_env(env):
     return dict(env, PATH=os.pathsep.join(folders + [env.get("PATH", "")]), CONDA_PREFIX=prefix)
 
 
-# name: (what it checks, interpreter ("test" = the runner's Python, "oracle", "brain" or "node"), script and args,
-# quick args, timeout s)
+# name: (what it checks, interpreter ("test" = the runner's Python, "oracle", "brain", "perception" or "node"), script
+# and args, quick args, timeout s)
 SUITES = {
     "cli": ("scripts/arm.py against the simulator", "test", ["cli_tests.py"], None, 600),
     "inproc": ("arm.py interrupted mid-move, in-process", "test", ["inproc_tests.py"], None, 300),
@@ -69,6 +78,8 @@ SUITES = {
     "sim": ("the simulator against the capture, and its registers and control port", "test", ["sim_tests.py"], None, 600),
     "twin": ("the twin (brain/twin): its model from the repo's sources, obstacles, cameras, its coupling to the "
              "simulator, both captures replayed", "brain", ["twin_tests.py"], None, 900),
+    "perception": ("perception (brain/perception): calibration and the obstacle map against the twin's cameras, and "
+                   "the map's contract live", "perception", ["perception_tests.py"], None, 900),
 }
 
 
@@ -84,6 +95,11 @@ def run_suite(name, index, args, results):
         exe = brain_python()
         if exe is None:
             results[name] = ("SKIP", 0.0, "no brain environment (brain/.venv): see brain/README.md")
+            return
+    elif interpreter == "perception":
+        exe = perception_python()
+        if exe is None:
+            results[name] = ("SKIP", 0.0, "no perception environment (brain/perception/.venv): see brain/README.md")
             return
     else:
         exe = sys.executable
@@ -123,7 +139,7 @@ def main():
         parser.error(f"--base must be 1 to {254 - len(SUITES)}")
     if args.list:
         for name, (what, interpreter, *_rest) in SUITES.items():
-            print(f"  {name:<10} {what}{f' [{interpreter}]' if interpreter in ('oracle', 'brain') else ''}")
+            print(f"  {name:<10} {what}{f' [{interpreter}]' if interpreter in ('oracle', 'brain', 'perception') else ''}")
         return 0
     names = args.suites or list(SUITES)
     unknown = [n for n in names if n not in SUITES]
@@ -131,7 +147,8 @@ def main():
         parser.error(f"unknown suite(s): {', '.join(unknown)}; see --list")
     os.makedirs(LOGS, exist_ok=True)
     print(f"Testing with {args.python or sys.executable}; oracle environment: {oracle_python() or 'MISSING'}; "
-          f"brain environment: {brain_python() or 'MISSING'}")
+          f"brain environment: {brain_python() or 'MISSING'}; perception environment: "
+          f"{perception_python() or 'MISSING'}")
     results, pending, running = {}, list(enumerate(names)), []
     t0 = time.monotonic()
     while pending or running:

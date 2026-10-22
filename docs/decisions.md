@@ -626,3 +626,132 @@ timing, which the twin is built on.
   see or the arm can push); rebuilding the model for every move of an obstacle.
 - **Why:** perception and planning need obstacles the cameras see and the arm can hit, placed the way the owner
   places everything else in the cell.
+
+## D70 to D79: perception
+
+Decided on 2026-10-22, building perception for the brain (`brain/perception/`): an obstacle map from depth cameras,
+for the planner, and the cameras' calibration to the arm (`brain/README.md`, "Perception"). The map's contract is
+`docs/world-map.md`; the planner session accepted it unchanged.
+
+## D70. The map is perception's own, on the CPU: a dense voxel grid with evidence, and an ESDF from it on request
+
+- **Decision:** one dense grid (2 cm voxels over the arm's reach, 1.67 million of them) holding each voxel's evidence
+  as log-odds. A frame adds hits where its points land and misses where its camera sees past a voxel's centre (each
+  voxel is projected into the image once per camera pose, so a frame costs a gather, not a ray per pixel; with a lens's
+  distortion, only voxels whose direction is within the image's field of view, as its own pixels' rays bound it, since
+  the distortion polynomial folds directions far off the axis back into the image); the signed distance field comes
+  from SciPy's exact Euclidean distance transform of the occupancy, once per revision, when asked. NumPy, SciPy and
+  OpenCV only, in an environment of its own.
+- **Alternatives:** nvblox through nvblox_torch (GPU TSDF and ESDF, what cuRobo's examples use); cuRoboV2's own GPU
+  mapper (`curobo/_src/perception/mapper`, block-sparse TSDF and ESDF in Warp); a TSDF of our own; OctoMap.
+- **Why:** both GPU mappers live in the planner's process and its torch and CUDA versions, while the map has to cross
+  processes with a contract both sides can test alone (the coordinator's brief), and the 12 GB GPU is shared. On this
+  PC's CPU a 640 x 480 frame integrates in 70 to 100 ms and the ESDF takes 0.2 s, ample for one camera at 5 Hz and a
+  planner that asks once a step. It runs, and is tested, on Windows and in WSL2 alike. Evidence over frames, rather
+  than a TSDF's averaged surface, gives the occupancy the planner and a person can read directly, and clears an
+  obstacle that has moved. Should a larger or finer map be needed, cuRoboV2's mapper can be fed the same frames.
+
+## D71. The map is served over HTTP from WSL2, on 127.0.0.1:8780, as JSON and .npz
+
+- **Decision:** perception serves `GET /v1/map` (a description), `GET /v1/map.npz` (occupancy and ESDF arrays), `GET
+  /v1/map/occupied.json` and `POST /v1/reset`, with a long poll (`after`, `wait`); loopback only, refusing web pages
+  as the jog panel and the twin do. Version 1, fields added within it, as the brain interface does (D42).
+- **Alternatives:** shared memory or files (one machine, but no freshness, no versioning, awkward across WSL2's
+  boundary); ZeroMQ or gRPC (dependencies for both ends); ROS (not on this PC).
+- **Why:** WSL2 can't reach Windows' `localhost`, so perception runs beside the planner in WSL2, and Windows still
+  reaches it at `127.0.0.1` (D41). HTTP and NumPy's .npz are in both sides' environments and readable with curl. The
+  arrays are about 5 MB with a float16 ESDF, 0.03 to 0.3 s a request on loopback.
+
+## D72. Four states: free, occupied, unknown, and hidden space assumed solid up to 15 cm behind what was seen
+
+- **Decision:** a voxel up to `hiddenM` (0.15 m) behind a surface a camera saw (not the arm's, the cart's or the
+  floor's) is "hidden" and counts as an obstacle in the ESDF, unless a camera has seen it empty within the last 3
+  frames; the arm being there ends it. Unknown space counts as empty, and the occupancy says which is which.
+- **Alternatives:** unknown as empty everywhere (nvblox's default); unknown as solid everywhere.
+- **Why:** a fixed camera sees the front of things. With unknown as empty, a planner could take the arm behind a box,
+  through its unseen back half; with unknown as solid, the arm's own shadow and everything outside the view would be
+  obstacles, and the arm would start every plan in collision. Hidden space covers the backs of objects (an object's
+  depth along the view up to 15 cm) without either. The cost: objects look up to 15 cm deeper than they are, away
+  from the camera.
+
+## D73. The ESDF is a lower bound on clearance, in cuRoboV2's layout and sign
+
+- **Decision:** outside obstacles, the distance between a voxel's centre and the nearest obstacle voxel's centre, less
+  half a voxel's diagonal; inside, minus the distance to the nearest free voxel's centre plus half a voxel; metres,
+  negative inside, arrays `[x][y][z]` in C order over a grid of even counts, so cuRoboV2's `VoxelGrid` (posed at the
+  grid's centre) takes it as it is. Grids whose counts cuRoboV2 would misread (it truncates float32 dims / voxel) are
+  refused.
+- **Alternatives:** distances between centres (overstates clearance by up to 17 mm at 2 cm); positive inside (cuRobo
+  0.7's sign).
+- **Why:** a sphere the ESDF calls clear then touches no obstacle voxel, and every seen surface is inside one: in the
+  twin it was never more than the distance to what was seen (by 3.2 mm at least). The planner subtracts its own half
+  voxel for interpolation. The layout and sign were read from cuRoboV2 at the commit the planner uses (78fd485) and
+  the suite re-implements its lookup against the published map.
+
+## D74. The arm is left out by its capsules at the status frames around each frame; the base, cart and floor by utra_model
+
+- **Decision:** joints come from the controller's 10 Hz status stream (port 30001, only listening). For each frame,
+  the status frames from the last before it to the first after it bracket where the arm was; if they differ, the arm is
+  left out at poses between them, close enough together that no capsule moves 12.5 mm between two. Points within the
+  capsules grown by `padM` (25 mm) plus three times the depth's noise are dropped, and voxels within `padM` aren't
+  updated by the frame. A frame is skipped unless the status frames around it, each with the one before it, all
+  arrived on the stream's 10 Hz cadence (they carry no time of their own, so after a stall the burst of held-up frames
+  would pass for fresh ones, and the first frame after a burst can still be late), as is one
+  where the arm moved more than 30 degrees, or one from a camera on the flange taken while the arm moved at all. The
+  base, the cart (20 mm) and the floor (20 mm) are left out the same way from `utra_model`'s shapes, and the active
+  tool's capsules from the cell.
+- **Alternatives:** the joints the twin renders with (exact, but a real camera has no such thing); rendering the arm's
+  meshes into a mask image (MoveIt's self-filter: needs a renderer, and the meshes rather than the shapes the spine and
+  planner use); segmenting the arm from the image.
+- **Why:** the capsules are fitted around the arm's meshes (in the twin, every point the cameras saw of the arm was
+  inside them), and they're the spine's own model. Bracketing covers the time between a frame and the status frames:
+  in the twin, the arm sweeping at up to 60 deg/s left nothing in the map, where joints 0.5 s stale (a Wi-Fi stall,
+  D54's captures had one of 3 s) left 410 voxels of it, hence the skip. Keeping what was known within the pad means an
+  obstacle beside the arm, seen before the arm came, stays in the map.
+
+## D75. Evidence and margins: two frames to show, four to clear, three sigma of a D455's noise
+
+- **Decision:** a voxel is hit when at least 2 of a frame's points land in it; log-odds +0.85 a hit, -0.4 a miss,
+  between -1.5 and 2.5, occupied above 1.0. Misses and the arm's and floor's margins allow three standard deviations
+  of the depth's noise, modelled as sigma = 1 mm + 2 mm/m^2 times the distance squared (about 5.5 mm at 1.5 m), and
+  pixels at depth discontinuities (where stereo cameras return "flying pixels" between near and far) are dropped.
+- **Alternatives:** one frame to show (fast, but a single noisy frame makes an obstacle); averaging depth over frames
+  first.
+- **Why:** an obstacle shows within 0.4 s at 5 frames a second (0.6 s where the space was seen empty), and one that
+  has moved clears in 0.8 s; obstacles appear faster than they go. With `noise.py`'s model of a D455's flaws, and with
+  twice its noise, the twin's maps had no voxel more than 5 cm off an obstacle and none of the arm.
+
+## D76. Calibration: a ChArUco board, hand-eye with both unknowns refined on every corner, views captured passively
+
+- **Decision:** a ChArUco board (6 x 4 squares of 60 mm, DICT_4X4_50) on the flange for a fixed camera, or fixed in
+  the cell for one on the flange. OpenCV's hand-eye solvers (Park, Tsai, Horaud, Daniilidis: the best fit) start it;
+  the camera's pose and the board's are then refined together by least squares on every corner's reprojection error
+  (a soft-L1 loss), views that don't fit are dropped and named, and the uncertainty comes from the fit. Views are
+  saved by `calibrate capture` each time the arm rests at a new pose: a taught program or the jog panel moves it. The
+  camera's intrinsics are its own.
+- **Alternatives:** a board at a measured spot (its pose would have to be measured to the accuracy wanted); a sphere
+  on the tool found in depth (a depth camera's bias goes straight into the pose); registering the arm's meshes to the
+  depth (no fiducial at all, but less accurate, and nothing to check it against yet).
+- **Why:** nothing needs measuring: the board's mount is solved too. ChArUco corners are known by id, so a board the
+  arm partly hides still counts. In the twin a fixed camera came out within 0.5 mm and 0.03 deg of its true pose
+  (tolerance 2 mm and 0.2 deg), a view with wrong joints was dropped, and joints read 0.02 deg off cost 1.3 mm.
+  Perception never moves the arm: the brain only proposes (D40).
+
+## D77. The board in the twin is two obstacles moved with the flange; the twin is unchanged
+
+- **Decision:** the board's black parts are a mesh (`board.write_stl`, generated from OpenCV's own board image, so
+  exact) over a white plate, placed as two ordinary obstacles and moved with the flange by whoever drives the twin (the
+  tests). The camera's true pose is used only to choose poses where the board faces it, as a person would by looking.
+- **Alternatives:** textures in the twin's model (a change to the twin, which wave 2's other session also touches);
+  drawing the board into the twin's images (the calibration wouldn't see the twin's renderer).
+- **Why:** the twin's renders are what a real camera's images stand in for, aliased edges and all (corners found to
+  0.4 px RMS), and the twin needed no change.
+
+## D78. Cameras plug in through a seam that carries only what a real camera gives
+
+- **Decision:** a camera source returns depth in metres aligned to colour, the colour image, its intrinsics and
+  distortion, and when it was taken. The twin's cameras are read over HTTP with their true pose and segmentation
+  dropped; saved frames replay from a folder. No RealSense support until there's a camera to test it on.
+- **Alternatives:** a RealSense source written now, untested; using the twin's true pose until a camera arrives.
+- **Why:** everything above the seam already runs as it will with a real camera, including its calibration, and the
+  margins assume a D455's noise. Driver code that has never seen the device would be the part most likely wrong.

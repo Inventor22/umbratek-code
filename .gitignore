@@ -142,3 +142,6 @@ cell/
 
 # Frames the twin's snapshot command writes by default (python -m brain.twin snapshot)
 twin-frames/
+
+# The board image perception's board command writes by default (python -m brain.perception board)
+board.png

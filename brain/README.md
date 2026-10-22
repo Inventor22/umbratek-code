@@ -216,3 +216,110 @@ the suite so a better model shows up:
   0.92 s. The tool's position is right (within 0.26 mm); the joints lag mid-turn by up to 3.4 degrees.
 - **STOP at other speeds.** The STOP model is built from the one stop at 30 deg/s. At 10 deg/s (MT-2), the arm ran
   on 0.17 degrees after STOP, the model 0.06.
+
+## Perception (`brain/perception/`)
+
+Perception turns depth images from calibrated cameras into an obstacle map of the cell in the arm's base frame, with
+the arm, its tool, its base, the cart and the floor left out (the planner has those from the repo), and serves it over
+HTTP. `docs/world-map.md` is the map's contract; `docs/decisions.md` D70 to D78 say why it is the way it is. It runs on
+the CPU (NumPy, SciPy, OpenCV), so it leaves the GPU to the planner and runs the same on Windows and in WSL2.
+
+- **The map** is one grid of 2 cm voxels over the arm's reach (x and y from -1.28 to 1.28 m, z from -0.74 to 1.30 m:
+  128 x 128 x 102). Each frame carves out the space its camera sees past and marks the voxels its points land in;
+  evidence builds over frames, so a surface shows after 2 frames (3 where the space was seen empty) and an obstacle
+  that has gone clears after 4 frames seen empty. Up to 15 cm behind what a camera saw counts as solid ("hidden": the
+  back of an object a fixed camera can't see). The signed distance field (ESDF) the planner uses is worked out from
+  the map on request, in about 0.2 s.
+- **The arm** is left out by its own collision capsules, at the joints the controller reported in its 10 Hz status
+  stream around each frame (if it moved meanwhile, everywhere it was between them), grown by 25 mm and the depth's
+  noise. A frame is skipped if those status frames didn't all arrive on the stream's cadence (a stall, or the burst
+  after one). The active tool's capsules come from the cell folder (`--cell`, `cell/` by default) and are re-read
+  when it changes.
+- **Cameras** are calibrated with a ChArUco board: on the flange for a camera fixed in the cell, or fixed in the cell
+  for one on the flange. The camera's intrinsics are its own; its pose comes from 15 to 20 views of the board with the
+  arm's joints at each.
+
+### The environment
+
+Its own environment, beside the planner's, with the twin's pins too (`requirements.txt`) so the twin runs in it for the
+tests. In WSL2 (where it runs beside the planner), from the repo's root:
+
+```
+python3 -m venv ~/.venvs/umbratek-perception
+~/.venvs/umbratek-perception/bin/python -m pip install -r brain/perception/requirements.txt
+```
+
+On Windows: `py -3.12 -m venv brain\perception\.venv`, then `brain\perception\.venv\Scripts\python -m pip install -r
+brain\perception\requirements.txt`. `python -m brain.perception check` shows the versions and maps a frame of the twin.
+
+### Running it
+
+In WSL2, with the twin there too on `127.0.0.1` (as above; `python` meaning the environment's):
+
+```
+python -m brain.twin serve --scene brain/twin/scenes/example.json          # the simulated controller and cameras
+python -m brain.perception serve --twin http://127.0.0.1:30100 --camera overhead --status 127.0.0.1
+```
+
+The map is then at `http://127.0.0.1:8780/v1/map` for the planner in WSL2, and from Windows at the same address.
+`serve` takes `--camera` once per camera, `--calibration DIR` (each camera's `<camera>.json`, default
+`cell/perception/`), `--cell DIR`, `--host` and `--port`, `--voxel` and `--bounds` for another grid, `--fps` (frames
+a second per camera, default 5), `--noise` to give the twin's ideal depth a D455's noise, flying pixels and holes
+(`noise.py`), `--frames DIR` to replay saved frames (at the joints saved with them), and `--no-arm` when no camera
+can see the arm (a twin camera needs `--status` or `--no-arm`). A frame takes 70 to 100 ms on this PC's CPU, so one
+camera at 5 frames a second uses about half a core.
+
+To try it on the twin before calibrating anything: `python tests/perception_tests.py calibration_fixed` with
+`PERCEPTION_CALIBRATIONS=cell/perception` in the environment saves the calibrations it solves for the example scene's
+`overhead` camera (and two others) there, from views of a board the test moves with the twin's flange.
+
+### Calibrating a camera
+
+1. `python -m brain.perception board --out board.png` makes the board (6 x 4 squares of 60 mm, 360 x 240 mm). Print it
+   at 100 % and measure a square; give any other length as `--square-mm` (and `--marker-mm` scaled the same) below.
+   Mount it flat and rigid on the flange (a fixed camera), or in the cell (a camera on the flange).
+2. `python -m brain.perception calibrate capture --twin URL --camera NAME --status HOST --out views/NAME` watches the
+   controller's status stream and saves a view each time the arm rests 0.6 s at a new pose. Move the arm through 15
+   to 20 poses where the camera sees the whole board, at different distances and tilted up to 30 degrees each way: a
+   taught program with a wait at each pose, or the jog panel. It never moves the arm. It won't add to a folder that
+   already holds views unless told to (`--append`): views of different set-ups mustn't mix.
+3. `python -m brain.perception calibrate solve views/NAME` (`--mount flange` for a camera on the flange) writes
+   `cell/perception/NAME.json` and prints the fit: the corners' error in pixels, the uncertainty, views it dropped and
+   why (a view whose joints don't match its image), and how the depth at the board's corners agrees with it.
+
+In the twin, a fixed camera comes out within 0.5 mm and 0.05 degrees of its true pose, and the wrist camera's mount
+within 0.3 mm and 0.1 degrees (tolerance 2 mm and 0.2 degrees). On the arm, its kinematic accuracy, the joints'
+readings and the board's flatness add to that.
+
+### Real cameras
+
+None is connected yet, so none is supported: the twin's cameras are the only source (`--twin`), with saved frames
+(`--frames`). `sources.py` holds the seam: a source returns depth in metres aligned to colour, the colour image's
+intrinsics and distortion, and when it was taken; nothing else. An Intel RealSense D455 (or a D435i nearer than about
+0.6 m) would be a `CameraSource` over pyrealsense2, its USB attached to WSL2 with usbipd; the map's noise margins
+already assume a D455 (`voxelmap.Params`). A wrist RGB camera (an Arducam OV9782) calibrates with `--mount flange`;
+without depth it doesn't feed the map.
+
+### How it's verified
+
+`tests/perception_tests.py` (`python tests/run_all.py perception`) checks perception against the twin's ground truth
+(true camera poses, obstacle shapes, segmentation), which perception itself never reads:
+
+| What | Result | Tolerance |
+| ---- | ------ | --------- |
+| Every point the cameras see of the arm, against its capsules (12 poses, 2 cameras) | all inside | inside |
+| Calibration, board on the flange: 2 fixed cameras, 16 views each | 0.46 and 0.08 mm, 0.025 and 0.011 deg | 2 mm, 0.2 deg |
+| ... with the joints read 0.02 deg (1 sigma) off | 1.3 mm, 0.06 deg | 2 mm, 0.2 deg |
+| ... a view with J2 2 deg off | dropped, the rest 0.40 mm | dropped |
+| Calibration of the wrist camera's mount, the board on the table | 0.22 mm, 0.08 deg | 2 mm, 0.2 deg |
+| The command line's capture and solve, the arm moved through 10 poses live | 0.25 mm, 0.016 deg | 2 mm, 0.2 deg |
+| Occupied voxels on a true obstacle (within half a voxel's diagonal and 4 mm) | 100 %, the farthest 14.9 mm | 99.9 % |
+| The obstacles' seen surface in an occupied voxel or one touching it | 100 % | 99 % |
+| The arm in the map: at rest, 3 cm above the table, sweeping at up to 60 deg/s | 0 voxels | 0 |
+| ... with a D455's noise, and with twice that | 0 and 0; 100 % on obstacles, 100 % mapped | 0; 98 and 95 % |
+| ... for comparison, without leaving the arm out, or with joints 0.5 s stale | 2990 and 410 voxels | |
+| The ESDF at free voxels against the distance to the nearest seen surface | always less: by 3.2 mm at least, 77 mm on average | never more than 3 mm over |
+| An obstacle moved 0.6 m: frames (from each of 2 cameras) to clear and to show | 4 and 2 | 4 and 3 |
+| A lens's distortion: voxels outside the view, mapped by another camera, after 4 frames | all kept | all |
+| A status stall and the burst after it; frames replayed to the end | not bracketed, so skipped; still served | |
+| Live over HTTP: the planner's request, cuRoboV2's indexing of the ESDF, long poll, an obstacle added to the twin | as the contract says; 0.6 s to show | |
