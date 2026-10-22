@@ -362,3 +362,24 @@ Decided on the arm, 2026-10-21, before the program tests.
   every "ready" raised it again, freedrive was refused while it was flagged, and a move back was rejected. The
   procedure brought it back on the arm. It needs a person holding the joint and is rare, so it stays out of the
   panel; the README describes it.
+
+## D50. The simulator keeps time with a high-resolution clock and timer
+
+Wave 1 of the spine, brain and twin plan (`brain/README.md`), 2026-10-21. D50 to D59 are the twin's; the spine's
+side of the plan numbers its decisions from D40.
+- **Decision:** `tools/utra_sim.py` reads time from `time.perf_counter()` and, on Windows before Python 3.11, sleeps on
+  a high-resolution waitable timer (`CreateWaitableTimerExW` with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`, through
+  ctypes); elsewhere `time.sleep` already is one. Its status and config streams keep an absolute 100 ms schedule,
+  starting it afresh rather than sending a burst if the process was starved for more than a period. The sim suite
+  times the frames it receives with `perf_counter` too.
+- **Alternatives:** `timeBeginPeriod(1)` (1 ms granularity at best, for the whole process); spinning through the last
+  milliseconds (a busy core per stream, with three suites at once); requiring Python 3.13, whose `monotonic()` is
+  high-resolution on Windows (the repo supports 3.8 up).
+- **Why:** on Python 3.9 under Windows, `time.monotonic()` and `time.sleep()` both follow the 15.6 ms system tick,
+  so frames came 63 to 140 ms apart and the suite's "frame gaps 85 to 115 ms" check failed under load; and every
+  angle the simulator reported was worked out at a time up to 15.6 ms stale (0.5 deg at 30 deg/s), which the twin,
+  sampling the simulator, would have inherited. On this PC, ten seconds of frames timed at the receiver: before,
+  77 to 125 ms apart (5th to 95th percentile 92.7 to 111.2) idle, and a 5th percentile of 78 ms under load; after,
+  99.4 to 100.5 ms idle and 96.3 to 105.1 ms with 20 busy processes on 16 threads. On Linux and macOS nothing
+  changes. The command-to-motion latency the suite measures went from a median of 109 to 100 ms, inside D6's 94 to
+  109: the coarse tick had been starting moves up to 15.6 ms late.
