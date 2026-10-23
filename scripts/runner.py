@@ -25,12 +25,11 @@ What the brain proposes, the safety shell (safety.py) checks whole before anythi
 if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,
 and a STOP ends the run as stopped whatever the step was doing, waiting on the brain included.
 
-The runner (docs/capabilities.md P2-P5): start (from the top or a chosen step; run, step or dry run), pause (STOP,
-then resume re-plans the interrupted step from wherever the arm is), resume, stop, step, reset, speed override. It
-runs in its own thread, so a run carries on with the page closed; manual moves started from the page instead stop if
-the page goes quiet. Every event goes to cell/logs/<date>/<time>-<program>.jsonl, a file of each run's own: another
-run of the same program started in the same second gets <time>-<program>~2.jsonl, then ~3 and so on (new_log).
-Standard library only.
+The runner: start (from the top or a chosen step; run, step or dry run), pause (STOP, then resume re-plans the
+interrupted step from wherever the arm is), resume, stop, step, reset, speed override. It runs in its own thread, so a
+run carries on with the page closed; manual moves started from the page instead stop if the page goes quiet. Every
+event goes to cell/logs/<date>/<time>-<program>.jsonl, a file of each run's own: another run of the same program
+started in the same second gets <time>-<program>~2.jsonl, then ~3 and so on (new_log). Standard library only.
 """
 from __future__ import annotations
 

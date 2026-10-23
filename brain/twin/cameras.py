@@ -8,7 +8,8 @@ Conventions, as a depth camera's driver and most perception code have them:
   colour image; 0 means no data (nothing there, or outside the camera's near..far range). Saved, it's a 16-bit PNG in
   millimetres (depth_scale 0.001), as a RealSense writes it;
 - segmentation holds each pixel's MuJoCo geom id (-1 for none); Frame.labels names what each id is.
-What's modelled is an ideal camera: no noise, no holes at edges, no exposure. Noise belongs in perception's tests.
+What's modelled is an ideal camera: no noise, no holes at edges, no exposure. Noise belongs in the tests of what reads
+the frames.
 """
 from __future__ import annotations
 

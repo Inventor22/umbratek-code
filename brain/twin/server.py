@@ -1,4 +1,4 @@
-"""The twin's HTTP endpoint, so other processes (the brain, perception, the viewer, tests) can take camera frames, read
+"""The twin's HTTP endpoint, so other processes (a brain, the viewer, tests) can take camera frames, read
 its state and place obstacles while it runs. It listens on the twin's loopback address only (port 30100 by default)
 and, like the jog panel, refuses requests from web pages (any with an Origin header, or for another Host).
 

@@ -1,5 +1,5 @@
-"""The HTTP server class every HTTP server here is built on: the jog panel's, the brains' (the stub's and the
-planner's), the twin's and perception's. All of them listen on this PC's loopback addresses only.
+"""The HTTP server class every HTTP server here is built on: the jog panel's, the stub brain's and the twin's. All of
+them listen on this PC's loopback addresses only.
 
 It's http.server's ThreadingHTTPServer, without the reverse DNS lookup that class makes when it binds.
 HTTPServer.server_bind asks for its address's name (socket.getfqdn), only to keep it as server_name, which none of

@@ -489,8 +489,8 @@ def verify(twin):
     c = capture(twin)
     raw, fit = c["raw"].summary(), c["fitted"].summary()
     settle = ("the real joints settle to within 0.05 deg of their targets and hold within 0.005 deg "
-              "(docs/capabilities.md, section 1); the simulator models neither the settle nor the servos' steady "
-              "offset")
+              "(measured in the capture of 2026-10-21, data/captures/2026-10-21); the simulator models neither the "
+              "settle nor the servos' steady offset")
     check(f"capture, whole session ({c['frames']} frames): at rest, joints, median", raw["rest"]["joints_deg"]["median"],
           0.01, "deg", settle)
     check("capture: at rest, joints, 95th percentile", raw["rest"]["joints_deg"]["p95"], 0.06, "deg", settle)

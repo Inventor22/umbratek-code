@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A stub brain: a stand-in for the real one (perception, a world model, cuRobo's planner and learned skills) that
+"""A stub brain: a stand-in for a real one (perception, a world model, a motion planner and learned skills) that
 speaks the spine's interface, version 1 (docs/brain-interface.md), so planned and learned steps run end to end now.
 
     python brain/stub/stub_brain.py            # serves http://127.0.0.1:8770, where the jog server looks by default
@@ -10,7 +10,7 @@ keep-out zones (scripts/utra_model.py and planner.py): straight there if that's 
 poses with the tool point raised above the start and the goal; else through random via points; giving up when its
 time is nearly out. It has one learned skill, "seek", a scripted stand-in for a policy: it spirals the tool point out
 from where the step began, a few millimetres a burst, until an input goes high. Standard-library Python, like the
-spine, whose modules it imports for the protocol and the arm's geometry; the real brain has its own environment
+spine, whose modules it imports for the protocol and the arm's geometry; a real brain has an environment of its own
 (brain/README.md).
 
 --ignore-zones plays a buggy brain whose world model has lost the cell's keep-out zones: its paths go straight through

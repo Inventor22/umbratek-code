@@ -3,6 +3,10 @@
 Decisions made during the overnight run of 2026-10-21, while the owner was asleep and couldn't be asked. Each has the
 alternatives considered and why this one won. Later entries may revise earlier ones; they say so.
 
+The machine-tending specification (`docs/capabilities.md`), the map contract (`docs/world-map.md`), the planner
+(`brain/planner/`) and perception (`brain/perception/`), with their suites and the twin's obstacle clip, are no longer
+in this repo. The entries that cite them, D60 to D79 among them, are kept as they were written.
+
 ## D1. Layout: `tools/` for the simulator and capture tools, `tests/` for the suites, `data/captures/` for raw data
 
 - **Decision:** `tools/utra_sim.py`, `tools/capture/{capture.py, line_check.mjs, settings_probe.py}`, the suites and

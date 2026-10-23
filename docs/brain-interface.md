@@ -44,8 +44,8 @@ The interface in code:
   because the spine treats every reply as untrusted, and the shell checks all of it.
 - **Deadlines.** Connecting must succeed within 1 s (on loopback a listening brain takes the connection at once).
   `hello` must be answered within 2 s, `plan` within 10 s (`--brain-timeout`; a planner's first call can be slow, as
-  cuRobo's is while it compiles its kernels), `act` within 2 s, `end` within 1 s. A reply that's late, an HTTP status
-  other than 200, or no connection, is no answer: the step faults, saying so.
+  a GPU planner's is while it compiles its kernels), `act` within 2 s, `end` within 1 s. A reply that's late, an HTTP
+  status other than 200, or no connection, is no answer: the step faults, saying so.
 - **Abandoning.** While the spine waits, a STOP or a pause abandons the question at once. The reply, if it comes, is
   dropped: the next question has a new id.
 

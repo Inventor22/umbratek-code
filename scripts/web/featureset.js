@@ -1,6 +1,6 @@
 // The jog panel's Program, Teach and Cell sections: running programs on the server (Run, Step, Dry run, Pause,
 // Stop run, Reset and the speed override), editing their steps, teaching targets in freedrive, and setting up the
-// cell's tools, frames, targets and keep-out zones. The server keeps and checks all of it (docs/capabilities.md);
+// cell's tools, frames, targets and keep-out zones. The server keeps and checks all of it (docs/programs.md);
 // this module shows it and sends the operator's requests. It builds on the panel's own script through
 // window.jogPanel and runs after it.
 const P = window.jogPanel;
