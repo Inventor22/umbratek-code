@@ -8,6 +8,9 @@
   and back-projecting depth onto known surfaces;
 - its coupling to tools/utra_sim.py: on a virtual clock, fed the SDK's own bytes, and live, served from the twin's
   process and driven through the SDK, with frames and state over HTTP;
+- every HTTP server here (the jog panel's, the stub brain's and the twin's) binding without a reverse DNS lookup, each
+  made in its own environment with socket's lookups recorded, and no module but scripts/loopback_http.py using
+  http.server's own server classes;
 - camera frames off the loop: snapshots of the twin rendered in a process of their own, pixel for pixel the twin's
   own frames, and the loop's 10 ms cadence and the controller's 10 Hz status held while frames are pulled;
 - the viewer (brain/twin/viewer.py): following the twin from a process of its own, read-only, through moves,
@@ -36,7 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
-from simrig import HOST, log_path, wait_port  # noqa: E402
+from simrig import HOST, PY, log_path, wait_port  # noqa: E402
 
 import numpy as np  # noqa: E402
 
@@ -537,6 +540,116 @@ def live():
         proc.wait()
 
 
+# ---- every HTTP server here: none asks DNS for its address's name when it binds -----------------------------------
+
+BIND_PROBE = """
+import json, socket, sys, time
+from http.server import BaseHTTPRequestHandler
+sys.path[:0] = {paths!r}
+asked, real = [], (socket.getfqdn, socket.gethostbyaddr)
+
+
+def getfqdn(name=""):
+    asked.append(name)
+    return name
+
+
+def gethostbyaddr(address):
+    asked.append(address)
+    return address, [], [address]
+
+
+ADDRESS = ({host!r}, 0)
+{make}
+socket.getfqdn, socket.gethostbyaddr = getfqdn, gethostbyaddr  # a lookup is recorded, not made
+server, close = make()
+bound = list(server.server_address[:2])
+close()
+socket.getfqdn, socket.gethostbyaddr = real
+took = None
+if {timed!r}:  # again, as it is: with no lookup, binding takes milliseconds even where DNS doesn't answer
+    t0 = time.perf_counter()
+    server, close = make()
+    took = time.perf_counter() - t0
+    close()
+print(json.dumps({{"asked": asked, "bound": bound, "took": took}}))
+"""
+# (whose, which environment ("spine": the Python under test; "brain": this suite's), how it's made: make() returns the
+# HTTPServer and what stops it)
+HTTP_SERVERS = (
+    ("the jog panel's (scripts/loopback_http.py's Server, which its main() makes)", "spine",
+     "import loopback_http\ndef make():\n    s = loopback_http.Server(ADDRESS, BaseHTTPRequestHandler)\n"
+     "    return s, s.server_close"),
+    ("the stub brain's", "spine", "import stub_brain\ndef make():\n"
+     "    s = stub_brain.Server(ADDRESS, BaseHTTPRequestHandler)\n    return s, s.server_close"),
+    ("the twin's", "brain", "from brain.twin import server as m\ndef make():\n"
+     "    s = m.TwinServer(None, *ADDRESS)\n    return s.httpd, s.close"),
+)
+STDLIB_SERVER = ("http.server's own ThreadingHTTPServer", "spine", "from http.server import ThreadingHTTPServer\n"
+                 "def make():\n    s = ThreadingHTTPServer(ADDRESS, BaseHTTPRequestHandler)\n    return s, s.server_close")
+
+
+def bind_probe(env, make, timed):
+    """Makes a server in its own environment, on HOST, with socket's reverse lookups recorded instead of made: (what
+    it asked for, where it bound, how long it took to make again with them as they are), or the failure."""
+    exe = {"spine": PY, "brain": sys.executable}[env]
+    paths = [ROOT, os.path.join(ROOT, "scripts"), os.path.join(ROOT, "brain", "stub")]
+    r = subprocess.run([exe, "-c", BIND_PROBE.format(paths=paths, host=HOST, make=make, timed=timed)], cwd=ROOT,
+                       capture_output=True, text=True, timeout=180)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1]), None
+    except (IndexError, ValueError):
+        return None, (r.stdout + r.stderr)[-1500:]
+
+
+def stdlib_http_users():
+    """The modules of scripts/, tools/ and brain/ (not the environments kept in them) that name http.server's
+    HTTPServer or ThreadingHTTPServer, other than scripts/loopback_http.py; and how many modules were read."""
+    import ast
+    skip = {"__pycache__", "node_modules", "vendor", "site-packages", "env", "venv", "ENV"}
+    own = os.path.join(ROOT, "scripts", "loopback_http.py")
+    named, read = [], 0
+    for top in ("scripts", "tools", "brain"):
+        for folder, dirs, files in os.walk(os.path.join(ROOT, top)):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in skip]
+            for f in sorted(files):
+                path = os.path.join(folder, f)
+                if not f.endswith(".py") or path == own:
+                    continue
+                with open(path, "rb") as fh:
+                    tree = ast.parse(fh.read(), path)
+                read += 1
+                names = set()
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Name):
+                        names.add(node.id)
+                    elif isinstance(node, ast.Attribute):
+                        names.add(node.attr)
+                    elif isinstance(node, ast.ImportFrom):
+                        names.update(a.name for a in node.names)
+                if names & {"HTTPServer", "ThreadingHTTPServer"}:
+                    named.append(os.path.relpath(path, ROOT))
+    return named, read
+
+
+def servers():
+    print(f"== every HTTP server here binds without asking DNS for its address's name, as http.server's own does "
+          f"(where DNS doesn't answer, in WSL2 with a VPN on, that takes 10 s): each made on {HOST} in its own "
+          f"environment")
+    for whose, env, make in HTTP_SERVERS:
+        out, why = bind_probe(env, make, True)
+        check(f"{whose} binds on {HOST} without asking for its name"
+              + (f" (made again with DNS as it is: {out['took'] * 1000:.0f} ms)" if out else ""),
+              out is not None and out["asked"] == [] and out["bound"][0] == HOST, why or out)
+    whose, env, make = STDLIB_SERVER
+    out, why = bind_probe(env, make, False)
+    check(f"{whose}, for comparison, asks for {HOST}'s name: the probe sees a lookup where there is one",
+          out is not None and HOST in out["asked"], why or out)
+    named, read = stdlib_http_users()
+    check(f"no other module serves HTTP with http.server's own server classes: of the {read} modules of scripts/, "
+          f"tools/ and brain/, only scripts/loopback_http.py names them", read >= 30 and not named, (read, named))
+
+
 # ---- off the loop: snapshots, and camera frames in a process of their own ----------------------------------------
 
 def heartbeat_during(fn):
@@ -689,8 +802,8 @@ def spread(gaps):
 
 
 class Puller:
-    """Pulls camera frames over HTTP as perception does, `rate` frames a second (None: one after another), while `on`
-    is set."""
+    """Pulls camera frames over HTTP as a perception client would, `rate` frames a second (None: one after another),
+    while `on` is set."""
 
     def __init__(self, path, rate=None):
         self.on, self.lock = threading.Event(), threading.Lock()
@@ -771,7 +884,7 @@ def cadence():
         check(f"so the first frame asked for takes {took * 1000:.0f} ms", code == 200 and took < 1.0, (code, took))
         status = StatusTimes()
         for label, least, make in (
-                ("perception's load, one camera's .npz (with segmentation) 5 times a second", 25,
+                ("a perception client's load, one camera's .npz (with segmentation) 5 times a second", 25,
                  lambda: [Puller("/cameras/overhead.npz", 5)]),
                 ("frames one after another from two clients, .npz and PNG", 30,
                  lambda: [Puller("/cameras/overhead.npz"), Puller("/cameras/wrist/rgb.png")])):
@@ -815,7 +928,7 @@ def cadence():
         q = lambda f: gaps[min(len(gaps) - 1, int(round(f * (len(gaps) - 1))))]  # noqa: E731
         check(f"meanwhile the simulated controller's status came at 10 Hz: {len(gaps) + 1} frames, 5th to 95th "
               f"percentile {q(0.05):.1f} to {q(0.95):.1f} ms apart (within 85 to 115), all {gaps[0]:.1f} to "
-              f"{gaps[-1]:.1f} (perception counts a stream on time within 50 to 150)", len(gaps) > 200
+              f"{gaps[-1]:.1f} (within 50 to 150: none stalled, none bunched)", len(gaps) > 200
               and q(0.05) > 85 and q(0.95) < 115 and gaps[0] >= 50 and gaps[-1] <= 150, gaps)
     finally:
         end(proc)
@@ -824,7 +937,8 @@ def cadence():
 # ---- live: frames taken as the arm sweeps ------------------------------------------------------------------------
 
 def frames_in_time():
-    print("== frames pulled as the arm sweeps: each taken between its request and its reply, as perception assumes")
+    print("== frames pulled as the arm sweeps: each taken between its request and its reply, so the joints read around "
+          "a request say where the arm was in its frame")
     proc, up = twin_process("twin_frames_in_time.log")
     if not up:
         return
@@ -1161,7 +1275,7 @@ def replays():
     twin.close()
 
 
-SECTIONS = (model_from_sources, cell_parts, obstacles, cameras, coupling_virtual, live, off_the_loop, cadence,
+SECTIONS = (model_from_sources, cell_parts, obstacles, cameras, coupling_virtual, live, servers, off_the_loop, cadence,
             frames_in_time, viewer_follows, viewer_process, replays)
 
 

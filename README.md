@@ -44,11 +44,9 @@ In Tool mode, drag an arrow to slide the tool along X, Y or Z, or a ring to turn
 
 Hold for freedrive, guide the arm by hand, and press Record here at each pose: it joins the program as a move. The server runs programs itself, with straight lines, waits, I/O and steps the brain plans, and checks every move before it's sent. More in [programs, teaching and the cell](docs/programs.md).
 
-### Plan around what a camera sees
+### Ask a brain for paths and skills
 
-![In the twin, a planned move goes straight; a crate appears that only a camera sees; the next plan goes over it](docs/media/obstacle.gif)
-
-A planned move asks the brain, a separate process, for its path. Here the brain is the planner (NVIDIA cuRobo, in WSL2), planning on perception's obstacle map from the twin's depth camera: a crate that no keep-out zone or model describes appears, and the next plan goes over it. The jog server checks the brain's path, whole, before anything moves. More in [the brain's README](brain/README.md), whose "Try it" runs this.
+A planned move asks the brain, a separate process, for its path, and a learned skill for its next short burst of motion. The jog server checks every answer, whole, before anything moves (joint limits, collisions with the arm, its cart, the floor, the tool and the keep-out zones, and that the arm is still where the brain was told it was), refuses it with its reasons if any part fails, and caps its speed. The stub brain (`python brain/stub/stub_brain.py`, standard library only) is the example: it plans straight there or up and over what's in the way, and has one scripted skill. More in [the brain interface](docs/brain-interface.md) and [the brain's README](brain/README.md).
 
 ## Safety
 
@@ -66,9 +64,9 @@ A planned move asks the brain, a separate process, for its path. Here the brain 
 | [Controlling the arm from Python](docs/python.md) | `scripts/arm.py` and Umbratek's SDK |
 | [Troubleshooting](docs/troubleshooting.md) | No arm found, E-stop and servo errors, network clashes, a joint past its limit |
 | [What's where](docs/repo-layout.md) | Every folder and file in this repo |
-| [The brain](brain/README.md) | The stub brain, the twin, perception and the planner, and how to try them |
+| [The brain](brain/README.md) | The stub brain and the twin, and how to try them |
 | [Tests and the simulator](tests/README.md) | The suites, their environments, and `tools/utra_sim.py` |
-| [Specification](docs/capabilities.md) and [decisions](docs/decisions.md) | The machine-tending featureset, and why it's built the way it is |
+| [Decisions](docs/decisions.md) | Why it's built the way it is |
 | [The pictures](tools/media/README.md) | How the pictures above are filmed, and how to film them again |
 
 CAD for the mounting plate and gripper, and the UTRA quick start guide, are in [Inventor22/umbratek-cad](https://github.com/Inventor22/umbratek-cad).

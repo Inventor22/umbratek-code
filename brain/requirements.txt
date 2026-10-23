@@ -1,5 +1,5 @@
-# The brain's environment: everything with heavy dependencies lives here, apart from the spine's standard-library
-# Python. For now that's the twin (brain/twin: MuJoCo); wave 2 adds the planner (cuRobo, in WSL2) and perception.
+# The brain's environment: everything here with heavy dependencies, apart from the spine's standard-library Python.
+# That's the twin (brain/twin: MuJoCo).
 #
 #   Windows:  py -3.12 -m venv brain\.venv
 #             brain\.venv\Scripts\python -m pip install -r brain\requirements.txt

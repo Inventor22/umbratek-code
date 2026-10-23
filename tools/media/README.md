@@ -1,8 +1,8 @@
 # The README's pictures
 
 The GIFs and the still in `docs/media/` are filmed from the real software, never the real arm: the jog panel and its
-server against the simulator (`tools/utra_sim.py`), and the twin, perception and the planner in WSL2. The scripts here
-make them, so they can be made again whenever the panel changes.
+server against the simulator (`tools/utra_sim.py`). The scripts here make them, so they can be made again whenever the
+panel changes.
 
 | File | What it shows | Made by |
 | ---- | ------------- | ------- |
@@ -10,7 +10,6 @@ make them, so they can be made again whenever the panel changes.
 | `jog.gif` | Hold Enable; three clicks of J1's +; J2's and J3's rings dragged to plan a pose; Move | `capture_panel.py jog` |
 | `tool.gif` | Tool mode: the gizmo's Z and X arrows dragged, a turn about Z, then Move | `capture_panel.py tool` |
 | `teach.gif` | Hold for freedrive; the arm moved by the simulator's "hand" and recorded twice; leave freedrive; Run | `capture_panel.py teach` |
-| `obstacle.gif` | In the twin: a planned move goes straight; a crate appears; perception maps it from the overhead camera; the next plan goes over it | `capture_twin.py` |
 
 ## The environment
 
@@ -23,17 +22,11 @@ tools\media\.venv\Scripts\python -m pip install -r tools\media\requirements.txt
 tools\media\.venv\Scripts\python -m playwright install chromium
 ```
 
-The obstacle clip also needs WSL2 with the brain's, perception's and the planner's environments, and port 502 open to
-unprivileged processes there (`brain/README.md`). The first time, it calibrates the twin's overhead camera by
-perception's own procedure, a minute or two more.
-
 ## Making them
 
 ```
 tools\media\.venv\Scripts\python tools\media\capture_panel.py          # hero.png, jog.gif, tool.gif and teach.gif (a few minutes)
 tools\media\.venv\Scripts\python tools\media\capture_panel.py tool     # or just the ones named
-tools\media\.venv\Scripts\python tools\media\capture_twin.py           # obstacle.gif (a few minutes)
-tools\media\.venv\Scripts\python tools\media\capture_twin.py --frames-only   # the GIF again from the last recording
 ```
 
 Each prints its pictures' sizes, and flags a GIF over 3 MB. Look at them before committing: a change to the panel's
@@ -57,16 +50,3 @@ from the page).
   one palette for the clip and ordered dither, so what doesn't move costs almost nothing. The desktop layout is
   filmed at 1440 x 820 CSS pixels drawn at two thirds, 960 pixels wide; the tool clip at 960 CSS pixels, one column,
   cropped to the 3D view.
-- **The twin's** (`capture_twin.py`): it runs `twin_chain.py` in WSL2 through `wsl.exe`. `record` starts the twin
-  (the example scene's table and overhead camera, and the pointer tool), the jog server, perception and the planner
-  (`--world map`), each in its own environment, with the twin, the map and the planner on `127.0.0.202` (ports 502,
-  30001, 30003, 30099 and 30100; 8963; 9962) and the jog server on `127.0.0.1:8962` inside WSL2, clear of the ports
-  of a twin, perception or planner already running there. It runs a program whose middle step is a planned move,
-  adds a crate to the twin alone, waits until perception's map shows it, and runs the program back; nothing tells the
-  planner or the jog server about the crate. It records the twin's joints, the map's voxels above the table and the
-  planner's plans, and fails if the twin saw the arm touch anything. `render` puts the twin back through the recording
-  and draws it from a scene camera (MuJoCo, on the GPU through EGL), with the planner's latest path in amber, the one
-  before in grey, the map's voxels in blue, the overhead camera's view, and that camera's own picture for the inset.
-  Where the arm stands still for more than 2 s while the planner thinks, the clip runs four times faster, as its
-  caption bar says. The recording, the frames and the camera's calibration stay in `--work` (by default
-  `%TEMP%\umbratek-media-twin`).

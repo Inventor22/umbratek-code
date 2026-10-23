@@ -21,7 +21,7 @@ import brain_protocol as bp
 DEFAULT_URL = "http://127.0.0.1:8770"
 CONNECT_TIMEOUT_S = 1.0  # on loopback a listening brain takes the connection at once; Windows takes ~2 s to refuse
 HELLO_TIMEOUT_S = 2.0
-PLAN_TIMEOUT_S = 10.0  # a planner may take a while on its first call (cuRobo compiles its kernels then)
+PLAN_TIMEOUT_S = 10.0  # a planner may take a while on its first call (a GPU planner may compile its kernels then)
 ACT_TIMEOUT_S = 2.0  # a learned skill acts at 10 Hz or slower, so it must answer quickly
 END_TIMEOUT_S = 1.0
 HELLO_EVERY_S = 5.0  # how often the server asks who the brain is, for the panel

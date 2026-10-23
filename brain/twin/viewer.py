@@ -1,5 +1,5 @@
 """The twin's viewer: MuJoCo's own viewer on a running twin, from a process of its own, read-only. Run it on Windows,
-natively, while the twin runs in WSL2 (brain/README.md, "Try it"):
+natively, while the twin runs in WSL2 (brain/README.md, "Running it"):
 
     python -m brain.twin view --follow http://127.0.0.1:30100
     python -m brain.twin view --follow http://127.0.0.1:30100 --check 5     # the same for 5 s, without a window
