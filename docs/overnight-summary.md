@@ -35,8 +35,9 @@ plan's sheet; the data, with a timeline, in `data/captures/2026-10-21-tests/`.
   - STOP's overrun isn't a fixed time (16.6 ms at 10 °/s against 6.4 at 30).
   - Wi-Fi drops the stream for 3 s every 33 s (D38).
 - **An incident:** wrist 1 was turned by hand to its limit (358°) and faulted. Recovering it took releasing that one
-  brake and turning the joint by hand, now documented (D39, README). It went the wrong way first, by over a turn, to
-  762°. No damage showed (J5 and J6 kept answering), but have the wrist's cabling checked if anything misbehaves.
+  brake and turning the joint by hand, now documented (D39, `docs/troubleshooting.md`). It went the wrong way first,
+  by over a turn, to 762°. No damage showed (J5 and J6 kept answering), but have the wrist's cabling checked if
+  anything misbehaves.
 - **Open:** whether the status stream reports measured or commanded positions while moving. At 50% the tool sat on
   the line to 0.0001 mm, too perfect to be measured. Until it's settled, path straightness from the stream isn't
   evidence of the physical path. Arrival at rest is, since the brake settle and enable shift show in it.

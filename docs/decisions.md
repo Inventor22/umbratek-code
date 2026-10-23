@@ -201,7 +201,7 @@ and Retry/Fallback adopted for later, their reactive ticking rejected (D19).
 - **Alternatives:** leave tool steps unchecked, as before (the controller worked out their joint angles, so the panel
   couldn't check them).
 - **Why:** with zones and tools in the cell, an unchecked step could drive the tool into a fixture. A behaviour
-  change, in README.
+  change, in the README (since moved to `docs/jog-panel.md`, D80).
 
 ## D24. Calibration accuracy is judged statistically
 
@@ -361,7 +361,7 @@ Decided on the arm, 2026-10-21, before the program tests.
 - **Why:** wrist 1 turned by hand in freedrive to 358° faulted (error 23, "Mechanical angle limit"). From then on
   every "ready" raised it again, freedrive was refused while it was flagged, and a move back was rejected. The
   procedure brought it back on the arm. It needs a person holding the joint and is rare, so it stays out of the
-  panel; the README describes it.
+  panel; `docs/troubleshooting.md` describes it (the README did, until D80).
 
 ## D40 to D49: the spine and the brain
 
@@ -936,3 +936,30 @@ for the planner, and the cameras' calibration to the arm (`brain/README.md`, "Pe
 - **Alternatives:** a RealSense source written now, untested; using the twin's true pose until a camera arrives.
 - **Why:** everything above the seam already runs as it will with a real camera, including its calibration, and the
   margins assume a D455's noise. Driver code that has never seen the device would be the part most likely wrong.
+
+## D80 to D89: the README and its pictures
+
+Decided on 2026-10-22, shortening the README into a landing page with pictures of the software at work
+(`tools/media/README.md`).
+
+## D80. The README is a landing page; its sections moved, word for word, to pages in `docs/`
+
+- **Decision:** the README says what this is, shows it, gives a quick start (the simulator first) and keeps the
+  safety notes; everything else moved unchanged to `docs/connecting.md`, `docs/jog-panel.md`, `docs/programs.md`,
+  `docs/python.md`, `docs/troubleshooting.md` and `docs/repo-layout.md`, with only their pointers to each other
+  rewritten. Pointers into the old sections (`scripts/arm.py`'s messages, `DESIGN.md`, D23, D39, the specification)
+  name the new pages.
+- **Alternatives:** trimming the README in place; a documentation site (MkDocs and the like).
+- **Why:** at 33,000 characters with no pictures, the README buried what the software does. Moving the text
+  unchanged loses nothing and reviews as a move; plain Markdown pages need no tooling and read the same on GitHub.
+
+## D81. The pictures are filmed from the real software against the simulator and the twin, by committed scripts
+
+- **Decision:** the panel's GIFs are the real page and jog server, driven by Playwright with real mouse moves, against
+  `tools/utra_sim.py` (freedrive's hand is its control port's); the obstacle clip is the real chain (the twin,
+  perception, the planner and the jog server) recorded in WSL2 and drawn again from a scene camera. The scripts and
+  their environment are in `tools/media/`; each GIF is 960 pixels wide at 12.5 frames a second, under 3 MB.
+- **Alternatives:** screen recordings made by hand (can't be made again when the panel changes); mock-ups; filming the
+  real arm (needs the owner, and can't be scripted).
+- **Why:** the pictures show what the software does, and one command makes them again after a change. Nothing
+  touches the real arm: every process runs on loopback addresses of its own, clear of the owner's.
