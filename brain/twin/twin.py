@@ -68,12 +68,6 @@ class Snapshot:
         return {"seq": self.seq, "time": self.t, "revision": self.layout.revision,
                 "fingerprint": self.layout.fingerprint, "joints": self.joints().tolist(), "obstacles": self.obstacles()}
 
-    def apply(self, data):
-        """Puts this state into `data`, an MjData of the same build (call mj_forward after)."""
-        data.qpos[:] = self.qpos
-        data.mocap_pos[:] = self.mocap_pos
-        data.mocap_quat[:] = self.mocap_quat
-
 
 class Twin:
     def __init__(self, scene=None):

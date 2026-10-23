@@ -936,3 +936,83 @@ for the planner, and the cameras' calibration to the arm (`brain/README.md`, "Pe
 - **Alternatives:** a RealSense source written now, untested; using the twin's true pose until a camera arrives.
 - **Why:** everything above the seam already runs as it will with a real camera, including its calibration, and the
   margins assume a D455's noise. Driver code that has never seen the device would be the part most likely wrong.
+
+## D90 to D99: the twin's viewer and its cadence
+
+Decided on 2026-10-22 (night). Watching the twin in MuJoCo's viewer through WSLg, the owner found it "super slow.
+Just a handful of FPS", with "odd balls surrounding the geometry", and chose: "Make the twin's viewer smooth: a native
+Windows viewer, camera rendering off the main loop, and closing it no longer stops the twin". Newton was set aside:
+physics isn't the bottleneck (the twin follows `tools/utra_sim.py`), and in WSL2 its viewer would take the same WSLg
+path.
+
+## D90. The viewer is a process of its own that follows the twin over HTTP, read-only; on Windows, natively
+
+- **Decision:** `python -m brain.twin view --follow URL` opens MuJoCo's own viewer (its passive mode) in a process of
+  its own. It takes the model from the twin, `GET /model`: the generated MJCF and its meshes, which it checks against
+  the twin's fingerprint of them (a SHA-256 of both) and compiles. Then it follows the twin's state as the twin streams
+  it, `GET /pose/stream`: a JSON line for every step of the twin's 10 ms loop, with the arm's joints and every
+  obstacle's pose, fixed or free. When the fingerprint in the stream changes (the twin rebuilt its model: an obstacle
+  or a camera added or removed), it loads the new model into the same window and keeps the view. It makes GET requests
+  only. `serve --viewer` starts it as a child process. Closing it ends that process only; Ctrl+C stops the twin. In
+  the chain the twin runs headless in WSL2, and the viewer natively on Windows, from `brain\.venv`, through WSL2's
+  localhost forwarding.
+- **Alternatives:** the viewer in the twin's process, as it was (through WSLg, a few frames a second; closing it
+  ended the twin's loop and with it the simulated controller; and its rendering would share the twin's GIL, D91);
+  building the model on the viewer's side from the same scene and cell (the scene's paths are WSL2's, obstacles added
+  over HTTP would have to be described in full, and builds on Windows and Linux differ in the last digit of a few
+  numbers, from each C library's sin and cos, so a fingerprint couldn't confirm them the same); polling `GET /state`
+  (it runs on the loop and works out contacts and zone clearances: a hundred times a second would load the loop);
+  Newton's viewer (above).
+- **Why:** measured on this PC, the twin in WSL2 and the viewer on Windows: all 100 states a second arrive (with
+  Nagle's algorithm off on the twin's HTTP connections; with it on, 71 did), and MuJoCo's own counter reads 144 frames
+  a second, the screen's refresh rate with vertical sync on, while perception pulls frames and the arm moves. A frame
+  of the window costs about 4 ms on the RTX 3080 Ti. Closing the window as its close button does ends the viewer with
+  exit code 0, and the twin's controller, loop and HTTP carry on. The model shown is the twin's, byte for byte, and
+  the viewer can't change the twin: whatever is changed in its window (a joint slider, a perturbation) changes only
+  its own copy of the state.
+
+## D91. Camera frames are rendered in a process of their own, from snapshots of the loop
+
+- **Decision:** every step, the twin's loop publishes a snapshot of its state: copies of the joints, the free
+  obstacles and the mocap poses, with the build they belong to. A frame request waits for the first snapshot after it
+  arrived and hands it to the camera process (Python's multiprocessing, spawned, started with the first frame asked
+  for). That process has each build of the model, sent once and compiled there, and OpenGL contexts and an MjData of
+  its own; it renders the frame, encodes it (`.npz` or PNG) and sends back the bytes. One frame at a time; a process
+  that dies, or doesn't answer within 10 s, is replaced at the next frame. On Linux it keeps to the last quarter of
+  the CPUs. `/pose`, its stream and `/model` are answered from snapshots too; `/state` and the POSTs still run on the
+  loop, between its steps. `GET /loop` reports the loop's cadence.
+- **Alternatives:** a render thread with its own context in the twin's process (MuJoCo holds Python's GIL while it
+  loads a model onto the GPU, in `MjrContext`: 45 ms on Windows and 180 to 380 ms in WSL2, at the first frame and
+  after every rebuild, stalling the loop and the simulated controller's threads); rendering on the loop less often
+  (each frame would still hold it up 83 ms in WSL2); cheaper frames, without shadows or reflections (52 down to 11 ms
+  for the colour in WSL2, but the images perception is built against would change); confining the twin's loop to
+  some CPUs instead of the renderer (measured: it doesn't help, the renderer's threads still land on the loop's CPUs).
+- **Why:** rendered on the loop, as they were, perception's frames (5 a second) held it up about 40% of each second
+  in WSL2, 83 ms a frame. In an experiment with that arrangement, 95% of ticks came within 77.3 ms of the one before
+  in WSL2 (the worst 113.3) and within 18.8 ms on Windows (the worst 41.6). Now, with idle seconds interleaved for
+  comparison (`tests/twin_tests.py`; `brain/README.md` has the table), 99% of ticks come within 10.6 ms of the one
+  before under perception's load and with frames pulled back to back from two clients, on Windows and in WSL2, none
+  late, and the controller's status stays 99.6 to 100.4 ms apart (5th to 95th percentile). Across the boundary, with
+  perception itself pulling frames from the twin in WSL2: 2000 ticks in 20 s, 99% within 10.15 ms of the one before,
+  the worst 11.47. The frames are pixel for pixel what `Twin.render` gives. The CPUs: in WSL2 the GPU driver's work
+  delays other threads' wake-ups on the CPUs it runs on. With frames rendered back to back, a 10 ms loop in another
+  process had 99% of its ticks within 16.8 ms and the worst at 20.8; with the renderer kept to 4 of the 16 CPUs, 10.2
+  and 10.4 ms, the renderer making 57 frames in 6 s instead of 68.
+- **Known limits:** rebuilding the model (an obstacle or a camera added or removed) still runs on the loop. It pauses
+  the twin's following for about 50 ms on Windows and 170 to 200 ms in WSL2, once per change; the simulated
+  controller doesn't pause (the build releases the GIL), and moving an obstacle doesn't rebuild. Other processes' GPU
+  work in WSL2 isn't confined by this: while another twin rendered its viewer through WSLg beside it, a twin's idle
+  loop had 99% of its ticks within 21 ms.
+
+## D92. The viewer's markers are sized for the arm (`statistic meansize`), and the viewer keeps the model's look
+
+- **Decision:** the generated model sets `<statistic meansize="0.05">`, so the viewer draws centres of mass (key M)
+  as balls 40 mm across, and joint axes and frames 50 mm long. The viewer keeps the model's visual settings (a 4096
+  shadow map, reflections).
+- **Alternatives:** the compiler's own meansize, 0.40 m from the extents of the cart and the floor (the "odd balls":
+  centres of mass drawn 320 mm across, joined up by auto connect, key A); lighter viewer defaults (a smaller shadow
+  map).
+- **Why:** meansize scales only what the viewer draws to explain the model; cameras draw none of it (they render with
+  MuJoCo's default options, which leave it all out). Natively the shadow map costs nothing measurable: 4.4 and 3.7 ms
+  a frame at the window's size with a 4096 and a 2048 map, reading the pixels back included, which the window doesn't
+  do. The window keeps up with the screen, so nothing was taken away.

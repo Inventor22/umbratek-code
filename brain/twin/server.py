@@ -8,7 +8,7 @@ and, like the jog panel, refuses requests from web pages (any with an Origin hea
     GET  /cameras/<name>/rgb.png      the colour image
     GET  /cameras/<name>/depth.png    depth, uint16 millimetres
     GET  /pose                        the arm's joints (rad) and where every obstacle is ([x, y, z (m), qw, qx, qy, qz],
-                                      base frame), with the model's revision and the loop's step number (seq)
+                                      base frame), with the model's revision and fingerprint, and the loop's step (seq)
     GET  /pose/stream[?hz=N]          the same, one JSON line per step of the loop (100 a second), or at most N a second
     GET  /model                       the generated model: a zip of twin.xml, its meshes (assets/) and layout.json
                                       (revision, fingerprint, the scene it was built from)
@@ -201,6 +201,7 @@ class TwinServer:
 class _Handler(BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True  # /pose/stream's lines go out as they're written, not two or three at a time
 
     def log_message(self, fmt, *args):
         pass

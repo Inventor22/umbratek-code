@@ -177,7 +177,7 @@ def encode(frame, what):
 class CameraProcess:
     """Renders the twin's cameras in a process of its own, from the snapshots the twin's loop publishes
     (twin.Snapshot), so the loop never waits for a frame. Not a thread: MuJoCo holds Python's GIL while it uploads a
-    model to the GPU (MjrContext), for 45 ms on Windows and 300 ms in WSL2, which would stall the loop and the
+    model to the GPU (MjrContext), for 45 ms on Windows and 180 to 380 ms in WSL2, which would stall the loop and the
     simulated controller at every first frame and every rebuild (docs/decisions.md D91).
 
     The process starts with the first frame asked for. It's sent each build of the model once (the generated MJCF and
@@ -245,8 +245,9 @@ class CameraProcess:
         self.proc = self.conn = self.sent = None
 
     def pid(self):
-        with self.lock:
-            return self.proc.pid if self.proc is not None and self.proc.is_alive() else None
+        """The process's pid while it runs (read without waiting for a frame in progress), else None."""
+        proc = self.proc
+        return proc.pid if proc is not None and proc.is_alive() else None
 
     def close(self):
         with self.lock:
