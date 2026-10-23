@@ -45,6 +45,9 @@ alternatives considered and why this one won. Later entries may revise earlier o
   session's folder.
 - **Why:** they made `collision.json` and the cart URDF (described in each model's `SOURCE.txt`); the brief asked for
   the simulator, the test suites and the capture tools. They need SolidWorks and aren't tests.
+- **Later, 2026-10-23:** at the owner's request, the model-building scripts are in `tools/model/` after all, with the
+  two drafts they replaced, so the cart model and the capsules can be made again: that folder was their only copy.
+  Run again, they reproduce the committed files exactly (`tools/model/README.md`). The earlier probes stay out.
 
 ## D6. The simulator's motion model is fitted to the capture
 

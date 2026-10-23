@@ -4,6 +4,7 @@ Source: Dustin's SolidWorks assembly "UTRA 1000 Aluminum Extrusion Assembly.SLDA
 https://github.com/Inventor22/umbratek-cad (folder "Utra 1000", last changed in commit 1aec164),
 read with SolidWorks 2026 (3DEXPERIENCE R2026x) through its COM API, without saving anything back:
 one STL per component in assembly coordinates, plus each component's placement.
+Made by tools/model/sw_export2.py, sw_export3.py and build_cart2.py (tools/model/README.md).
 
 Frame: everything is in the arm's URDF base_link frame (z up; origin at the centre of the base's
 mounting face, where the base meets the mounting plate). The assembly's 1000-BASE part is lined up with
