@@ -1029,7 +1029,7 @@ path.
   first frame asked for instead, the process made perception's first frames wait for it, so in the planner suite's
   chain, under the full run's load, the crate showed in the map 7.3 s after perception served it, against 1.2 s
   before. Ready beforehand, the first frame takes 69 ms on Windows and 128 ms in WSL2, and so does the first after a
-  rebuild.
+  rebuild; in that chain the crate now shows 0.6 s after perception serves its map.
 - **Known limits:** rebuilding the model (an obstacle or a camera added or removed) still runs on the loop. It pauses
   the twin's following for about 50 ms on Windows and 170 to 200 ms in WSL2, once per change; the simulated
   controller doesn't pause (the build releases the GIL), and moving an obstacle doesn't rebuild. Other processes' GPU
