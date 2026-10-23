@@ -1002,12 +1002,13 @@ path.
 
 - **Decision:** every step, the twin's loop publishes a snapshot of its state: copies of the joints, the free
   obstacles and the mocap poses, with the build they belong to. A frame request waits for the first snapshot after it
-  arrived and hands it to the camera process (Python's multiprocessing, spawned, started with the first frame asked
-  for). That process has each build of the model, sent once and compiled there, and OpenGL contexts and an MjData of
-  its own; it renders the frame, encodes it (`.npz` or PNG) and sends back the bytes. One frame at a time; a process
-  that dies, or doesn't answer within 10 s, is replaced at the next frame. On Linux it keeps to the last quarter of
-  the CPUs. `/pose`, its stream and `/model` are answered from snapshots too; `/state` and the POSTs still run on the
-  loop, between its steps. `GET /loop` reports the loop's cadence.
+  arrived and hands it to the camera process (Python's multiprocessing, spawned). That process starts with the twin
+  and gets ready in the background: it's sent the model and compiles it, makes OpenGL contexts and an MjData of its
+  own, and renders each camera once; it does the same for each new build. For a frame it renders the snapshot's state,
+  encodes it (`.npz` or PNG) and sends back the bytes. One frame at a time; a process that dies, or doesn't answer
+  within 10 s, is replaced at the next frame. On Linux it keeps to the last quarter of the CPUs. `/pose`, its stream
+  and `/model` are answered from snapshots too; `/state` and the POSTs still run on the loop, between its steps.
+  `GET /loop` reports the loop's cadence.
 - **Alternatives:** a render thread with its own context in the twin's process (MuJoCo holds Python's GIL while it
   loads a model onto the GPU, in `MjrContext`: 45 ms on Windows and 180 to 380 ms in WSL2, at the first frame and
   after every rebuild, stalling the loop and the simulated controller's threads); rendering on the loop less often
@@ -1017,14 +1018,18 @@ path.
 - **Why:** rendered on the loop, as they were, perception's frames (5 a second) held it up about 40% of each second
   in WSL2, 83 ms a frame. In an experiment with that arrangement, 95% of ticks came within 77.3 ms of the one before
   in WSL2 (the worst 113.3) and within 18.8 ms on Windows (the worst 41.6). Now, with idle seconds interleaved for
-  comparison (`tests/twin_tests.py`; `brain/README.md` has the table), 99% of ticks come within 10.6 ms of the one
+  comparison (`tests/twin_tests.py`; `brain/README.md` has the table), 99% of ticks come within 10.5 ms of the one
   before under perception's load and with frames pulled back to back from two clients, on Windows and in WSL2, none
   late, and the controller's status stays 99.6 to 100.4 ms apart (5th to 95th percentile). Across the boundary, with
   perception itself pulling frames from the twin in WSL2: 2000 ticks in 20 s, 99% within 10.15 ms of the one before,
   the worst 11.47. The frames are pixel for pixel what `Twin.render` gives. The CPUs: in WSL2 the GPU driver's work
   delays other threads' wake-ups on the CPUs it runs on. With frames rendered back to back, a 10 ms loop in another
   process had 99% of its ticks within 16.8 ms and the worst at 20.8; with the renderer kept to 4 of the 16 CPUs, 10.2
-  and 10.4 ms, the renderer making 57 frames in 6 s instead of 68.
+  and 10.4 ms, the renderer making 57 frames in 6 s instead of 68. Getting ready as the twin starts: started with the
+  first frame asked for instead, the process made perception's first frames wait for it, so in the planner suite's
+  chain, under the full run's load, the crate showed in the map 7.3 s after perception served it, against 1.2 s
+  before. Ready beforehand, the first frame takes 69 ms on Windows and 128 ms in WSL2, and so does the first after a
+  rebuild.
 - **Known limits:** rebuilding the model (an obstacle or a camera added or removed) still runs on the loop. It pauses
   the twin's following for about 50 ms on Windows and 170 to 200 ms in WSL2, once per change; the simulated
   controller doesn't pause (the build releases the GIL), and moving an obstacle doesn't rebuild. Other processes' GPU

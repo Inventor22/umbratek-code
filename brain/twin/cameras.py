@@ -180,10 +180,11 @@ class CameraProcess:
     model to the GPU (MjrContext), for 45 ms on Windows and 180 to 380 ms in WSL2, which would stall the loop and the
     simulated controller at every first frame and every rebuild (docs/decisions.md D91).
 
-    The process starts with the first frame asked for. It's sent each build of the model once (the generated MJCF and
-    meshes, which it compiles itself), then, for each frame, the snapshot's state; it renders with OpenGL contexts of
-    its own and answers with the frame encoded as the request wants it. One frame at a time. If it fails or doesn't
-    answer within wait_s, it's stopped and the next frame starts another."""
+    The process starts as the twin starts serving, and warms up in the background (warm()): it's sent the model (the
+    generated MJCF and meshes, which it compiles itself), makes its OpenGL contexts and renders each camera once. So
+    does each new build. Then, for each frame, it's sent the snapshot's state; it renders with contexts of its own and
+    answers with the frame encoded as the request wants it. One frame at a time. If it fails or doesn't answer within
+    wait_s, it's stopped and the next frame starts another."""
 
     def __init__(self, wait_s=10.0):
         import importlib
@@ -197,6 +198,30 @@ class CameraProcess:
         self.proc = self.conn = None
         self.sent = None  # the twin.Layout the process has
         self.started = 0  # how many processes have been started
+        self.warmed = None  # the revision of the build the process last had ready, every camera rendered once
+
+    def warm(self, layout):
+        """Has the process ready for `layout` (a twin.Layout) before a frame is asked for: started, the model
+        compiled, its OpenGL contexts made and each camera rendered once. In the background: this returns at once, and
+        a frame asked for meanwhile waits its turn."""
+        threading.Thread(target=self._warm, args=(layout,), name="twin-cameras-warm", daemon=True).start()
+
+    def _warm(self, layout):
+        with self.lock:
+            if self.sent is not None and self.sent.revision > layout.revision:
+                return  # a later build got there first
+            try:
+                if self.proc is None or not self.proc.is_alive():
+                    self._start()
+                if self.sent is not layout:
+                    self._send_model(layout)
+                self.conn.send(("warm",))
+                if not self.conn.poll(3 * self.wait_s):
+                    raise TimeoutError(f"not ready within {3 * self.wait_s:g} s")
+                self.conn.recv()
+                self.warmed = layout.revision
+            except (OSError, EOFError):
+                self._stop()  # the next frame starts another
 
     def frame(self, snap, name, what):
         """The bytes of camera `name`'s frame, encoded as `what` ("npz", "rgb.png" or "depth.png", encode()), with the
@@ -210,8 +235,7 @@ class CameraProcess:
                     self._start()
                 layout = snap.layout
                 if self.sent is not layout:
-                    self.conn.send(("model", layout.built.xml, layout.built.assets, layout.built.cameras, layout.seen))
-                    self.sent = layout
+                    self._send_model(layout)
                 self.conn.send(("frame", name, what, snap.t, snap.qpos, snap.mocap_pos, snap.mocap_quat, layout.qadr))
                 if not self.conn.poll(self.wait_s):
                     raise TimeoutError(f"no frame within {self.wait_s:g} s")
@@ -224,6 +248,10 @@ class CameraProcess:
         if kind != "ok":
             raise RuntimeError(f"the twin's camera process: {body}")
         return body
+
+    def _send_model(self, layout):
+        self.conn.send(("model", layout.built.xml, layout.built.assets, layout.built.cameras, layout.seen))
+        self.sent = layout
 
     def _start(self):
         self._stop()
@@ -250,8 +278,15 @@ class CameraProcess:
         return proc.pid if proc is not None and proc.is_alive() else None
 
     def close(self):
-        with self.lock:
+        if not self.lock.acquire(timeout=5.0):  # a frame or a warm-up under way: end the process, so it ends too
+            proc = self.proc
+            if proc is not None:
+                proc.kill()
+            self.lock.acquire()
+        try:
             self._stop()
+        finally:
+            self.lock.release()
 
 
 def confine():
@@ -294,10 +329,22 @@ def serve_frames(conn):
                 try:
                     model = mujoco.MjModel.from_xml_string(xml, assets)
                     data = mujoco.MjData(model)
+                    mujoco.mj_forward(model, data)
                     cameras = Cameras(model)
                     failed = None
                 except Exception as e:  # said with every frame asked for, until a model compiles
                     failed = f"the model didn't compile: {e!r}"
+                continue
+            if message[0] == "warm":  # each camera once, so its renderer (an OpenGL context) is made and used
+                for spec in ([] if failed else specs.values()):
+                    try:
+                        cameras.render(data, spec)
+                    except Exception:  # the frame asked for will say what's wrong
+                        pass
+                try:
+                    conn.send(("warm", failed))
+                except (EOFError, OSError):
+                    return
                 continue
             _, name, what, t, qpos, mocap_pos, mocap_quat, qadr = message
             try:

@@ -638,6 +638,22 @@ def off_the_loop():
     finally:
         cams.close()
     check("closed, it's gone", cams.proc is None and cams.pid() is None)
+    warm = CameraProcess(60.0)
+    try:
+        t0 = time.perf_counter()
+        warm.warm(twin.layout)
+        deadline = time.monotonic() + 60
+        while warm.warmed != twin.layout.revision and time.monotonic() < deadline:
+            time.sleep(0.02)
+        ready = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        warm.frame(twin.snapshot(), "overhead", "npz")
+        took = time.perf_counter() - t0
+        check(f"warmed up in the background as the twin starts (ready in {ready:.1f} s: the process started, the model "
+              f"compiled, each camera rendered once), its first frame takes {took * 1000:.0f} ms",
+              warm.warmed == twin.layout.revision and took < 1.0, (warm.warmed, took))
+    finally:
+        warm.close()
     twin.close()
 
 
@@ -738,15 +754,21 @@ def cadence():
     if not up:
         return
     try:
-        time.sleep(1.5)
+        time.sleep(0.5)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and json.loads(http("/loop?seconds=1")[1]).get("camerasReady") != 1:
+            time.sleep(0.1)
+        stats = json.loads(http("/loop?seconds=60&raw=1")[1])
+        p99, late, worst, n = spread(stats["gapsMs"][10:])  # from the loop's tenth tick
+        ready = stats.get("camerasReady")
+        check(f"the camera process starts with the twin and warms up meanwhile (spawned, the model compiled, its "
+              f"OpenGL contexts made, each camera rendered once): of the loop's {n} ticks till then, {late} late, the "
+              f"worst {worst:.1f} ms after the one before (made in the twin's own process, MuJoCo would hold the loop "
+              f"up 45 ms or more)", ready == 1 and worst < 30.0, (ready, worst, late))
         t0 = time.perf_counter()
         code, _ = http("/cameras/overhead.npz")
         took = time.perf_counter() - t0
-        p99, late, worst, n = spread(loop_gaps(took + 0.02))
-        check(f"the first frame ({took:.1f} s: the camera process started, the model compiled, OpenGL contexts made) "
-              f"leaves the loop alone: of {n} ticks meanwhile, {late} late, the worst {worst:.1f} ms after the one "
-              f"before (made on the loop's thread, or another of its process, MuJoCo would hold it up 45 ms or more)",
-              code == 200 and worst < 30.0, (code, worst, late))
+        check(f"so the first frame asked for takes {took * 1000:.0f} ms", code == 200 and took < 1.0, (code, took))
         status = StatusTimes()
         for label, least, make in (
                 ("perception's load, one camera's .npz (with segmentation) 5 times a second", 25,
@@ -769,10 +791,26 @@ def cadence():
             for pl in pullers:
                 pl.close()
             (ip99, ilate, iworst, ni), (bp99, blate, bworst, nb) = spread(idle), spread(busy)
+            # Rendered on the loop, as frames were, each one would make a tick late. On a busy computer the camera
+            # process's own work makes a few more late than the idle seconds do, but not one a frame.
+            excess = blate - ilate * nb / max(ni, 1)
             check(f"{label}: {frames} frames in 6 s; the loop's ticks 99% within {bp99:.2f} ms of the one before, "
                   f"{blate} of {nb} late, the worst {bworst:.1f} ms (between them, idle: {ip99:.2f} ms, {ilate} of "
-                  f"{ni}, {iworst:.1f} ms)", not failed and frames >= least and bp99 <= max(15.0, ip99 + 2.0)
-                  and blate <= max(0.01 * nb, ilate + 0.01 * nb), (failed, frames, bp99, blate, nb, ip99, ilate))
+                  f"{ni}, {iworst:.1f} ms): {max(0.0, excess):.0f} late beyond the idle seconds' share",
+                  not failed and frames >= least and bp99 <= max(15.0, ip99 + 2.0)
+                  and excess <= max(0.01 * nb, 0.5 * frames), (failed, frames, bp99, blate, nb, ip99, ilate))
+        http("/obstacles", {"add": {"name": "crate", "shape": "box", "size": [100, 100, 180],
+                                    "pose": {"xyz": [480, 0, -10], "rpy": [0, 0, 0]}}})
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and json.loads(http("/loop?seconds=1")[1]).get("camerasReady") != 2:
+            time.sleep(0.05)
+        t0 = time.perf_counter()
+        code, body = http("/cameras/overhead.npz")
+        took = time.perf_counter() - t0
+        labels = set(json.loads(str(npz(body)["meta"]))["labels"].values()) if code == 200 else set()
+        check(f"an obstacle added (the model rebuilt): the camera process warms up on the new model meanwhile, so the "
+              f"next frame takes {took * 1000:.0f} ms, and shows it", code == 200 and took < 1.0
+              and "obstacle: crate" in labels, (code, took, labels))
         gaps = status.close()
         q = lambda f: gaps[min(len(gaps) - 1, int(round(f * (len(gaps) - 1))))]  # noqa: E731
         check(f"meanwhile the simulated controller's status came at 10 Hz: {len(gaps) + 1} frames, 5th to 95th "

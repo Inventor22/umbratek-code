@@ -13,7 +13,8 @@ and, like the jog panel, refuses requests from web pages (any with an Origin hea
     GET  /model                       the generated model: a zip of twin.xml, its meshes (assets/) and layout.json
                                       (revision, fingerprint, the scene it was built from)
     GET  /loop[?seconds=S][&raw=1]    the loop's cadence over the last S seconds (default 10): ticks, the gaps between
-                                      them and the work in each, in ms (raw: every gap); and the camera process's pid
+                                      them and the work in each, in ms (raw: every gap); the camera process's pid, and
+                                      the revision of the build it last had ready (camerasReady)
     POST /obstacles                   {"add": {obstacle}} | {"move": {"name", "pose", "frame"}} | {"remove": "name"}
     POST /cameras                     {"add": {camera}} | {"update": {"name", ...}} | {"remove": "name"}
 
@@ -108,6 +109,8 @@ class TwinServer:
         if twin is not None:
             self.publish(twin.snapshot())
         self.cameras = CameraProcess(WAIT_S)
+        if twin is not None:
+            self.cameras.warm(twin.layout)
         handler = type("Handler", (_Handler,), {"server_ref": self})
         self.httpd = loopback_http.Server((host, port), handler)
         self.httpd.daemon_threads = True
@@ -133,7 +136,8 @@ class TwinServer:
 
     def process(self, t, controller):
         """Called by the twin's loop: note the time and the controller's state, and run what the request threads
-        queued. After each job, what it changed is published before its request is answered."""
+        queued. After each job, what it changed is published before its request is answered, and a new build of the
+        model is sent to the camera process to warm up."""
         self.t, self.controller = t, controller
         while True:
             try:
@@ -141,6 +145,7 @@ class TwinServer:
             except queue.Empty:
                 return
             if future.set_running_or_notify_cancel():
+                layout = self.twin.layout
                 try:
                     result = fn(self.twin)
                 except Exception as e:  # handed back to the request
@@ -149,6 +154,8 @@ class TwinServer:
                 else:
                     self.publish(self.twin.snapshot())
                     future.set_result(result)
+                if self.twin.layout is not layout:
+                    self.cameras.warm(self.twin.layout)
 
     # ---- the requests' side ---------------------------------------------------------------------------------------
     def call(self, fn):
@@ -246,7 +253,8 @@ class _Handler(BaseHTTPRequestHandler):
                                                                  ("X-Twin-Fingerprint", layout.fingerprint)])
             if path == "/loop":
                 stats = s.cadence.stats(float(query.get("seconds", ["10"])[0]), query.get("raw", ["0"])[0] == "1")
-                return self._send(200, dict(stats, cameraProcess=s.cameras.pid(), ok=True))
+                return self._send(200, dict(stats, cameraProcess=s.cameras.pid(), camerasReady=s.cameras.warmed,
+                                            ok=True))
             if path.startswith("/cameras/"):
                 rest = path[len("/cameras/"):]
                 if rest.endswith(".npz"):

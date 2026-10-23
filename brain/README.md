@@ -158,7 +158,7 @@ does.
 | `GET /pose` | The arm's joints (rad) and where every obstacle is (`[x, y, z]` in m and a quaternion `[w, x, y, z]`, base frame), with the model's revision and fingerprint, and the loop's step number. |
 | `GET /pose/stream` | The same, one JSON line for every step of the loop (100 a second; `?hz=N` for at most N a second), until the client goes: what the viewer follows. |
 | `GET /model` | The generated model as a zip: `twin.xml`, its meshes (`assets/`) and `layout.json` (its revision and fingerprint, and the scene it was built from). |
-| `GET /loop` | The loop's cadence over the last 10 s (`?seconds=S`): how many ticks, the gaps between them and the work in each, in ms (`&raw=1`: every gap); and the camera process's pid. |
+| `GET /loop` | The loop's cadence over the last 10 s (`?seconds=S`): how many ticks, the gaps between them and the work in each, in ms (`&raw=1`: every gap); the camera process's pid, and the revision of the model it has ready (`camerasReady`). |
 | `POST /obstacles` | `{"add": {obstacle}}`, `{"move": {"name", "pose", "frame"}}` or `{"remove": "name"}`. |
 | `POST /cameras` | `{"add": {camera}}`, `{"update": {"name", ...}}` or `{"remove": "name"}`. |
 
@@ -213,11 +213,12 @@ As a depth camera's driver and most perception code have them:
   rendered; the arm, tool, cart, floor and obstacles are.
 
 A 640 x 480 frame takes about 5 ms (colour and depth) or 16 ms (with segmentation) on the RTX 3080 Ti, and about
-75 ms with segmentation in WSL2. Over HTTP, compressing included, an `.npz` frame takes about 70 ms on
-Windows and 120 ms in WSL2. Frames are rendered in a process of their own (the camera process, started with the
-first frame asked for), from a snapshot of the twin taken after the request arrives, and they're pixel for pixel what
-`Twin.render` gives in the twin's own process. That's for the twin's 10 ms loop: rendered on the loop, as they were,
-a frame held it up 83 ms in WSL2 (`docs/decisions.md` D91).
+75 ms with segmentation in WSL2. Over HTTP, compressing included, an `.npz` frame takes about 70 ms on Windows and
+120 ms in WSL2. Frames are rendered in a process of their own, the camera process. It starts with the twin and gets
+ready in the background (the model compiled, its OpenGL contexts made, each camera rendered once: about 1 s on
+Windows, 2 s in WSL2), and again after each rebuild. It renders from a snapshot of the twin taken after the request
+arrives, and its frames are pixel for pixel what `Twin.render` gives in the twin's own process. That's for the twin's
+10 ms loop: rendered on the loop, as they were, a frame held it up 83 ms in WSL2 (`docs/decisions.md` D91).
 
 ### How it's verified
 
@@ -229,14 +230,17 @@ twin's own, the loop's cadence while frames are pulled, the viewer, and the repl
 
 The cadence is checked against the loop's own record (`GET /loop`), with seconds of camera load interleaved with idle
 seconds, 6 of each, so the idle ones show what the computer itself does meanwhile. A tick is late when it comes more
-than 15 ms after the one before. Each figure is the suite's, run on Windows and, by hand, in WSL2:
+than 15 ms after the one before. Under load, the 99th percentile may be at most 2 ms worse than idle (or 15 ms), and
+late ticks beyond the idle seconds' share may number at most one for every two frames pulled. Rendered on the loop,
+as before, every frame made a tick late. Each figure is the suite's, run on Windows and, by hand, in WSL2:
 
 | What | Windows | WSL2 |
 | ---- | ------- | ---------- |
-| The loop under perception's load: one camera's `.npz` (with segmentation) 5 times a second | 99% of ticks within 10.44 ms of the one before, 0 of 593 late, the worst 10.5 ms (idle: 10.48, 0, 10.7) | 10.25 ms, 0 of 593, 10.5 ms (idle: 10.14, 0, 10.5) |
-| ... frames one after another from two clients (`.npz` and PNG) | 162 frames in 6 s; 10.55 ms, 0 of 627, 13.3 ms | 76 frames; 10.21 ms, 0 of 701, 10.4 ms |
-| ... the first frame: the camera process started, the model compiled, its OpenGL contexts made (1.4 and 1.6 s) | the worst tick 23.1 ms (10.4 to 14.5 over 6 more cold starts) | 12.9 ms |
-| The simulated controller's status meanwhile | 5th to 95th percentile 99.6 to 100.4 ms apart, all 97.2 to 102.5 | 99.8 to 100.2, all 99.7 to 100.3 |
+| The loop under perception's load: one camera's `.npz` (with segmentation) 5 times a second | 99% of ticks within 10.41 ms of the one before, 0 of 593 late, the worst 10.6 ms (idle: 10.49, 0, 10.8) | 10.11 ms, 0 of 594, 10.2 ms (idle: 10.10, 0, 10.2) |
+| ... frames one after another from two clients (`.npz` and PNG) | 165 frames in 6 s; 10.47 ms, 0 of 629, 10.9 ms | 77 frames; 10.15 ms, 0 of 675, 10.2 ms |
+| ... the camera process starting with the twin and getting ready | ready in about 1 s; the worst tick meanwhile 10.6 ms; the first frame then 69 ms | 1.7 s; 12.1 ms; 128 ms |
+| ... an obstacle added (the model rebuilt): the next frame | 77 ms, the obstacle in it | 121 ms |
+| The simulated controller's status meanwhile | 5th to 95th percentile 99.6 to 100.4 ms apart, all 98.5 to 101.3 | 99.8 to 100.2, all 98.9 to 101.2 |
 | For comparison: the loop with frames rendered on it, 5 a second (as before; an experiment) | 95% within 18.8 ms, worst 41.6 | 95% within 77.3 ms, worst 113.3 |
 
 The viewer is checked without a window: it follows a joint move at about 100 states a second, each on the
