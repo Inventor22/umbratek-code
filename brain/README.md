@@ -487,6 +487,10 @@ refused, the brain 0.67 to 1.19 s, the spine from starting the step to accepting
 
 ## Try it: a camera, the map and the planner, around an obstacle in the twin
 
+![In the twin, a planned move goes straight; a crate appears that only the overhead camera sees; perception maps it, and the next plan goes over it](../docs/media/obstacle.gif)
+
+(Filmed by `tools/media/capture_twin.py`, which runs this chain on addresses of its own: `tools/media/README.md`.)
+
 On this PC: the jog panel on Windows; the twin, perception and the planner in WSL2, each in its environment (above),
 from the repo's root (`/mnt/c/Users/Dustin/Documents/Github/umbratek-code` in WSL2). Only `127.0.0.1` crosses from
 Windows into WSL2, and only on ports Windows isn't using itself, so:

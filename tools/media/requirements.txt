@@ -1,0 +1,4 @@
+# The README's pictures (tools/media/README.md): Playwright films the jog panel in Chromium, Pillow composes the frames.
+# ffmpeg, which makes the GIFs, comes separately (on the PATH, or named by FFMPEG).
+playwright==1.64.1
+pillow==13.0.0
