@@ -22,11 +22,11 @@ plan's sheet; the data, with a timeline, in `data/captures/2026-10-21-tests/`.
   run, pause and resume, stop, a keep-out zone fault; line times within 1% of the plan), MT-7 (freedrive), MT-8
   (three points taught by freedrive, replayed at 20% and 50% within 0.26 mm) and MT-9 (a run with the page closed).
 - **The arm found four bugs, each fixed with a simulator test that reproduces it:**
-  - Line arrival was checked at 0.2 mm, but real lines rest up to 0.47 mm out (D32; 20ec65a).
-  - Enable opened extra status connections and ran out of the controller's five (D33; 20ec65a).
+  - Line arrival was checked at 0.2 mm, but real lines rest up to 0.47 mm out (D32; ee09263).
+  - Enable opened extra status connections and ran out of the controller's five (D33; ee09263).
   - Freedrive was entered in the wrong order. The controller stops the arm when the sensitivity is written and
-    ignores mode 2 while stopped (D34 to D37; 5b18aaf).
-  - The recorder missed a power cut, because a dead controller never closes the connection (5b18aaf).
+    ignores mode 2 while stopped (D34 to D37; cb22aab).
+  - The recorder missed a power cut, because a dead controller never closes the connection (cb22aab).
 - **Learned:**
   - Leaving freedrive switches the motors off, and J3 settles about 0.45° onto its brake.
   - Teach sensitivity is 90 to 110 % in Umbratek's current SDK, and 90 holds where released (D35).
@@ -48,12 +48,12 @@ plan's sheet; the data, with a timeline, in `data/captures/2026-10-21-tests/`.
 | ------ | ---- |
 | 1137f86, cb4882f | The simulator (`tools/utra_sim.py`), the suites (`tests/`, one runner `run_all.py`), the capture tools (`tools/capture/`) and the 2026-10-21 capture (`data/captures/`, byte for byte), with relative paths. The capture became regression fixtures (`tests/capture_tests.py`). |
 | feee832 | The simulator fitted to the capture: a jerk-limited profile, start delays, the queue count, STOP's 6.39 ms overrun and settle, the enable shift, port 30002 refused, the config stream, registers, GPIO, freedrive, collision detection, faults, and a control port for tests (D6 to D12). |
-| fb4b9ae | `docs/capabilities.md`: the controller's facts; the four jobs broken into steps; the capabilities they share; RAPID, UR, PLCopen and behaviour trees adopted or rejected; each capability with what the controller provides, what we build, acceptance and dependencies; what 10 Hz rules out; build order. |
-| 00075d1 | K1: server-side kinematics (`scripts/kinematics.py`), checked against Pinocchio and SciPy. |
-| 1e502ef | On the server: the cell (`cell.py`: tools, frames, targets, zones, calibration, re-mapping), planning (`planner.py`: joint and straight moves, offsets, zones, singularities, durations), supervised execution (`executor.py`), the program model and runner (`runner.py`), freedrive and teaching (`jog_server.py`), and their API. |
-| 078adb8 | In the panel: the Program, Teach and Cell sections (`scripts/web/featureset.js`), designed to DESIGN.md and reviewed; faulted steps drawn in the 3D view; the morning's tools (`tau_check.py`, `sensitivity.py`); a simulator bug fixed. |
-| 209ae3d | `docs/morning-test-plan.md`. |
-| 97f6be6 | Tests for the program model and the runner's states; the spec's acceptance text corrected to what the tests check; decisions D20 to D31. |
+| cd6f3f1 | `docs/capabilities.md`: the controller's facts; the four jobs broken into steps; the capabilities they share; RAPID, UR, PLCopen and behaviour trees adopted or rejected; each capability with what the controller provides, what we build, acceptance and dependencies; what 10 Hz rules out; build order. |
+| 5fa78a4 | K1: server-side kinematics (`scripts/kinematics.py`), checked against Pinocchio and SciPy. |
+| da948bc | On the server: the cell (`cell.py`: tools, frames, targets, zones, calibration, re-mapping), planning (`planner.py`: joint and straight moves, offsets, zones, singularities, durations), supervised execution (`executor.py`), the program model and runner (`runner.py`), freedrive and teaching (`jog_server.py`), and their API. |
+| 19efb0b | In the panel: the Program, Teach and Cell sections (`scripts/web/featureset.js`), designed to DESIGN.md and reviewed; faulted steps drawn in the 3D view; the morning's tools (`tau_check.py`, `sensitivity.py`); a simulator bug fixed. |
+| f095c64 | `docs/morning-test-plan.md`. |
+| f950aa6 | Tests for the program model and the runner's states; the spec's acceptance text corrected to what the tests check; decisions D20 to D31. |
 
 ## How each claim was verified
 
