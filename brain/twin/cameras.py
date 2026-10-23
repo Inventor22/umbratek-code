@@ -15,8 +15,10 @@ from __future__ import annotations
 import dataclasses
 import io
 import json
+import math
 import os
 import struct
+import threading
 import zlib
 
 import numpy as np
@@ -143,6 +145,228 @@ class Cameras:
         for r in self.renderers.values():
             r.close()
         self.renderers = {}
+
+
+def frame_of(cameras, data, spec, seen, t, joints_rad, segmentation=True):
+    """A Frame from camera `spec` in the state `data` (mj_forward'ed), rendered by `cameras` (a Cameras of the same
+    model). `seen` names what each geom is (Twin.seen), `t` and `joints_rad` stamp the frame."""
+    rgb, depth, seg, T = cameras.render(data, spec, segmentation)
+    labels = {}
+    if seg is not None:
+        for g in np.unique(seg):
+            if g >= 0 and seen[g]:
+                labels[int(g)] = seen[g]
+    return Frame(spec.name, t, rgb, depth, seg, spec.K, T, [math.degrees(v) for v in joints_rad], spec.near, spec.far,
+                 labels)
+
+
+FRAME_KINDS = {"npz": "application/octet-stream", "rgb.png": "image/png", "depth.png": "image/png"}
+
+
+def encode(frame, what):
+    """A Frame as the twin's HTTP endpoint sends it: "npz" (Frame.npz()), "rgb.png", or "depth.png" (uint16 mm)."""
+    if what == "npz":
+        return frame.npz()
+    if what == "rgb.png":
+        return png_bytes(frame.rgb)
+    if what == "depth.png":
+        return png_bytes(np.round(frame.depth * 1000.0).clip(0, 65535).astype(np.uint16))
+    raise ValueError(f"Unknown frame kind {what!r}.")
+
+
+class CameraProcess:
+    """Renders the twin's cameras in a process of its own, from the snapshots the twin's loop publishes
+    (twin.Snapshot), so the loop never waits for a frame. Not a thread: MuJoCo holds Python's GIL while it uploads a
+    model to the GPU (MjrContext), for 45 ms on Windows and 180 to 380 ms in WSL2, which would stall the loop and the
+    simulated controller at every first frame and every rebuild (docs/decisions.md D91).
+
+    The process starts as the twin starts serving, and warms up in the background (warm()): it's sent the model (the
+    generated MJCF and meshes, which it compiles itself), makes its OpenGL contexts and renders each camera once. So
+    does each new build. Then, for each frame, it's sent the snapshot's state; it renders with contexts of its own and
+    answers with the frame encoded as the request wants it. One frame at a time. If it fails or doesn't answer within
+    wait_s, it's stopped and the next frame starts another."""
+
+    def __init__(self, wait_s=10.0):
+        import importlib
+        import multiprocessing
+        import multiprocessing.connection
+        # Imported now, at the start: imports hold the GIL, and this one would otherwise be at the first frame.
+        importlib.import_module("multiprocessing.popen_spawn_" + ("win32" if os.name == "nt" else "posix"))
+        self.context = multiprocessing.get_context("spawn")  # never fork a process with threads (the simulator's)
+        self.wait_s = wait_s
+        self.lock = threading.Lock()
+        self.proc = self.conn = None
+        self.sent = None  # the twin.Layout the process has
+        self.started = 0  # how many processes have been started
+        self.warmed = None  # the revision of the build the process last had ready, every camera rendered once
+
+    def warm(self, layout):
+        """Has the process ready for `layout` (a twin.Layout) before a frame is asked for: started, the model
+        compiled, its OpenGL contexts made and each camera rendered once. In the background: this returns at once, and
+        a frame asked for meanwhile waits its turn."""
+        threading.Thread(target=self._warm, args=(layout,), name="twin-cameras-warm", daemon=True).start()
+
+    def _warm(self, layout):
+        with self.lock:
+            if self.sent is not None and self.sent.revision > layout.revision:
+                return  # a later build got there first
+            try:
+                if self.proc is None or not self.proc.is_alive():
+                    self._start()
+                if self.sent is not layout:
+                    self._send_model(layout)
+                self.conn.send(("warm",))
+                if not self.conn.poll(3 * self.wait_s):
+                    raise TimeoutError(f"not ready within {3 * self.wait_s:g} s")
+                self.conn.recv()
+                self.warmed = layout.revision
+            except (OSError, EOFError):
+                self._stop()  # the next frame starts another
+
+    def frame(self, snap, name, what):
+        """The bytes of camera `name`'s frame, encoded as `what` ("npz", "rgb.png" or "depth.png", encode()), with the
+        twin in the state `snap`. SceneError if there's no such camera; RuntimeError if the process failed."""
+        from .model import SceneError
+        if what not in FRAME_KINDS:
+            raise ValueError(f"Unknown frame kind {what!r}.")
+        with self.lock:
+            try:
+                if self.proc is None or not self.proc.is_alive():
+                    self._start()
+                layout = snap.layout
+                if self.sent is not layout:
+                    self._send_model(layout)
+                self.conn.send(("frame", name, what, snap.t, snap.qpos, snap.mocap_pos, snap.mocap_quat, layout.qadr))
+                if not self.conn.poll(self.wait_s):
+                    raise TimeoutError(f"no frame within {self.wait_s:g} s")
+                kind, body = self.conn.recv()
+            except (OSError, EOFError, TimeoutError) as e:  # the process died or hung: the next frame starts another
+                self._stop()
+                raise RuntimeError(f"the twin's camera process failed ({e!r})") from None
+        if kind == "missing":
+            raise SceneError(body)
+        if kind != "ok":
+            raise RuntimeError(f"the twin's camera process: {body}")
+        return body
+
+    def _send_model(self, layout):
+        self.conn.send(("model", layout.built.xml, layout.built.assets, layout.built.cameras, layout.seen))
+        self.sent = layout
+
+    def _start(self):
+        self._stop()
+        self.conn, child = self.context.Pipe()
+        self.proc = self.context.Process(target=serve_frames, args=(child,), name="twin-cameras", daemon=True)
+        self.proc.start()
+        child.close()
+        self.sent = None
+        self.started += 1
+
+    def _stop(self):
+        if self.conn is not None:
+            self.conn.close()
+        if self.proc is not None:
+            self.proc.join(timeout=2.0)
+            if self.proc.is_alive():
+                self.proc.kill()
+                self.proc.join()
+        self.proc = self.conn = self.sent = None
+
+    def pid(self):
+        """The process's pid while it runs (read without waiting for a frame in progress), else None."""
+        proc = self.proc
+        return proc.pid if proc is not None and proc.is_alive() else None
+
+    def close(self):
+        if not self.lock.acquire(timeout=5.0):  # a frame or a warm-up under way: end the process, so it ends too
+            proc = self.proc
+            if proc is not None:
+                proc.kill()
+            self.lock.acquire()
+        try:
+            self._stop()
+        finally:
+            self.lock.release()
+
+
+def confine():
+    """On Linux, keeps this process to the upper half of the CPUs it may use (from 4 CPUs up), for a process that
+    renders beside the twin's loop: the camera process, or a viewer in WSL2. In WSL2 the GPU driver's work delays
+    other threads' wake-ups on the CPUs it runs on: with frames rendered back to back, a 10 ms loop in another process
+    woke up to 10 ms late (99th percentile 16.8 ms, worst 20.8); with the renderer kept to 8 of 16 CPUs, at worst
+    10.4 ms. Kept to 4, the loop did no better and each frame took 17 ms longer (docs/decisions.md D91). Threads made
+    afterwards, the driver's included, inherit it. Returns the CPUs kept, or None."""
+    if not hasattr(os, "sched_setaffinity"):
+        return None
+    cpus = sorted(os.sched_getaffinity(0))
+    if len(cpus) < 4:
+        return None
+    keep = cpus[len(cpus) // 2:]
+    os.sched_setaffinity(0, keep)
+    return keep
+
+
+def serve_frames(conn):
+    """The camera process (CameraProcess): compiles each model it's sent, renders each frame it's asked for into an
+    MjData of its own, answers with its bytes. Ends when the twin's end of the pipe closes, the twin's exit included."""
+    confine()
+    import mujoco
+
+    from .model import SceneError
+    model = data = cameras = None
+    specs, seen, failed = {}, [], "no model yet"
+    try:
+        while True:
+            try:
+                message = conn.recv()
+            except (EOFError, OSError):
+                return
+            if message[0] == "model":
+                _, xml, assets, specs, seen = message
+                if cameras is not None:
+                    cameras.close()
+                model = data = cameras = None
+                try:
+                    model = mujoco.MjModel.from_xml_string(xml, assets)
+                    data = mujoco.MjData(model)
+                    mujoco.mj_forward(model, data)
+                    cameras = Cameras(model)
+                    failed = None
+                except Exception as e:  # said with every frame asked for, until a model compiles
+                    failed = f"the model didn't compile: {e!r}"
+                continue
+            if message[0] == "warm":  # each camera once, so its renderer (an OpenGL context) is made and used
+                for spec in ([] if failed else specs.values()):
+                    try:
+                        cameras.render(data, spec)
+                    except Exception:  # the frame asked for will say what's wrong
+                        pass
+                try:
+                    conn.send(("warm", failed))
+                except (EOFError, OSError):
+                    return
+                continue
+            _, name, what, t, qpos, mocap_pos, mocap_quat, qadr = message
+            try:
+                if failed:
+                    raise RuntimeError(failed)
+                spec = specs.get(name)
+                if spec is None:
+                    raise SceneError(f"There's no camera called {name!r}.")
+                data.qpos[:], data.mocap_pos[:], data.mocap_quat[:] = qpos, mocap_pos, mocap_quat
+                mujoco.mj_forward(model, data)
+                reply = ("ok", encode(frame_of(cameras, data, spec, seen, t, qpos[qadr], what == "npz"), what))
+            except SceneError as e:
+                reply = ("missing", str(e))
+            except Exception as e:
+                reply = ("error", repr(e))
+            try:
+                conn.send(reply)
+            except (EOFError, OSError):
+                return
+    finally:
+        if cameras is not None:
+            cameras.close()
 
 
 # ---- PNG, with the standard library and NumPy -----------------------------------------------------------------

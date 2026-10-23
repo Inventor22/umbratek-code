@@ -2,7 +2,8 @@
 
 Its model is generated from the repo's own sources (model.py), its joints follow tools/utra_sim.py, the controller's
 stand-in fitted to the real arm (coupling.py), and it renders RGB-D cameras with known intrinsics and true poses
-(cameras.py). brain/README.md says how to run it.
+(cameras.py), served over HTTP while it runs (server.py) and followed, read-only, by its viewer (viewer.py).
+brain/README.md says how to run it.
 """
 import os
 import sys

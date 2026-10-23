@@ -13,7 +13,7 @@ The arm's software is split three ways:
 
 This folder holds a stub brain that speaks the interface (standard-library Python, no environment needed), the brain's
 environment, and the twin. `docs/decisions.md` says why they are the way they are: D40 to D49 for the interface and
-the stub, D50 to D56 for the twin.
+the stub, D50 to D56 for the twin, D90 to D92 for its viewer and its cadence.
 
 ## Stub brain (`brain/stub/`)
 
@@ -47,7 +47,8 @@ and plays misbehaving brains with its answers in-process.
 
 ## The environment
 
-Python 3.12 with MuJoCo's and NumPy's wheels, pinned in `requirements.txt`. On Windows, from the repo's root:
+Python 3.12 with MuJoCo's and NumPy's wheels, pinned in `requirements.txt`. On Windows, from the repo's root (the
+twin's viewer runs from this one, natively, even when the twin runs in WSL2):
 
 ```
 py -3.12 -m venv brain\.venv
@@ -106,7 +107,11 @@ A MuJoCo model of the arm on its cart, in the cell, whose joints follow `tools/u
   from each keep-out zone. Nothing it finds stops the arm: the controller's own collision detection is off on this
   arm (sensitivity 0), and the spine checks moves before they're sent.
 - **Cameras**: colour, depth and segmentation from any pose, fixed in the cell or on the arm, with known intrinsics
-  and the camera's true pose, for perception to be built against before a real camera arrives.
+  and the camera's true pose, for perception to be built against before a real camera arrives. They're rendered in a
+  process of their own, so the twin's 10 ms loop and the simulated controller never wait for a frame.
+- **A viewer of its own.** `python -m brain.twin view` shows a running twin in MuJoCo's viewer from a separate
+  process, read-only: natively on Windows while the twin runs in WSL2, at the screen's refresh rate. Closing it never
+  stops the twin.
 
 ### Running it
 
@@ -114,13 +119,25 @@ From the repo's root, with the environment above (`python` meaning `brain\.venv\
 
 ```
 python -m brain.twin serve --scene brain/twin/scenes/example.json    # the simulated controller, with the twin
+python -m brain.twin view                                             # in another shell: the viewer, following it
 python scripts/jog_server.py 127.0.0.1                                # in another shell: the jog panel, against it
 ```
 
 `serve` takes `tools/utra_sim.py`'s options too (`--joints`, fault injection, ...), `--host` for another loopback
-address, `--cell DIR` for a cell folder (the jog panel's is `cell/`), and `--viewer` to watch the scene in MuJoCo's
-viewer (its group keys show the collision shapes, zones, and frames and targets: groups 3, 4 and 5). It prints what
-the arm touches as it happens.
+address, `--cell DIR` for a cell folder (the jog panel's is `cell/`), and `--viewer` to start the viewer as well (a
+process of its own). It prints what the arm touches as it happens. It runs until Ctrl+C in its shell, or until its
+process is ended; closing the viewer doesn't stop it.
+
+The viewer, `python -m brain.twin view [--follow URL]` (`http://127.0.0.1:30100` by default), is MuJoCo's own
+viewer on the model the twin built: it takes the twin's generated MJCF and meshes over HTTP, so it's the same model
+exactly, obstacles added over HTTP included. It follows the twin's state as the twin streams it, every step of its
+loop: the arm's joints and where every obstacle is, fixed or free. When the twin rebuilds its model (an obstacle or a
+camera added or removed), the viewer loads the new one into the same window and keeps the view. Its group keys show
+the collision shapes, zones, and frames and targets (groups 3, 4 and 5); M, A and J show centres of mass, connections
+and joints, sized for the arm. It's read-only: it only ever reads the twin (`GET /model` and `GET /pose/stream`),
+and whatever is changed in its window (a joint slider, a perturbation) changes only what it shows. If the twin stops,
+the window stays, says so, and follows the twin again when it's back. `view --check 5` follows the twin for 5 s
+without a window and says what arrived: whether the twin can be followed from where it runs.
 
 ```
 python -m brain.twin snapshot --scene brain/twin/scenes/example.json --joints 0,10,100,-20,90,0 --out frames
@@ -138,8 +155,16 @@ does.
 | `GET /state` | Time, joints, flange and tool pose, the controller's state, contacts, zone clearances, obstacles (`obstacles`: where each is; `obstacleShapes`: its shape, size, whether it's fixed, and its mesh file), and every camera's intrinsics and true pose. |
 | `GET /cameras/<name>.npz` | A frame: `rgb`, `depth` (m), `segmentation`, `K`, `T_base_camera` and `meta` (JSON). |
 | `GET /cameras/<name>/rgb.png`, `/depth.png` | The colour image; depth as 16-bit millimetres. |
+| `GET /pose` | The arm's joints (rad) and where every obstacle is (`[x, y, z]` in m and a quaternion `[w, x, y, z]`, base frame), with the model's revision and fingerprint, and the loop's step number. |
+| `GET /pose/stream` | The same, one JSON line for every step of the loop (100 a second; `?hz=N` for at most N a second), until the client goes: what the viewer follows. |
+| `GET /model` | The generated model as a zip: `twin.xml`, its meshes (`assets/`) and `layout.json` (its revision and fingerprint, and the scene it was built from). |
+| `GET /loop` | The loop's cadence over the last 10 s (`?seconds=S`): how many ticks, the gaps between them and the work in each, in ms (`&raw=1`: every gap); the camera process's pid, and the revision of the model it has ready (`camerasReady`). |
 | `POST /obstacles` | `{"add": {obstacle}}`, `{"move": {"name", "pose", "frame"}}` or `{"remove": "name"}`. |
 | `POST /cameras` | `{"add": {camera}}`, `{"update": {"name", ...}}` or `{"remove": "name"}`. |
+
+Every step, the twin's loop publishes a snapshot of its state. A camera frame is rendered from the first snapshot
+after its request arrives, in the camera process; `/pose`, its stream and `/model` are answered from the newest. None
+of them waits for the loop or makes it wait. `/state` and the POSTs run on the loop, between its steps.
 
 From Python, without a server:
 
@@ -187,14 +212,51 @@ As a depth camera's driver and most perception code have them:
   at its centre). Real sensors' noise belongs in perception's tests. Keep-out zones, frames and targets aren't
   rendered; the arm, tool, cart, floor and obstacles are.
 
-A 640 x 480 frame takes about 5 ms (colour and depth) or 16 ms (with segmentation) on the RTX 3080 Ti.
+A 640 x 480 frame takes about 5 ms (colour and depth) or 16 ms (with segmentation) on the RTX 3080 Ti, and about
+75 ms with segmentation in WSL2. Over HTTP, compressing included, an `.npz` frame takes about 70 ms on Windows and
+120 ms in WSL2. Frames are rendered in a process of their own, the camera process. It starts with the twin and gets
+ready in the background (the model compiled, its OpenGL contexts made, each camera rendered once: about 1 s on
+Windows, 2 s in WSL2), and again after each rebuild. It renders from a snapshot of the twin taken after the request
+arrives, and its frames are pixel for pixel what `Twin.render` gives in the twin's own process. That's for the twin's
+10 ms loop: rendered on the loop, as they were, a frame held it up 83 ms in WSL2 (`docs/decisions.md` D91).
 
 ### How it's verified
 
 `tests/twin_tests.py` (`python tests/run_all.py twin`) checks the model against the spine's own kinematics and
 collision shapes, the cell's parts, obstacles and physics, the cameras (known points land within 0.12 px of where K
 and the pose put them; depth back-projects onto known surfaces to within 0.1 mm), the coupling (the simulator's
-joints, exactly, from the SDK's bytes), a live run through the SDK and HTTP, and the replays.
+joints, exactly, from the SDK's bytes), a live run through the SDK and HTTP, the camera process's frames against the
+twin's own, the loop's cadence while frames are pulled, the viewer, and the replays.
+
+The cadence is checked against the loop's own record (`GET /loop`), with seconds of camera load interleaved with idle
+seconds, 6 of each, so the idle ones show what the computer itself does meanwhile. A tick is late when it comes more
+than 15 ms after the one before. Under load, the 99th percentile may be at most 2 ms worse than idle (or 15 ms), and
+late ticks beyond the idle seconds' share may number at most one for every two frames pulled. Rendered on the loop,
+as before, every frame made a tick late. Each figure is the suite's, run on Windows and, by hand, in WSL2:
+
+| What | Windows | WSL2 |
+| ---- | ------- | ---------- |
+| The loop under perception's load: one camera's `.npz` (with segmentation) 5 times a second | 99% of ticks within 10.41 ms of the one before, 0 of 593 late, the worst 10.6 ms (idle: 10.49, 0, 10.8) | 10.14 ms, 0 of 593, 10.4 ms (idle: 10.15, 0, 10.7) |
+| ... frames one after another from two clients (`.npz` and PNG) | 165 frames in 6 s; 10.47 ms, 0 of 629, 10.9 ms | 87 frames; 10.15 ms, 0 of 695, 10.3 ms |
+| ... the camera process starting with the twin and getting ready | ready in about 1 s; the worst tick meanwhile 10.6 ms; the first frame then 69 ms | 1.7 s; 12.4 ms; 112 ms |
+| ... an obstacle added (the model rebuilt): the next frame | 77 ms, the obstacle in it | 107 ms |
+| The simulated controller's status meanwhile | 5th to 95th percentile 99.6 to 100.4 ms apart, all 98.5 to 101.3 | 99.8 to 100.2, all 99.4 to 100.7 |
+| For comparison: the loop with frames rendered on it, 5 a second (as before; an experiment) | 95% within 18.8 ms, worst 41.6 | 95% within 77.3 ms, worst 113.3 |
+
+The viewer is checked without a window: it follows a joint move at about 100 states a second, each on the
+controller's path, and settles on the twin's joints exactly; it takes the twin's new model when an obstacle is added
+or removed, shows one moved without a new model, only ever makes `GET /model` and `GET /pose/stream` requests, and,
+when the twin stops, says so and follows it again when it's back. A viewer's process ended while it followed leaves
+the twin running: its controller's status at 10 Hz, its loop, HTTP, and a move it then takes. Frames pulled 5 times
+a second while the arm sweeps J1 from -35 to 35 deg are each taken between their request and their reply, as
+perception assumes when it leaves the arm out: the requests take 65 ms (median) on Windows and 100 ms in WSL2. With
+`TWIN_TEST_WINDOW=1` on Windows, the suite also opens the real window (`serve --viewer`) and closes it as its close
+button does: the viewer exits with 0 and the twin carries on.
+
+By hand across the boundary (the twin and perception in WSL2 on `127.0.0.1`, the viewer on Windows), the viewer gets
+all 100 states a second and MuJoCo's own counter reads 144 frames a second, the screen's refresh rate, while
+perception pulls frames and the arm moves. Over 20 s, the twin's loop ticked 2000 times, 99% within 10.11 ms of the
+one before and the worst 10.21 ms without perception, and 10.15 and 11.47 ms with it.
 
 The replays send both captures' commands to the simulator again, as the jog panel and the program runner built
 them, and compare every status frame with the twin's joints and its tool pose:
@@ -420,7 +482,7 @@ perception's environment in WSL2 too (`~/.venvs/umbratek-perception`, or `UMBRAT
 | The twin, the planner brain and the jog server as processes: taught, planned, taught around the twin's crate, out and back, the crate moved, then a pole, a ball, a tube | 6 runs done, every plan accepted, no contact in the twin (sampled 176 to 347 times a run), the tool on its target to 0.001 mm |
 | Their planning times | the brain 0.87 s median, 0.97 s at most (with reading the twin's state); the spine, from starting the planned step to accepting its path, 0.91 s median and 0.99 s at most, against its 10 s deadline |
 | The control: the same program with a brain blind to the crate (`--world request`) | the spine accepts its straight path, and the twin sees the arm hit the crate (the flange and the tool) |
-| The chain, the camera the only source: perception calibrates the twin's overhead camera by its own procedure and maps what it sees; the planner plans on that map (`--world map`) around a crate on the table that's no keep-out zone and that no brain is told of; taught, planned, taught, out and back | the calibration 0.08 mm and 0.011 deg from the twin's camera; the crate in the map 1.2 s after perception serves it; 4 runs done, every plan accepted, no contact in the twin (sampled 194 to 282 times a run), the paths 44.1 to 48.8 mm from the true crate and table at the least, the tool on its target to 0.001 mm |
+| The chain, the camera the only source: perception calibrates the twin's overhead camera by its own procedure and maps what it sees; the planner plans on that map (`--world map`) around a crate on the table that's no keep-out zone and that no brain is told of; taught, planned, taught, out and back | the calibration 0.08 mm and 0.011 deg from the twin's camera; the crate in the map 0.6 s after perception serves it (1.2 s while the twin rendered frames on its loop, D91); 4 runs done, every plan accepted, no contact in the twin (sampled 194 to 282 times a run), the paths 44.1 to 48.8 mm from the true crate and table at the least, the tool on its target to 0.001 mm |
 | ... the crate moved 60 mm in the twin between runs | the map shows it moved 1.5 s later, nothing left where it was; the next plan is made on that map and goes around it |
 | Their planning times | the brain 1.46 s median, 1.55 s at most (fetching the map 0.24 s median); the spine, from starting the step to accepting the path, 1.51 s median and 1.60 s at most, against its 10 s deadline |
 | The chain's control: the brain without the map (`--world request`) | the spine accepts its straight path, and the twin sees the tool hit the crate |
@@ -454,19 +516,25 @@ PERCEPTION_CALIBRATIONS=cell/perception ~/.venvs/umbratek-perception/bin/python 
 Then each in a WSL2 shell of its own, in this order (the planner reads the map's grid when it starts):
 
 ```
-~/.venvs/umbratek-brain/bin/python -m brain.twin serve --scene brain/twin/scenes/example.json --viewer
+~/.venvs/umbratek-brain/bin/python -m brain.twin serve --scene brain/twin/scenes/example.json
 ~/.venvs/umbratek-perception/bin/python -m brain.perception serve --twin http://127.0.0.1:30100 --camera overhead --status 127.0.0.1 --cell cell/twin
 ~/.venvs/umbratek-planner/bin/python -m brain.planner serve --world map --port 8790
 ```
 
-and on Windows a panel of its own, with a cell folder of its own:
+and on Windows, each in a shell of its own, the twin's viewer from the brain's Windows environment (above), and a
+panel with a cell folder of its own:
 
 ```
+brain\.venv\Scripts\python -m brain.twin view --follow http://127.0.0.1:30100
 python scripts\jog_server.py 127.0.0.1 --port 8767 --cell cell\twin --brain http://127.0.0.1:8790
 ```
 
-`--viewer` opens MuJoCo's viewer on the Windows desktop through WSLg (checked): the arm, the example scene's table,
-fixture and part, and what's added. In the panel at `http://127.0.0.1:8767`, enable the arm and add two targets in the
+The viewer runs natively on Windows and follows the twin in WSL2 through WSL2's localhost forwarding: the arm, the
+example scene's table, fixture and part, and whatever is added, moved or removed, at the screen's refresh rate (144
+frames a second on this PC; MuJoCo's viewer in WSL2, through WSLg, managed a few). Close it whenever you like: the
+twin, its simulated controller and its HTTP endpoint carry on, and the viewer can be started again. The twin stops
+with Ctrl+C in its WSL2 shell. `view --check 5` says, without a window, whether the twin can be followed from
+Windows. In the panel at `http://127.0.0.1:8767`, enable the arm and add two targets in the
 base frame either side of the table's middle, the flange pointing down: P at x 480, y -180, z 100 mm and Q at x 480,
 y 180, z 100, both rpy 180, 0, 0. A program: a planned move to P with an offset 50 mm up, a line move to P, a planned
 move to Q with an offset 50 mm up, a line move to Q (every move between them planned, so it can run again from Q).
