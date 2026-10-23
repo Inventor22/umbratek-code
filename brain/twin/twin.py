@@ -6,6 +6,7 @@ zone clearances and simulated RGB-D cameras (cameras.py).
     twin.follow(t, joints_rad)           # the arm where the controller has it at time t; free obstacles step along
     frame = twin.render("overhead")      # rgb, depth, K, T_base_camera
     twin.contacts()                      # what the arm or tool touches
+    snap = twin.snapshot()               # its state now, for another thread to render or send (Snapshot)
 """
 from __future__ import annotations
 
@@ -16,9 +17,62 @@ import numpy as np
 
 from . import model as twin_model
 from . import repo
-from .cameras import Cameras, Frame
+from .cameras import Cameras, frame_of
 
 MAX_CATCH_UP_S = 0.25  # after a longer gap between follow() calls, free obstacles jump rather than replay it all
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Layout:
+    """One build of the twin's model, as other threads see it: they may read the model, never change it."""
+    revision: int  # counts the twin's builds, from 1
+    model: object  # the compiled MjModel
+    built: object  # model.Built: the MJCF, cameras, obstacles
+    scene: dict  # the Scene it was built from, as Scene.to_dict() gave it then (later moves aren't in it)
+    fingerprint: str  # model.fingerprint(built)
+    seen: list  # geom id -> "kind: label" for what cameras see, else None
+    qadr: np.ndarray  # the arm's joints' addresses in qpos
+    free: dict  # free obstacle -> (qpos address, dof address)
+    mocap: dict  # fixed obstacle -> mocap index
+
+
+@dataclasses.dataclass(eq=False)
+class Snapshot:
+    """The twin's state at one step of its loop: copies, so another thread can use them while the loop carries on."""
+    layout: Layout
+    t: float  # s, on the controller's clock
+    qpos: np.ndarray
+    mocap_pos: np.ndarray
+    mocap_quat: np.ndarray
+    seq: int = 0  # set by whoever publishes it (server.TwinServer.publish)
+
+    def joints(self):
+        """The arm's joints (rad)."""
+        return self.qpos[self.layout.qadr]
+
+    def obstacles(self):
+        """Where each obstacle is: {name: [x, y, z (m), qw, qx, qy, qz]}, base frame, its body's pose exactly."""
+        out = {}
+        for name in self.layout.built.obstacles:
+            if name in self.layout.free:
+                a = self.layout.free[name][0]
+                out[name] = self.qpos[a:a + 7].tolist()
+            else:
+                k = self.layout.mocap[name]
+                out[name] = self.mocap_pos[k].tolist() + self.mocap_quat[k].tolist()
+        return out
+
+    def sample(self):
+        """What GET /pose and /pose/stream send: the model's own units (metres, radians), unrounded, and which build
+        they belong to (its revision, and its fingerprint: a follower needs a new model exactly when that changes)."""
+        return {"seq": self.seq, "time": self.t, "revision": self.layout.revision,
+                "fingerprint": self.layout.fingerprint, "joints": self.joints().tolist(), "obstacles": self.obstacles()}
+
+    def apply(self, data):
+        """Puts this state into `data`, an MjData of the same build (call mj_forward after)."""
+        data.qpos[:] = self.qpos
+        data.mocap_pos[:] = self.mocap_pos
+        data.mocap_quat[:] = self.mocap_quat
 
 
 class Twin:
@@ -26,6 +80,7 @@ class Twin:
         self.scene = scene or twin_model.Scene()
         self.cameras = None
         self.t, self.q = None, None
+        self.revision = 0
         self._build()
 
     # ---- building -------------------------------------------------------------------------------------------------
@@ -62,10 +117,19 @@ class Twin:
                     self.data.qpos[a:a + 7], self.data.qvel[v:v + 6] = qpos, qvel
         mujoco.mj_forward(m, self.data)
         self.cameras = Cameras(m)
+        self.revision += 1
+        self.layout = Layout(self.revision, m, self.built, self.scene.to_dict(), twin_model.fingerprint(self.built),
+                             self.seen, self.qadr, dict(self.free), dict(self.mocap))
 
     def close(self):
         if self.cameras is not None:
             self.cameras.close()
+
+    def snapshot(self):
+        """The twin's state now (a Snapshot: copies, with this build's Layout), for another thread to render or send
+        while this one carries on."""
+        return Snapshot(self.layout, self.t if self.t is not None else 0.0, self.data.qpos.copy(),
+                        self.data.mocap_pos.copy(), self.data.mocap_quat.copy())
 
     # ---- the arm --------------------------------------------------------------------------------------------------
     def set_joints(self, q, qd=None):
@@ -223,15 +287,8 @@ class Twin:
 
     def render(self, name, segmentation=True):
         """A Frame from camera `name`, as the scene is now."""
-        spec = self.camera(name)
-        rgb, depth, seg, T = self.cameras.render(self.data, spec, segmentation)
-        labels = {}
-        if seg is not None:
-            for g in np.unique(seg):
-                if g >= 0 and self.seen[g]:
-                    labels[int(g)] = self.seen[g]
-        return Frame(name, self.t if self.t is not None else 0.0, rgb, depth, seg, spec.K, T,
-                     [math.degrees(v) for v in self.data.qpos[self.qadr]], spec.near, spec.far, labels)
+        return frame_of(self.cameras, self.data, self.camera(name), self.seen, self.t if self.t is not None else 0.0,
+                        self.data.qpos[self.qadr], segmentation)
 
     def add_camera(self, spec):
         if any(c.name == spec.name for c in self.scene.cameras):

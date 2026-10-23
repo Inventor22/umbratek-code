@@ -8,10 +8,17 @@
   and back-projecting depth onto known surfaces;
 - its coupling to tools/utra_sim.py: on a virtual clock, fed the SDK's own bytes, and live, served from the twin's
   process and driven through the SDK, with frames and state over HTTP;
+- camera frames off the loop: snapshots of the twin rendered in a process of their own, pixel for pixel the twin's
+  own frames, and the loop's 10 ms cadence and the controller's 10 Hz status held while frames are pulled;
+- the viewer (brain/twin/viewer.py): following the twin from a process of its own, read-only, through moves,
+  obstacles added, moved and removed, and the twin restarting; and the twin carrying on when a viewer ends;
 - the replays of both captures, every figure against its stated tolerance (brain/twin/replay.py's verify()).
 
-Usage: brain/.venv/Scripts/python tests/twin_tests.py   (from tests/run_all.py: python tests/run_all.py twin)
+Usage: brain/.venv/Scripts/python tests/twin_tests.py [section ...]   (from tests/run_all.py: python tests/run_all.py
+twin). TWIN_TEST_WINDOW=1, on Windows, also opens the viewer's real window (serve --viewer) and closes it as its close
+button does; without it no window opens.
 """
+import io
 import json
 import math
 import os
@@ -20,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -115,6 +123,10 @@ def model_from_sources():
     twin.set_joints(rad([0, -30, 50, -10, 90, 0]))
     check("at the simulator's start pose nothing touches", twin.contacts(include_world=True) == [],
           twin.contacts(include_world=True))
+    size = twin.model.stat.meansize
+    check(f"the viewer's markers (centres of mass, joints, frames) are sized for the arm: stat.meansize "
+          f"{size * 1000:.0f} mm, so a centre of mass is a ball {2 * twin.model.vis.scale.com * size * 1000:.0f} mm "
+          f"across (the compiler's guess, from the cart and the floor, made it 320)", abs(size - 0.05) < 1e-9, size)
     folder = tempfile.mkdtemp(prefix="twin-export-")
     try:
         path = twin_model.export(a, folder)
@@ -525,6 +537,520 @@ def live():
         proc.wait()
 
 
+# ---- off the loop: snapshots, and camera frames in a process of their own ----------------------------------------
+
+def heartbeat_during(fn):
+    """fn()'s result, and the longest another thread of this process waited to run while fn ran (ms). That thread
+    sleeps 1 ms at a time, so anything holding Python's GIL shows."""
+    gaps, done = [], []
+
+    def beat():
+        last = time.perf_counter()
+        while not done:
+            time.sleep(0.001)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    th = threading.Thread(target=beat, daemon=True)
+    th.start()
+    time.sleep(0.05)
+    try:
+        out = fn()
+    finally:
+        done.append(True)
+        th.join()
+    return out, max(gaps) * 1000.0
+
+
+def npz(body):
+    with np.load(io.BytesIO(body)) as z:
+        return {k: z[k] for k in z.files}
+
+
+def off_the_loop():
+    print("== camera frames off the loop: snapshots of the twin, rendered in a process of their own")
+    import mujoco
+
+    from brain.twin.cameras import CameraProcess, png_bytes
+    twin = Twin(Scene.load(EXAMPLE))
+    twin.set_joints(rad([20, -10, 70, 15, 60, 30]))
+    twin.move_obstacle("fixture", {"xyz": [700, -250, -60], "rpy": [0, 0, 40]})  # a fixed one, moved
+    snap = twin.snapshot()
+    kept = snap.qpos.copy()
+    obstacles, worst, R = snap.obstacles(), 0.0, np.zeros(9)
+    for name, p in obstacles.items():
+        T = twin.obstacle_pose(name)
+        mujoco.mju_quat2Mat(R, np.array(p[3:]))
+        worst = max(worst, np.abs(np.array(p[:3]) - T[:3, 3]).max(), np.abs(R.reshape(3, 3) - T[:3, :3]).max())
+    check(f"a snapshot holds the arm's joints and where every obstacle is, fixed or free "
+          f"({', '.join(sorted(obstacles))}), as the twin has them (worst {worst:.1e})",
+          sorted(obstacles) == sorted(twin.built.obstacles) and (snap.joints() == twin.data.qpos[twin.qadr]).all()
+          and worst < 1e-12, (obstacles, worst))
+    want = {name: twin.render(name) for name in twin.built.cameras}  # in this process, at the snapshot's state
+    twin.set_joints(rad([0, -30, 50, -10, 90, 0]))
+    check("it's a copy: the twin moving on leaves it as it was", (snap.qpos == kept).all())
+    cams = CameraProcess(60.0)
+    try:
+        body, waited = heartbeat_during(lambda: cams.frame(snap, "overhead", "npz"))
+        got, w = npz(body), want["overhead"]
+        meta = json.loads(str(got["meta"]))
+        same = all((got[k] == v).all() for k, v in (
+            ("rgb", w.rgb), ("depth", w.depth), ("segmentation", w.segmentation), ("K", w.K),
+            ("T_base_camera", w.T_base_camera)))
+        want_labels = {str(k): v for k, v in w.labels.items()}
+        check("a frame from the camera process is the twin's own, pixel for pixel: colour, depth, segmentation, K, "
+              "true pose, and the labels and joints it was taken at", same and meta["labels"] == want_labels
+              and meta["joints_deg"] == w.joints, (same, meta["joints_deg"]))
+        check(f"its first frame (a process started, the model compiled, OpenGL contexts made) left this process's "
+              f"other threads alone: they waited {waited:.1f} ms at most", waited < 15.0, waited)
+        other = Twin(Scene.load(EXAMPLE))
+        _, held = heartbeat_during(lambda: other.render("overhead"))
+        other.close()
+        print(f"  (for comparison, the same first frame made in this process held its other threads up for "
+              f"{held:.0f} ms: MuJoCo keeps Python's GIL while it loads a model onto the GPU)")
+        if hasattr(os, "sched_getaffinity"):
+            mine, theirs = sorted(os.sched_getaffinity(0)), sorted(os.sched_getaffinity(cams.pid()))
+            check(f"on Linux it keeps to the last quarter of the CPUs (CPUs {theirs[0]} to {theirs[-1]} of "
+                  f"{len(mine)}), so the GPU driver's work doesn't delay the loop's wake-ups",
+                  len(mine) < 4 and theirs == mine or theirs == mine[-(len(mine) // 4):], (mine, theirs))
+        body = cams.frame(snap, "wrist", "rgb.png")
+        check("and as the HTTP endpoint sends them: a PNG, byte for byte the twin's own frame's", body == png_bytes(
+            want["wrist"].rgb))
+        twin.add_obstacle(Obstacle("crate", "box", [100, 100, 180], {"xyz": [480, 0, -10], "rpy": [0, 0, 0]}))
+        snap2 = twin.snapshot()
+        labels = set(json.loads(str(npz(cams.frame(snap2, "overhead", "npz"))["meta"]))["labels"].values())
+        check("after the twin rebuilds its model (an obstacle added), the process is given the new one: its frame "
+              "shows the crate", snap2.layout.revision == snap.layout.revision + 1 and "obstacle: crate" in labels,
+              labels)
+        try:
+            cams.frame(snap2, "nope", "npz")
+            ok = False
+        except SceneError:
+            ok = True
+        check("a camera that isn't there: SceneError (404 over HTTP)", ok)
+        first = cams.pid()
+        cams.proc.kill()
+        cams.proc.join()
+        got = npz(cams.frame(snap2, "wrist", "npz"))
+        check("if the process dies, the next frame starts another", cams.started == 2 and cams.pid() not in (
+            None, first) and got["rgb"].shape == (480, 640, 3), (cams.started, first, cams.pid()))
+    finally:
+        cams.close()
+    check("closed, it's gone", cams.proc is None and cams.pid() is None)
+    twin.close()
+
+
+# ---- live: the loop's cadence while frames are pulled -----------------------------------------------------------
+
+def twin_process(log_name, *extra):
+    """python -m brain.twin serve on HOST with the example scene, up and listening: (process, up)."""
+    log = log_path(log_name)
+    with open(log, "w") as out:
+        proc = subprocess.Popen([sys.executable, "-m", "brain.twin", "serve", "--host", HOST, "--port", str(HTTP_PORT),
+                                 "--scene", EXAMPLE, *extra], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
+    up = wait_port(502, timeout=30) and wait_port(HTTP_PORT, timeout=10)
+    if not up:
+        check(f"python -m brain.twin serve {' '.join(extra)} starts", False, open(log).read()[-2000:])
+    return proc, up
+
+
+def end(proc):
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait()
+
+
+def loop_gaps(seconds):
+    """The gaps (ms) between the twin's last `seconds` of loop ticks, from GET /loop."""
+    return json.loads(http(f"/loop?seconds={seconds:.3f}&raw=1")[1])["gapsMs"]
+
+
+def spread(gaps):
+    """(99th percentile, ticks late (more than 15 ms after the one before), worst, how many) of loop gaps (ms)."""
+    g = sorted(gaps)
+    return g[max(0, int(math.ceil(0.99 * len(g))) - 1)], sum(x > 15.0 for x in g), g[-1], len(g)
+
+
+class Puller:
+    """Pulls camera frames over HTTP as perception does, `rate` frames a second (None: one after another), while `on`
+    is set."""
+
+    def __init__(self, path, rate=None):
+        self.on, self.lock = threading.Event(), threading.Lock()
+        self.frames, self.failed, self.busy, self.stop = 0, [], 0, False
+        self.thread = threading.Thread(target=self.run, args=(path, rate), daemon=True)
+        self.thread.start()
+
+    def run(self, path, rate):
+        while not self.stop:
+            if not self.on.wait(0.05):
+                continue
+            t0 = time.perf_counter()
+            with self.lock:
+                self.busy += 1
+            code, body = http(path)
+            with self.lock:
+                self.busy -= 1
+                if code == 200:
+                    self.frames += 1
+                else:
+                    self.failed.append((code, body[:200]))
+            if rate:
+                time.sleep(max(0.0, 1.0 / rate - (time.perf_counter() - t0)))
+
+    def pause(self):
+        self.on.clear()
+        while self.busy:
+            time.sleep(0.005)
+
+    def close(self):
+        self.pause()
+        self.stop = True
+        self.thread.join()
+
+
+class StatusTimes:
+    """The arrival times of the simulated controller's 10 Hz status frames (port 30001), read in the background."""
+
+    def __init__(self):
+        sys.path.insert(0, repo.SCRIPTS)
+        import arm as armcli
+        self.report, self.times, self.stop = armcli.StatusReport(HOST), [], False
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        while not self.stop:
+            self.report.read()
+            self.times.append(time.perf_counter())
+
+    def close(self):
+        self.stop = True
+        self.thread.join()
+        self.report.close()
+        return sorted((b - a) * 1000.0 for a, b in zip(self.times, self.times[1:]))
+
+
+def cadence():
+    print("== the loop keeps its 10 ms cadence, and the controller its 10 Hz status, while camera frames are pulled")
+    proc, up = twin_process("twin_cadence.log")
+    if not up:
+        return
+    try:
+        time.sleep(1.5)
+        t0 = time.perf_counter()
+        code, _ = http("/cameras/overhead.npz")
+        took = time.perf_counter() - t0
+        p99, late, worst, n = spread(loop_gaps(took + 0.02))
+        check(f"the first frame ({took:.1f} s: the camera process started, the model compiled, OpenGL contexts made) "
+              f"leaves the loop alone: of {n} ticks meanwhile, {late} late, the worst {worst:.1f} ms after the one "
+              f"before (made on the loop's thread, or another of its process, MuJoCo would hold it up 45 ms or more)",
+              code == 200 and worst < 30.0, (code, worst, late))
+        status = StatusTimes()
+        for label, least, make in (
+                ("perception's load, one camera's .npz (with segmentation) 5 times a second", 25,
+                 lambda: [Puller("/cameras/overhead.npz", 5)]),
+                ("frames one after another from two clients, .npz and PNG", 30,
+                 lambda: [Puller("/cameras/overhead.npz"), Puller("/cameras/wrist/rgb.png")])):
+            pullers, idle, busy = make(), [], []
+            for _ in range(6):
+                t0 = time.perf_counter()
+                time.sleep(1.0)
+                idle += loop_gaps(time.perf_counter() - t0)
+                t0 = time.perf_counter()
+                for pl in pullers:
+                    pl.on.set()
+                time.sleep(1.0)
+                for pl in pullers:
+                    pl.pause()
+                busy += loop_gaps(time.perf_counter() - t0)
+            frames, failed = sum(pl.frames for pl in pullers), [f for pl in pullers for f in pl.failed]
+            for pl in pullers:
+                pl.close()
+            (ip99, ilate, iworst, ni), (bp99, blate, bworst, nb) = spread(idle), spread(busy)
+            check(f"{label}: {frames} frames in 6 s; the loop's ticks 99% within {bp99:.2f} ms of the one before, "
+                  f"{blate} of {nb} late, the worst {bworst:.1f} ms (between them, idle: {ip99:.2f} ms, {ilate} of "
+                  f"{ni}, {iworst:.1f} ms)", not failed and frames >= least and bp99 <= max(15.0, ip99 + 2.0)
+                  and blate <= max(0.01 * nb, ilate + 0.01 * nb), (failed, frames, bp99, blate, nb, ip99, ilate))
+        gaps = status.close()
+        q = lambda f: gaps[min(len(gaps) - 1, int(round(f * (len(gaps) - 1))))]  # noqa: E731
+        check(f"meanwhile the simulated controller's status came at 10 Hz: {len(gaps) + 1} frames, 5th to 95th "
+              f"percentile {q(0.05):.1f} to {q(0.95):.1f} ms apart (within 85 to 115), all {gaps[0]:.1f} to "
+              f"{gaps[-1]:.1f} (perception counts a stream on time within 50 to 150)", len(gaps) > 200
+              and q(0.05) > 85 and q(0.95) < 115 and gaps[0] >= 50 and gaps[-1] <= 150, gaps)
+    finally:
+        end(proc)
+
+
+# ---- the viewer ------------------------------------------------------------------------------------------------
+
+def viewer_follows():
+    print("== the viewer follows the twin from its own process, over HTTP, read-only (here without a window)")
+    import mujoco
+
+    from brain.twin import viewer
+    proc, up = twin_process("twin_viewer.log")
+    if not up:
+        return
+    url, windows, stop, arm = f"http://{HOST}:{HTTP_PORT}", [], [], None
+
+    class Window(viewer.Headless):
+        def __init__(self, mirror):
+            super().__init__(mirror)
+            self.seen = []
+            windows.append(self)
+
+        def sync(self):
+            super().sync()
+            self.seen.append(self.mirror.data.qpos[self.mirror.qadr].tolist())
+
+    follower = viewer.Follower(url)
+    th = threading.Thread(target=viewer.follow, args=(follower, Window), kwargs=dict(log=lambda s: None,
+                          until=lambda: bool(stop)), daemon=True)
+    th.start()
+
+    def body_xyz(m, name):
+        return m.data.xpos[mujoco.mj_name2id(m.model, mujoco.mjtObj.mjOBJ_BODY, f"obstacle_{name}")] * 1000.0
+
+    def wait_for(cond, timeout=5.0):
+        deadline = time.monotonic() + timeout
+        while not cond() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return cond()
+
+    try:
+        wait_for(lambda: windows and windows[0].syncs, 15.0)
+        w = windows[0] if windows else None
+        pose = json.loads(http("/pose")[1])
+        here = twin_model.fingerprint(build(Scene.load(EXAMPLE)))
+        check(f"it shows the twin's own model: its generated MJCF and meshes (GET /model), compiled here, fingerprint "
+              f"{pose['fingerprint'][:12]}, the same as a build of the same scene on this side",
+              w is not None and w.mirror.fingerprint == pose["fingerprint"] == here, (pose["fingerprint"], here))
+        sys.path.insert(0, repo.SCRIPTS)
+        import arm as armcli
+        arm = armcli.open_arm(HOST)
+        arm.reset_err()
+        arm.set_motion_mode(0)
+        arm.set_motion_enable(8, 1)
+        arm.set_motion_status(0)
+        time.sleep(0.4)
+        start = json.loads(http("/pose")[1])["joints"]
+        goal = list(start)
+        goal[0] += math.radians(25)
+        goal[2] -= math.radians(15)
+        n0 = len(w.seen)
+        arm.moveto_joint_p2p(goal, math.radians(25), math.radians(100), 0)
+        wait_for(lambda: json.loads(http("/state")[1])["controller"]["status"] == 1, 2.0)
+        wait_for(lambda: json.loads(http("/state")[1])["controller"]["status"] == 2, 8.0)
+        time.sleep(0.3)
+        moving = [q for q in w.seen[n0:] if q != start and abs(q[0] - goal[0]) > 1e-6]
+        f = (lambda q: (q[0] - start[0]) / (goal[0] - start[0]))  # noqa: E731
+        off = max((abs(q[j] - (start[j] + f(q) * (goal[j] - start[j]))) for q in moving for j in range(6)), default=1.0)
+        s = json.loads(http("/pose")[1])
+        distinct = len({tuple(q) for q in moving})
+        check(f"during a joint move it showed {distinct} states of the arm, about 100 a second, each on the "
+              f"controller's path (off by {math.degrees(off):.1e} deg); settled, its arm is the twin's exactly",
+              distinct > 80 and off < 1e-6 and w.mirror.data.qpos[w.mirror.qadr].tolist() == s["joints"],
+              (distinct, off, s["joints"]))
+        part = w.mirror.data.qpos[w.mirror.free["part"]:w.mirror.free["part"] + 7]
+        check("and the free part where the twin's physics has it", np.abs(part - s["obstacles"]["part"]).max() < 1e-6,
+              (part, s["obstacles"]["part"]))
+        http("/obstacles", {"add": {"name": "crate", "shape": "box", "size": [100, 100, 180],
+                                    "pose": {"xyz": [480, 0, -10], "rpy": [0, 0, 0]}}})
+        wait_for(lambda: len(w.mirrors) == 2 and w.syncs)
+        s = json.loads(http("/state")[1])
+        check("an obstacle added over HTTP: it takes the twin's new model, the crate where the twin has it",
+              len(w.mirrors) == 2 and w.mirror.revision == 2 and "crate" in w.mirror.mocap and
+              np.abs(body_xyz(w.mirror, "crate") - s["obstacles"]["crate"]["xyz"]).max() < 1e-6,
+              (len(w.mirrors), s["obstacles"].get("crate")))
+        http("/obstacles", {"move": {"name": "crate", "pose": {"xyz": [480, 60, -10], "rpy": [0, 0, 30]}}})
+        moved = wait_for(lambda: abs(body_xyz(w.mirror, "crate")[1] - 60.0) < 1e-6)
+        s = json.loads(http("/state")[1])
+        R = w.mirror.data.xmat[mujoco.mj_name2id(w.mirror.model, mujoco.mjtObj.mjOBJ_BODY, "obstacle_crate")]
+        check("moved, it moves there too, turned as the twin has it, without a new model", moved and len(w.mirrors) == 2
+              and abs(math.degrees(math.atan2(R[3], R[0])) - s["obstacles"]["crate"]["rpy"][2]) < 1e-6)
+        http("/obstacles", {"remove": "crate"})
+        check("removed, it's gone (the twin's next model)", wait_for(lambda: len(w.mirrors) == 3) and
+              "crate" not in w.mirror.mocap and w.mirror.revision == 3)
+        before = json.loads(http("/state")[1])
+        time.sleep(2.0)
+        after = json.loads(http("/state")[1])
+        unchanged = before["joints"] == after["joints"] and before["controller"] == after["controller"] and all(
+            np.abs(np.array(before["obstacles"][k]["xyz"]) - after["obstacles"][k]["xyz"]).max() < 0.05
+            for k in before["obstacles"]) and sorted(before["obstacles"]) == sorted(after["obstacles"])
+        check(f"read-only: it only ever asked the twin for its model and its state ("
+              f"{', '.join(sorted({f'{v} {p}' for v, p in follower.requests}))}), and 2 s of following changed "
+              f"nothing in the twin (the free part rests within 0.05 mm)", {p for _, p in follower.requests} == {
+                  "/model", "/pose/stream"} and {v for v, _ in follower.requests} == {"GET"} and unchanged,
+              (follower.requests, before, after))
+        arm.socket_fp.close()
+        arm = None
+        end(proc)
+        gone = wait_for(lambda: not follower.connected and w.text and "isn't answering" in w.text, 5.0)
+        syncs = w.syncs
+        proc, up = twin_process("twin_viewer_again.log")
+        back = up and wait_for(lambda: follower.connected and w.syncs > syncs + 50 and w.text is None, 15.0)
+        check("the twin stopped: the window stays, saying the twin isn't answering; the twin back, it follows it again",
+              gone and back and w.running(), (gone, back, w.text))
+    finally:
+        stop.append(True)
+        th.join(timeout=5)
+        follower.close()
+        if arm is not None:
+            arm.socket_fp.close()
+        end(proc)
+
+
+def family(pid):
+    """pid and its descendants (on Windows a venv's python.exe is a launcher that starts the real one as a child)."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("th32ProcessID", wt.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_void_p), ("th32ModuleID", wt.DWORD), ("cntThreads", wt.DWORD),
+                    ("th32ParentProcessID", wt.DWORD), ("pcPriClassBase", wt.LONG), ("dwFlags", wt.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+
+    k32 = ctypes.windll.kernel32
+    k32.CreateToolhelp32Snapshot.restype = wt.HANDLE
+    snap, e, parents = k32.CreateToolhelp32Snapshot(2, 0), Entry(), {}
+    e.dwSize = ctypes.sizeof(Entry)
+    ok = k32.Process32FirstW(snap, ctypes.byref(e))
+    while ok:
+        parents[e.th32ProcessID] = e.th32ParentProcessID
+        ok = k32.Process32NextW(snap, ctypes.byref(e))
+    k32.CloseHandle(snap)
+    out = {pid}
+    while True:
+        more = {c for c, p in parents.items() if p in out} - out
+        if not more:
+            return out
+        out |= more
+
+
+def viewer_windows(pid):
+    """[(window, its process)]: the visible MuJoCo windows of pid's processes."""
+    import ctypes
+    import ctypes.wintypes as wt
+    user32, pids, found = ctypes.windll.user32, family(pid), []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+    def each(hwnd, _):
+        owner = wt.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value in pids and user32.IsWindowVisible(hwnd):
+            title = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            if title.value.startswith("MuJoCo"):
+                found.append((hwnd, owner.value))
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def exit_code(pid, timeout):
+    """pid's exit code once it has exited (None if it's still running after timeout s)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    k32 = ctypes.windll.kernel32
+    k32.OpenProcess.restype = wt.HANDLE
+    handle = k32.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE, PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        if k32.WaitForSingleObject(handle, int(timeout * 1000)) != 0:
+            return None
+        code = wt.DWORD()
+        k32.GetExitCodeProcess(handle, ctypes.byref(code))
+        return code.value
+    finally:
+        k32.CloseHandle(handle)
+
+
+def carries_on(proc, what):
+    """Checks that the twin served by proc carries on: its process runs, the controller's status at 10 Hz, its loop
+    and HTTP, and it takes a move that the twin then follows."""
+    sys.path.insert(0, repo.SCRIPTS)
+    import arm as armcli
+    seq = json.loads(http("/pose")[1])["seq"]
+    report = armcli.StatusReport(HOST)
+    times = []
+    for _ in range(12):
+        report.read()
+        times.append(time.perf_counter())
+    report.close()
+    gaps = sorted((b - a) * 1000.0 for a, b in zip(times[1:], times[2:]))  # the first comes when it connects
+    stats = json.loads(http("/loop?seconds=1")[1])
+    arm = armcli.open_arm(HOST)
+    try:
+        arm.reset_err()
+        arm.set_motion_mode(0)
+        arm.set_motion_enable(8, 1)
+        arm.set_motion_status(0)
+        time.sleep(0.4)
+        q0 = json.loads(http("/pose")[1])["joints"]
+        goal = list(q0)
+        goal[0] += math.radians(5)
+        arm.moveto_joint_p2p(goal, math.radians(20), math.radians(100), 0)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and abs(json.loads(http("/pose")[1])["joints"][0] - goal[0]) > 1e-5:
+            time.sleep(0.05)
+        q1 = json.loads(http("/pose")[1])
+    finally:
+        arm.socket_fp.close()
+    check(f"{what}, the twin carries on: its process runs, the controller's status comes every {gaps[0]:.0f} to "
+          f"{gaps[-1]:.0f} ms, its loop {stats['perSecond']:.0f} times a second, and it takes a joint move that the "
+          f"twin follows", proc.poll() is None and q1["seq"] > seq and 85 < gaps[0] and gaps[-1] < 115 and
+          abs(stats["perSecond"] - 100) < 2 and abs(q1["joints"][0] - goal[0]) < 1e-5, (gaps, stats, q1["joints"]))
+
+
+def viewer_process():
+    print("== the viewer's process ends, the twin doesn't")
+    proc, up = twin_process("twin_viewer_process.log")
+    if not up:
+        return
+    url = f"http://{HOST}:{HTTP_PORT}"
+    try:
+        fingerprint = json.loads(http("/pose")[1])["fingerprint"]
+        out = subprocess.run([sys.executable, "-m", "brain.twin", "view", "--follow", url, "--check", "2"], cwd=ROOT,
+                             capture_output=True, text=True, timeout=120)
+        said = (out.stdout.strip().splitlines() or [""])[-1]
+        check(f"python -m brain.twin view --check follows it from a process of its own: \"{said}\"", out.returncode == 0
+              and "states shown" in said and fingerprint[:12] in said and "GET /model, GET /pose/stream" in said,
+              out.stdout + out.stderr)
+        view = subprocess.Popen([sys.executable, "-m", "brain.twin", "view", "--follow", url, "--check", "60"],
+                                cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(4.0)
+        view.kill()
+        view.wait()
+        carries_on(proc, "a viewer's process killed while it followed")
+        if os.environ.get("TWIN_TEST_WINDOW") != "1" or os.name != "nt":
+            print("  (TWIN_TEST_WINDOW=1 on Windows also opens the real window, with serve --viewer, and closes it)")
+            return
+        end(proc)
+        proc, up = twin_process("twin_viewer_window.log", "--viewer")
+        if not up:
+            return
+        found, deadline = [], time.monotonic() + 30
+        while not found and time.monotonic() < deadline:
+            found = viewer_windows(proc.pid)
+            time.sleep(0.2)
+        check("serve --viewer opens the viewer's window", len(found) == 1, found)
+        if not found:
+            return
+        time.sleep(3.0)
+        import ctypes
+        ctypes.windll.user32.PostMessageW(found[0][0], 0x0010, 0, 0)  # WM_CLOSE, as the window's close button sends
+        code = exit_code(found[0][1], 15.0)
+        check(f"closing its window ends the viewer's process (exit code {code})", code == 0, code)
+        carries_on(proc, "the viewer's window closed")
+    finally:
+        end(proc)
+
+
 # ---- the replays ----------------------------------------------------------------------------------------------------
 
 def replays():
@@ -535,8 +1061,17 @@ def replays():
     twin.close()
 
 
+SECTIONS = (model_from_sources, cell_parts, obstacles, cameras, coupling_virtual, live, off_the_loop, cadence,
+            viewer_follows, viewer_process, replays)
+
+
 def main():
-    for section in (model_from_sources, cell_parts, obstacles, cameras, coupling_virtual, live, replays):
+    named = sys.argv[1:]
+    unknown = set(named) - {s.__name__ for s in SECTIONS}
+    if unknown:
+        sys.exit(f"unknown section(s): {', '.join(sorted(unknown))}; the sections: "
+                 f"{', '.join(s.__name__ for s in SECTIONS)}")
+    for section in (s for s in SECTIONS if not named or s.__name__ in named):
         try:
             section()
         except Exception as e:  # report and carry on

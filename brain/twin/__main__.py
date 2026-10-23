@@ -4,7 +4,12 @@
         The simulated controller (tools/utra_sim.py) served from this process, on HOST:502, :30001, :30003 and
         :30099, exactly as the simulator serves them, with the twin following it: point the jog panel, arm.py or the
         brain at HOST as at the real controller. Camera frames, state and obstacles at http://HOST:30100 (server.py).
-        --viewer opens MuJoCo's viewer on the scene.
+        --viewer also starts the viewer (below) in a process of its own. Ctrl+C stops the twin; closing the viewer
+        doesn't.
+    python -m brain.twin view [--follow http://127.0.0.1:30100] [--check SECONDS]
+                                       MuJoCo's viewer on a running twin, read-only, in a process of its own (on
+                                       Windows natively while the twin runs in WSL2): viewer.py. --check follows it
+                                       without a window for that long and says what arrived.
     python -m brain.twin replay        Replays both captures through the simulator and the twin; prints every
                                        figure against its tolerance and why (exit 1 if any fails).
     python -m brain.twin snapshot [--scene FILE] [--joints J1,...,J6] [--out DIR]
@@ -17,6 +22,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 
@@ -26,6 +32,7 @@ from .model import CameraSpec, Scene
 
 HOME_DEG = [0.0, -30.0, 50.0, -10.0, 90.0, 0.0]  # tools/utra_sim.py's starting pose
 OVERVIEW = dict(name="overview", pose={"eye": [1600.0, -900.0, 900.0], "target": [250.0, 0.0, -150.0]})
+PERIOD_S = 0.01  # the twin's loop: sample the controller, follow it, check contacts
 
 
 def load_scene(args):
@@ -42,17 +49,22 @@ def cmd_serve(args, sim_args):
     scene = load_scene(args)
     twin = Twin(scene)
     host = coupling.Host(args.host, sim_args)
-    api = server.TwinServer(twin, args.host, args.port)
+    api = server.TwinServer(twin, args.host, args.port, PERIOD_S)
+    url = f"http://{args.host}:{args.port}"
     print(f"twin: the simulated controller is on {args.host} (UTRC :502, status :30001, config :30003, control "
-          f":{utra_sim.CONTROL_PORT}); camera frames, state and obstacles on http://{args.host}:{args.port}/state",
-          flush=True)
+          f":{utra_sim.CONTROL_PORT}); camera frames, state and obstacles on {url}/state", flush=True)
     print(f"twin: {len(twin.built.obstacles)} obstacle(s), cameras: {', '.join(twin.built.cameras) or 'none'}"
           + (f"; cell {scene.cell}" if scene.cell else ""), flush=True)
-    viewer, viewed = None, None
+    viewer = None
+    if args.viewer:
+        viewer = subprocess.Popen([sys.executable, "-m", "brain.twin", "view", "--follow", url], cwd=repo.ROOT)
+        print(f"twin: the viewer is process {viewer.pid}; closing it leaves the twin running", flush=True)
+    print("twin: Ctrl+C stops the twin", flush=True)
     touching = set()
     tick = utra_sim.clock()
     try:
         while True:
+            api.cadence.start()
             t, q, state = host.sample()
             twin.follow(t, q)
             now = {(c["a"], c["b"]) for c in twin.contacts()}
@@ -61,24 +73,22 @@ def cmd_serve(args, sim_args):
             for a, b in sorted(touching - now):
                 print(f"twin: {a} clear of {b}", flush=True)
             touching = now
+            api.publish(twin.snapshot())
             api.process(t, state)
-            if args.viewer:
-                import mujoco.viewer
-                if viewed is not twin.model:  # (re)built: the viewer needs the new model
-                    if viewer is not None:
-                        viewer.close()
-                    viewer, viewed = mujoco.viewer.launch_passive(twin.model, twin.data), twin.model
-                if not viewer.is_running():
-                    break
-                viewer.sync()
-            tick = utra_sim.next_tick(tick, 0.01)
+            api.cadence.end()
+            tick = utra_sim.next_tick(tick, PERIOD_S)
     except KeyboardInterrupt:
         pass
     finally:
-        if viewer is not None:
-            viewer.close()
+        if viewer is not None and viewer.poll() is None:
+            viewer.terminate()
         api.close()
         twin.close()
+
+
+def cmd_view(args):
+    from . import viewer
+    return viewer.main(args.follow, args.check)
 
 
 def cmd_replay(args):
@@ -148,7 +158,13 @@ def main(argv=None):
     s.add_argument("--port", type=int, default=30100, help="the twin's HTTP port (default 30100)")
     s.add_argument("--scene", help="scene file (JSON): cell, obstacles, cameras")
     s.add_argument("--cell", help="cell folder (cell.json), overriding the scene's")
-    s.add_argument("--viewer", action="store_true", help="open MuJoCo's viewer")
+    s.add_argument("--viewer", action="store_true",
+                   help="also start the viewer (python -m brain.twin view), in a process of its own")
+    v = sub.add_parser("view", help="MuJoCo's viewer on a running twin, read-only")
+    v.add_argument("--follow", default="http://127.0.0.1:30100", metavar="URL",
+                   help="the twin's HTTP address (default http://127.0.0.1:30100)")
+    v.add_argument("--check", type=float, metavar="SECONDS",
+                   help="follow it for this long without a window, and say what arrived")
     r = sub.add_parser("replay", help="replay both captures and check every figure against its tolerance")
     r.add_argument("--json", action="store_true", help="print the results as JSON")
     n = sub.add_parser("snapshot", help="render the scene's cameras once")
@@ -166,7 +182,8 @@ def main(argv=None):
         p.error(f"unrecognised arguments: {' '.join(rest)}")
     if args.cmd == "serve":
         return cmd_serve(args, rest)
-    return {"replay": cmd_replay, "snapshot": cmd_snapshot, "export": cmd_export, "check": cmd_check}[args.cmd](args)
+    return {"view": cmd_view, "replay": cmd_replay, "snapshot": cmd_snapshot, "export": cmd_export,
+            "check": cmd_check}[args.cmd](args)
 
 
 if __name__ == "__main__":

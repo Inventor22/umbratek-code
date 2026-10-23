@@ -20,6 +20,7 @@ from the controller (twin.py), so contacts() reports what the arm touches, and n
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 import os
@@ -328,7 +329,10 @@ def build(scene=None):
     ET.SubElement(visual, "quality", shadowsize="4096", offsamples="0")
     ET.SubElement(visual, "map", znear="0.005", zfar="25")  # times the extent: 1 cm to 50 m
     ET.SubElement(visual, "headlight", ambient="0.25 0.25 0.25", diffuse="0.45 0.45 0.45", specular="0.05 0.05 0.05")
-    ET.SubElement(root, "statistic", extent="2", center="0.35 0 -0.2")
+    # meansize is the unit the viewer draws its markers in (centres of mass, joint axes, frames, contact points); no
+    # camera draws them. The compiler's own guess, from the cart's and the floor's sizes, was 0.4 m: a centre of mass
+    # drawn as a ball 320 mm across. 5 cm suits an arm whose links are about 10 cm across.
+    ET.SubElement(root, "statistic", extent="2", center="0.35 0 -0.2", meansize="0.05")
 
     default = ET.SubElement(root, "default")
     for cls, attrs in (
@@ -528,6 +532,16 @@ def build(scene=None):
 def compile_model(built):
     import mujoco
     return mujoco.MjModel.from_xml_string(built.xml, built.assets)
+
+
+def fingerprint(built):
+    """A digest of the generated MJCF and its meshes: two builds are the same model exactly when theirs match. Builds
+    of the same sources match on one platform; across platforms a few numbers can differ in their last digit (each C
+    library's sin and cos), which is why a follower (viewer.py) takes the twin's own MJCF rather than building it."""
+    h = hashlib.sha256(built.xml.encode())
+    for name in sorted(built.assets):
+        h.update(name.encode() + b"\0" + hashlib.sha256(built.assets[name]).digest())
+    return h.hexdigest()
 
 
 def export(built, folder):
