@@ -308,7 +308,7 @@ def cmd_find(args):
     else:
         networks = local_networks()
     if not networks:
-        raise ArmError("This PC has no usable IPv4 network. Connect to the controller first (see README).")
+        raise ArmError("This PC has no usable IPv4 network. Connect to the controller first (see docs/connecting.md).")
 
     hosts = []
     for net, mine in sorted(networks.items(), key=lambda kv: kv[0]):
@@ -317,7 +317,7 @@ def cmd_find(args):
         if len(mine) > 1:
             print(f"Warning: this PC has several addresses in {net} ({', '.join(map(str, sorted(mine)))}). "
                   "If one is a direct link to the arm, traffic may leave through the wrong adapter "
-                  "(see README > Troubleshooting).")
+                  "(see docs/troubleshooting.md).")
         hosts += [str(h) for h in (net if net.prefixlen >= 31 else net.hosts())]
 
     print(f"Scanning {', '.join(str(n) for n in sorted(networks))} for TCP port {CMD_PORT} ...")
