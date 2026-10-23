@@ -611,9 +611,9 @@ def off_the_loop():
               f"{held:.0f} ms: MuJoCo keeps Python's GIL while it loads a model onto the GPU)")
         if hasattr(os, "sched_getaffinity"):
             mine, theirs = sorted(os.sched_getaffinity(0)), sorted(os.sched_getaffinity(cams.pid()))
-            check(f"on Linux it keeps to the last quarter of the CPUs (CPUs {theirs[0]} to {theirs[-1]} of "
+            check(f"on Linux it keeps to the upper half of the CPUs (CPUs {theirs[0]} to {theirs[-1]} of "
                   f"{len(mine)}), so the GPU driver's work doesn't delay the loop's wake-ups",
-                  len(mine) < 4 and theirs == mine or theirs == mine[-(len(mine) // 4):], (mine, theirs))
+                  len(mine) < 4 and theirs == mine or theirs == mine[len(mine) // 2:], (mine, theirs))
         body = cams.frame(snap, "wrist", "rgb.png")
         check("and as the HTTP endpoint sends them: a PNG, byte for byte the twin's own frame's", body == png_bytes(
             want["wrist"].rgb))
@@ -818,6 +818,68 @@ def cadence():
               f"{gaps[-1]:.1f} (perception counts a stream on time within 50 to 150)", len(gaps) > 200
               and q(0.05) > 85 and q(0.95) < 115 and gaps[0] >= 50 and gaps[-1] <= 150, gaps)
     finally:
+        end(proc)
+
+
+# ---- live: frames taken as the arm sweeps ------------------------------------------------------------------------
+
+def frames_in_time():
+    print("== frames pulled as the arm sweeps: each taken between its request and its reply, as perception assumes")
+    proc, up = twin_process("twin_frames_in_time.log")
+    if not up:
+        return
+    sys.path.insert(0, repo.SCRIPTS)
+    import arm as armcli
+    arm, done, frames = None, [], []
+    sweep = [(35, -20, 70, -10, 65, 40), (-35, -20, 70, -10, 115, -40)]  # J1 +/-35 deg over the table, 45 deg/s
+
+    def sweeping():
+        for k in range(4):
+            arm.moveto_joint_p2p(rad(sweep[k % 2]), math.radians(45), math.radians(150), 0)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and json.loads(http("/state")[1])["controller"]["status"] != 1:
+                time.sleep(0.05)
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and json.loads(http("/state")[1])["controller"]["status"] != 2:
+                time.sleep(0.1)
+        done.append(True)
+
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and json.loads(http("/loop?seconds=1")[1]).get("camerasReady") != 1:
+            time.sleep(0.1)
+        arm = armcli.open_arm(HOST)
+        arm.reset_err()
+        arm.set_motion_mode(0)
+        arm.set_motion_enable(8, 1)
+        arm.set_motion_status(0)
+        time.sleep(0.4)
+        th = threading.Thread(target=sweeping, daemon=True)
+        th.start()
+        while not done and th.is_alive():
+            t0 = time.perf_counter()  # the twin's clock is the controller's, perf_counter: one clock for every process
+            code, body = http("/cameras/overhead.npz")
+            t1 = time.perf_counter()
+            if code == 200:
+                meta = json.loads(str(npz(body)["meta"]))
+                frames.append((t0, t1, meta["time"], meta["joints_deg"]))
+            time.sleep(max(0.0, 0.2 - (t1 - t0)))
+        th.join()
+        # The snapshot a frame shows is the loop's first after the request arrived; the loop takes its sample at the
+        # start of a step, so up to one step (10 ms) before.
+        early = max((t0 - t for t0, t1, t, q in frames), default=1.0)
+        late = max((t - t1 for t0, t1, t, q in frames), default=1.0)
+        took = sorted((t1 - t0) * 1000.0 for t0, t1, t, q in frames)
+        j1 = [q[0] for *_, q in frames]
+        check(f"{len(frames)} frames pulled 5 times a second as the arm swept J1 from {min(j1, default=0):.0f} to "
+              f"{max(j1, default=0):.0f} deg: each taken between its request and its reply (at most "
+              f"{max(early, 0) * 1000:.1f} ms before the request, by the loop's step; {max(-late, 0) * 1000:.0f} ms "
+              f"before the reply at the least), the requests taking {took[len(took) // 2]:.0f} ms (median), "
+              f"{took[int(0.95 * (len(took) - 1))]:.0f} ms (95th percentile)", len(frames) >= 25
+              and max(j1) - min(j1) > 50 and early <= 0.01 and late <= 0, (len(frames), early, late, j1))
+    finally:
+        if arm is not None:
+            arm.socket_fp.close()
         end(proc)
 
 
@@ -1100,7 +1162,7 @@ def replays():
 
 
 SECTIONS = (model_from_sources, cell_parts, obstacles, cameras, coupling_virtual, live, off_the_loop, cadence,
-            viewer_follows, viewer_process, replays)
+            frames_in_time, viewer_follows, viewer_process, replays)
 
 
 def main():

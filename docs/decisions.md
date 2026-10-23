@@ -1006,7 +1006,7 @@ path.
   and gets ready in the background: it's sent the model and compiles it, makes OpenGL contexts and an MjData of its
   own, and renders each camera once; it does the same for each new build. For a frame it renders the snapshot's state,
   encodes it (`.npz` or PNG) and sends back the bytes. One frame at a time; a process that dies, or doesn't answer
-  within 10 s, is replaced at the next frame. On Linux it keeps to the last quarter of the CPUs. `/pose`, its stream
+  within 10 s, is replaced at the next frame. On Linux it keeps to the upper half of the CPUs. `/pose`, its stream
   and `/model` are answered from snapshots too; `/state` and the POSTs still run on the loop, between its steps.
   `GET /loop` reports the loop's cadence.
 - **Alternatives:** a render thread with its own context in the twin's process (MuJoCo holds Python's GIL while it
@@ -1024,8 +1024,13 @@ path.
   perception itself pulling frames from the twin in WSL2: 2000 ticks in 20 s, 99% within 10.15 ms of the one before,
   the worst 11.47. The frames are pixel for pixel what `Twin.render` gives. The CPUs: in WSL2 the GPU driver's work
   delays other threads' wake-ups on the CPUs it runs on. With frames rendered back to back, a 10 ms loop in another
-  process had 99% of its ticks within 16.8 ms and the worst at 20.8; with the renderer kept to 4 of the 16 CPUs, 10.2
-  and 10.4 ms, the renderer making 57 frames in 6 s instead of 68. Getting ready as the twin starts: started with the
+  process had 99% of its ticks within 16.8 ms and the worst at 20.8; with the renderer kept to 8 of the 16 CPUs, 10.1
+  and 10.4 ms, the renderer making 64 frames in 6 s instead of 68. Kept to 4, the loop did no better and the renderer
+  made 57: perception's requests took 114 ms (median) against main's 92, in an A/B of the same sweep, where with 8
+  they took 99 and 104 ms against main's 92 and 97 (two runs each). That A/B swept the arm over the table, J1 +/-35 deg
+  at 45 deg/s, with perception mapping the overhead camera, then parked it clear: the maps 5 s later were the same
+  with both twins (no voxel in space the camera sees through, none occupied more than 3 cm from a true surface), and
+  in every frame the arm was among the poses perception left out. Getting ready as the twin starts: started with the
   first frame asked for instead, the process made perception's first frames wait for it, so in the planner suite's
   chain, under the full run's load, the crate showed in the map 7.3 s after perception served it, against 1.2 s
   before. Ready beforehand, the first frame takes 69 ms on Windows and 128 ms in WSL2, and so does the first after a

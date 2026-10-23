@@ -236,18 +236,20 @@ as before, every frame made a tick late. Each figure is the suite's, run on Wind
 
 | What | Windows | WSL2 |
 | ---- | ------- | ---------- |
-| The loop under perception's load: one camera's `.npz` (with segmentation) 5 times a second | 99% of ticks within 10.41 ms of the one before, 0 of 593 late, the worst 10.6 ms (idle: 10.49, 0, 10.8) | 10.11 ms, 0 of 594, 10.2 ms (idle: 10.10, 0, 10.2) |
-| ... frames one after another from two clients (`.npz` and PNG) | 165 frames in 6 s; 10.47 ms, 0 of 629, 10.9 ms | 77 frames; 10.15 ms, 0 of 675, 10.2 ms |
-| ... the camera process starting with the twin and getting ready | ready in about 1 s; the worst tick meanwhile 10.6 ms; the first frame then 69 ms | 1.7 s; 12.1 ms; 128 ms |
-| ... an obstacle added (the model rebuilt): the next frame | 77 ms, the obstacle in it | 121 ms |
-| The simulated controller's status meanwhile | 5th to 95th percentile 99.6 to 100.4 ms apart, all 98.5 to 101.3 | 99.8 to 100.2, all 98.9 to 101.2 |
+| The loop under perception's load: one camera's `.npz` (with segmentation) 5 times a second | 99% of ticks within 10.41 ms of the one before, 0 of 593 late, the worst 10.6 ms (idle: 10.49, 0, 10.8) | 10.14 ms, 0 of 593, 10.4 ms (idle: 10.15, 0, 10.7) |
+| ... frames one after another from two clients (`.npz` and PNG) | 165 frames in 6 s; 10.47 ms, 0 of 629, 10.9 ms | 87 frames; 10.15 ms, 0 of 695, 10.3 ms |
+| ... the camera process starting with the twin and getting ready | ready in about 1 s; the worst tick meanwhile 10.6 ms; the first frame then 69 ms | 1.7 s; 12.4 ms; 112 ms |
+| ... an obstacle added (the model rebuilt): the next frame | 77 ms, the obstacle in it | 107 ms |
+| The simulated controller's status meanwhile | 5th to 95th percentile 99.6 to 100.4 ms apart, all 98.5 to 101.3 | 99.8 to 100.2, all 99.4 to 100.7 |
 | For comparison: the loop with frames rendered on it, 5 a second (as before; an experiment) | 95% within 18.8 ms, worst 41.6 | 95% within 77.3 ms, worst 113.3 |
 
 The viewer is checked without a window: it follows a joint move at about 100 states a second, each on the
 controller's path, and settles on the twin's joints exactly; it takes the twin's new model when an obstacle is added
 or removed, shows one moved without a new model, only ever makes `GET /model` and `GET /pose/stream` requests, and,
 when the twin stops, says so and follows it again when it's back. A viewer's process ended while it followed leaves
-the twin running: its controller's status at 10 Hz, its loop, HTTP, and a move it then takes. With
+the twin running: its controller's status at 10 Hz, its loop, HTTP, and a move it then takes. Frames pulled 5 times
+a second while the arm sweeps J1 from -35 to 35 deg are each taken between their request and their reply, as
+perception assumes when it leaves the arm out: the requests take 65 ms (median) on Windows and 100 ms in WSL2. With
 `TWIN_TEST_WINDOW=1` on Windows, the suite also opens the real window (`serve --viewer`) and closes it as its close
 button does: the viewer exits with 0 and the twin carries on.
 

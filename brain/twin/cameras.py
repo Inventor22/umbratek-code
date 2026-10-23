@@ -290,18 +290,18 @@ class CameraProcess:
 
 
 def confine():
-    """On Linux, keeps this process to the last quarter of the CPUs it may use (from 4 CPUs up), for a process that
+    """On Linux, keeps this process to the upper half of the CPUs it may use (from 4 CPUs up), for a process that
     renders beside the twin's loop: the camera process, or a viewer in WSL2. In WSL2 the GPU driver's work delays
     other threads' wake-ups on the CPUs it runs on: with frames rendered back to back, a 10 ms loop in another process
-    woke up to 10 ms late (99th percentile 16.8 ms, worst 20.8); with the renderer kept to 4 of 16 CPUs, at worst
-    10.4 ms (docs/decisions.md D91). Threads made afterwards, the driver's included, inherit it. Returns the CPUs kept,
-    or None."""
+    woke up to 10 ms late (99th percentile 16.8 ms, worst 20.8); with the renderer kept to 8 of 16 CPUs, at worst
+    10.4 ms. Kept to 4, the loop did no better and each frame took 17 ms longer (docs/decisions.md D91). Threads made
+    afterwards, the driver's included, inherit it. Returns the CPUs kept, or None."""
     if not hasattr(os, "sched_setaffinity"):
         return None
     cpus = sorted(os.sched_getaffinity(0))
     if len(cpus) < 4:
         return None
-    keep = cpus[-(len(cpus) // 4):]
+    keep = cpus[len(cpus) // 2:]
     os.sched_setaffinity(0, keep)
     return keep
 
