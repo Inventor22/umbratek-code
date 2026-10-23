@@ -120,6 +120,8 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .led[data-on="live"] { background: var(--green); }
   .led[data-on="slow"] { background: #8f8b83; }
   .led[data-on="dead"] { background: var(--alarm); }
+  /* The manual-motion policy, under the link line; its lamp lights amber while the hold-to-move key is held. */
+  .policy .led[data-on="held"] { background: var(--amber); }
 
   .readout-window {
     grid-area: state;
@@ -858,6 +860,7 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   <div class="ident">
     <h1>Jog panel</h1>
     <p class="link"><span class="led" id="linkLed"></span><span id="linkText">Connecting…</span></p>
+    <p class="link policy" id="policy" hidden><span class="led" id="holdLed" hidden></span><span id="policyText"></span></p>
   </div>
   <div class="readout-window" id="stateWindow" data-tone="idle" aria-live="polite">
     <p class="state-name" id="stateName">CONNECTING</p>
@@ -2054,6 +2057,10 @@ function describe(s) {
     return ["READY", `${s.run.program} is ${s.run.halt ? "halted" : "paused"}${at}: Resume or Step it in Program. `
       + "You can jog first; it carries on from wherever the arm is.", "ready"];
   }
+  if (s.manual && s.manual.holdToMove && !s.manual.held) {
+    return ["READY", "Hold-to-move is on: moves need the hold-to-move key held on the device that asked for it. "
+      + "Enable, STOP and freedrive work without it.", "ready"];
+  }
   return ["READY", "Click a key for one step, or drag in the 3D view or a joint's fader cap to plan a pose, then press Move.", "ready"];
 }
 
@@ -2074,6 +2081,17 @@ function render() {
   $("linkLed").dataset.on = live ? (slow ? "slow" : "live") : s || settled ? "dead" : "";
   setText($("linkText"), live ? `Live · ${s.ip}${slow ? ` · status ${s.age.toFixed(1)} s old` : ""}`
     : s ? `No status from ${s.ip}` : settled ? "Jog server not answering" : "Connecting…");
+  // The manual-motion policy, set by the program that started the server (or its flags), and the hold's state.
+  const manual = s && s.manual;
+  $("policy").hidden = !(manual && (manual.reducedSpeed || manual.holdToMove));
+  if (!$("policy").hidden) {
+    $("holdLed").hidden = !manual.holdToMove;
+    $("holdLed").dataset.on = manual.holdToMove && manual.held ? "held" : "";
+    const parts = [];
+    if (manual.reducedSpeed) parts.push(`Reduced speed, ${CONFIG.toolRedline} mm/s`);
+    if (manual.holdToMove) parts.push(`${parts.length ? "hold" : "Hold"} to move: ${manual.held ? "held" : "not held"}`);
+    setText($("policyText"), parts.join(" · "));
+  }
 
   canJog = live && !s.err && s.enabled && [0, 1, 2].includes(s.state) && !s.stopAlarm && !localStopAlarm
     && !s.freedrive && !(s.run && RUN_MOVING.includes(s.run.state));

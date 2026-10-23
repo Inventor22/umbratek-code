@@ -37,6 +37,19 @@ SEGMENT_TOLERANCE_MM = 0.1
 MAX_TOOL_SPEED_MM_S = 1000.0
 MAX_ORI_SPEED_DEG_S = 180.0
 TOOL_SPEED_SAMPLES = 16  # points along a joint move at which the tool point's speed is bounded (and both ends)
+# Reduced speed: ISO 10218-1's limit for moving the arm by hand, 250 mm/s at the tool. With the server's manual-motion
+# policy asking for it (jog_server.py --reduced-speed, or POST /api/manual), every move is sent slowly enough that
+# neither the flange nor the tool point in use can pass it (docs/decisions.md D101 and D102).
+REDUCED_SPEED_MM_S = 250.0
+REDUCED_WHY = f", keeping the tool point and flange under {REDUCED_SPEED_MM_S:g} mm/s (reduced speed)"
+REDUCED_STEP_DEG = 1.0  # a joint move's bound is taken where no joint turns more than this between samples
+# How fast the controller may turn the tool on a straight move, for the bound: 1 rad/s for every this many mm/s of the
+# speed sent. The simulator assumes 100 (unverified, D11); the arm's turns fitted 50 (D54, four turns of one size), so
+# this allows for the controller turning twice as fast as measured.
+REDUCED_TURN_MM_PER_RAD = 25.0
+# Without the arm model the lever arms aren't known: every joint is taken to swing the flange this far from its axis,
+# the links from the shoulder to the flange end to end (1145 mm), rounded up.
+REDUCED_REACH_MM = 1150.0
 
 
 class PlanError(Exception):
@@ -62,6 +75,74 @@ def capped_joint_speed(speed, travel):
             if cap < sent:
                 sent, limiting = cap, i
     return sent, limiting
+
+
+def lever_bound(model, start, goal, tools=()):
+    """An upper bound (mm per rad of the leading joint) on how fast the flange, or the point of any of `tools` (each
+    flange <- point, 4x4), moves anywhere on the joint move start -> goal (deg), every joint turning in step as the
+    controller's point-to-point moves turn them.
+
+    It's the sum of each joint's share of the turn times the point's distance from that joint's axis (joints turning
+    together add up), taken where no joint turns more than REDUCED_STEP_DEG from one sample to the next, plus the most
+    that sum can grow between samples: a point's distance from a joint's axis changes no faster than the joints beyond
+    that joint turn, times the point's reach from them, which is at most the links from the shoulder to the flange, end
+    to end, and the point's offset. Without a model every joint is taken to swing the points REDUCED_REACH_MM and the
+    tool's offset from its axis."""
+    travel = [g - s for s, g in zip(start, goal)]
+    lead = max((abs(d) for d in travel), default=0.0)
+    if lead <= 0:
+        return 0.0
+    shares = [abs(d) / lead for d in travel]
+    points = [kin.IDENTITY] + [t for t in tools if t is not None]
+    offset = max(math.sqrt(t[0][3] ** 2 + t[1][3] ** 2 + t[2][3] ** 2) for t in points)  # m
+    if model is None:
+        return sum(shares) * (REDUCED_REACH_MM / 1000.0 + offset) * 1000.0
+    n = max(1, int(math.ceil(lead / REDUCED_STEP_DEG)))
+    worst = 0.0
+    for k in range(n + 1):
+        q = [s + d * k / n for s, d in zip(start, travel)]
+        frames = model.frames(q)
+        axes = [([f[r][0] * a[0] + f[r][1] * a[1] + f[r][2] * a[2] for r in range(3)], [f[r][3] for r in range(3)])
+                for (_, _, a, _), f in zip(model.joints, frames)]
+        for point in points:
+            t = kin.mul(frames[-1], point)
+            total = 0.0
+            for (z, o), share in zip(axes, shares):
+                if share > 0:
+                    arm = [t[r][3] - o[r] for r in range(3)]
+                    along = arm[0] * z[0] + arm[1] * z[1] + arm[2] * z[2]
+                    total += share * math.sqrt(max(arm[0] ** 2 + arm[1] ** 2 + arm[2] ** 2 - along * along, 0.0))
+            worst = max(worst, total)
+    reach = sum(math.sqrt(f[0][3] ** 2 + f[1][3] ** 2 + f[2][3] ** 2) for _, f, _, _ in model.joints[2:]) + offset
+    beyond = [sum(abs(d) for d in travel[j + 1:]) for j in range(len(travel))]  # deg the joints past each one turn
+    growth = sum(share * turn for share, turn in zip(shares, beyond)) * math.radians(1.0) * reach
+    return (worst + growth / (2 * n)) * 1000.0
+
+
+def reduced_joint_speed(model, start, goal, tools=(), limit=REDUCED_SPEED_MM_S):
+    """The fastest the leading joint may turn (deg/s, rounded down to 0.1, at least 0.1) on the joint move start -> goal
+    for neither the flange nor any of `tools`' points to pass `limit` mm/s (lever_bound); None if they don't move (by
+    less than a micron per radian of the turn, a point on the turning axis, say)."""
+    per = lever_bound(model, start, goal, tools)
+    if per <= 1e-3:
+        return None
+    return max(0.1, math.floor(math.degrees(limit / per) * 10) / 10)
+
+
+def reduced_line_speed(length_mm, turn_deg, reach_mm, limit=REDUCED_SPEED_MM_S):
+    """The fastest (mm/s, rounded down to 0.1, at least 0.1) to send a straight move of the flange, length_mm long and
+    turning turn_deg, for neither the flange nor a point up to reach_mm from it to pass `limit` mm/s.
+
+    The controller drives the flange along its line at the speed sent or slower, and its turn keeps pace with the line
+    (as the simulator's does), at no more than 1 rad/s for every REDUCED_TURN_MM_PER_RAD mm/s (assumed, D102). So the
+    move takes at least max(length, turn x REDUCED_TURN_MM_PER_RAD) / speed, while a point reach_mm out travels at most
+    length + turn x reach_mm."""
+    turn = math.radians(abs(turn_deg))
+    need = abs(length_mm) + turn * reach_mm
+    pace = max(abs(length_mm), turn * REDUCED_TURN_MM_PER_RAD)
+    if need <= pace * (1.0 + 1e-6):  # the limit itself (within a millionth: a turn worked out from poses has noise)
+        return limit
+    return max(0.1, min(limit, math.floor(limit * pace / need * 10) / 10))
 
 
 def blocked(hit, margin_mm=10):
@@ -95,20 +176,24 @@ def thin(path, count):
 
 
 class Planner:
-    """Plans moves for one arm model (with the cell's tool and zones in it) and its kinematics."""
+    """Plans moves for one arm model (with the cell's tool and zones in it) and its kinematics. With `reduced` (the tool
+    in use, flange <- its point, 4x4), reduced speed is on: every move it plans keeps that point and the flange under
+    REDUCED_SPEED_MM_S."""
 
-    def __init__(self, model, joint_acc=None, tool_acc=None, joint_jerk=None, tool_jerk=None):
+    def __init__(self, model, joint_acc=None, tool_acc=None, joint_jerk=None, tool_jerk=None, reduced=None):
         self.model = model
         self.kin = kin.Kinematics(model)
         self.joint_acc = joint_acc or JOINT_ACC_DEG_S2
         self.tool_acc = tool_acc or TOOL_ACC_MM_S2
         self.joint_jerk = joint_jerk or JOINT_JERK_DEG_S3
         self.tool_jerk = tool_jerk or TOOL_JERK_MM_S3
+        self.reduced = reduced
 
     # -- joint moves ---------------------------------------------------------------------------------------------
     def joint(self, start, goal, speed, label="the joints", tool=None, tool_speed=None):
         """A joint move. With `tool_speed` (mm/s) it's also slowed until the tool point (`tool`: flange <- tool point)
-        can't pass that speed anywhere on the way (tool_speed_per_deg_s)."""
+        can't pass that speed anywhere on the way (tool_speed_per_deg_s); with reduced speed on, until neither the tool
+        point nor the flange can pass REDUCED_SPEED_MM_S (reduced_joint_speed)."""
         start, goal = [float(v) for v in start], [float(v) for v in goal]
         for i, g in enumerate(goal):
             low, high = DRAG_LIMITS_DEG[i]
@@ -125,6 +210,10 @@ class Planner:
             cap = math.floor(tool_speed / per * 10) / 10 if per > 0 else sent
             if cap < sent:
                 sent, why = max(cap, 0.1), f", keeping the tool point under {tool_speed:g} mm/s"
+        if self.reduced is not None:
+            cap = reduced_joint_speed(self.model, start, goal, [self.reduced, tool])
+            if cap is not None and cap < sent:
+                sent, why = cap, REDUCED_WHY
         acc = min(max(100.0, sent / 0.3), self.joint_acc)
         lead = max(travel)
         profile = motion_profile.double_s(lead, sent, acc, self.joint_jerk) if lead > 0 else None
@@ -182,6 +271,13 @@ class Planner:
         if length < 0.01 and turn < 0.01:
             return Plan("line", start, start, [start], [], 0.0, f"Already at {label}", tool, (t0, target))
         n = max(1, int(math.ceil(length / LINE_STEP_MM)), int(math.ceil(turn / LINE_STEP_DEG)))
+        segments, why = None, ""
+        if self.reduced is not None:  # each segment the controller drives, the tool point and flange under the limit
+            segments = self._segments(t0, target, tool, [start] * (n + 1), speed)
+            reach = max(math.dist(kin.position(t), (0.0, 0.0, 0.0)) for t in (tool, self.reduced))
+            cap = min(reduced_line_speed(seg_len, seg_turn, reach) for _, seg_len, seg_turn in segments)
+            if cap < speed:
+                speed, why = cap, REDUCED_WHY
         acc = min(max(200.0, speed / 0.3), self.tool_acc)
         # The line's pace: how long each sample takes at the speed it actually reaches (short lines never reach the
         # speed asked for) or at the turning speed, whichever is slower.
@@ -211,7 +307,8 @@ class Planner:
                 raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit)
             path.append(nxt)
             q = nxt
-        segments = self._segments(t0, target, tool, path, speed)
+        if segments is None:  # they depend on the line and its number of samples, not on the joints solved
+            segments = self._segments(t0, target, tool, path, speed)
         duration = START_DELAY_LINE_S
         for flange, seg_len, seg_turn in segments:
             # unverified: how the controller paces a line's turn; the simulator counts 1 rad as 100 mm
@@ -220,7 +317,7 @@ class Planner:
         sent = [(flange, speed, acc) for flange, _, _ in segments]
         pieces = f" in {len(sent)} segments" if len(sent) > 1 else ""
         text = f"Straight line to {label}, {length:.1f} mm" + (f" turning {turn:.1f}\u00b0" if turn >= 0.05 else "") + \
-            f", at {speed:g} mm/s{pieces}, about {duration:.1f} s"
+            f", at {speed:g} mm/s{pieces}{why}, about {duration:.1f} s"
         return Plan("line", start, path[-1], path, sent, duration, text, tool, (t0, target))
 
     def _segments(self, t0, target, tool, path, speed):

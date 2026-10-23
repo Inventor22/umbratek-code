@@ -19,7 +19,9 @@ A program is a tree of steps, saved as JSON in cell/programs/<name>.json:
 Every step has a stable "id". Moves name targets, so re-teaching a target or recalibrating its frame changes every
 move to it. Speeds: tool mm/s for lines, joint deg/s for joint, planned and learned moves, the program's defaults
 where a step has none, times the override; lines, and whatever the brain proposes, are capped at REDUCED_SPEED_MM_S
-at the tool (ISO 10218-1's reduced speed) unless the program says "fullSpeed": true.
+at the tool (ISO 10218-1's reduced speed) unless the program says "fullSpeed": true. With the server's reduced speed
+on (jog_server.py's manual-motion policy) every move is, fullSpeed or not, the flange too (planner.Planner's
+`reduced`); with its hold-to-move on, a run pauses when the hold lapses, and a move to a target stops.
 
 What the brain proposes, the safety shell (safety.py) checks whole before anything moves, and refuses with its reasons
 if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,
@@ -56,7 +58,7 @@ MOVE_KINDS = ("joint", "line", "planned")
 IO = re.compile(r"^(tool|controller)\.(\d{1,2})$")
 MAX_DEPTH = 6
 MAX_STEPS = 2000
-REDUCED_SPEED_MM_S = 250.0
+REDUCED_SPEED_MM_S = plannermod.REDUCED_SPEED_MM_S
 DEFAULT_SPEEDS = {"tcp": 50.0, "ori": 30.0, "joint": 20.0}
 LEARNED_WITHIN_MM, MAX_WITHIN_MM = 100.0, 500.0
 LEARNED_SECONDS = 60.0
@@ -624,7 +626,9 @@ class Runner:
             self.panel.rearm()
 
     def _abort(self):
-        """The executor's check, a few times a second: a pause or stop asked for, or (for a manual move) a quiet page."""
+        """The executor's check, a few times a second: a pause or stop asked for, or (for a manual move) a quiet page;
+        and with hold-to-move on, its hold lapsed, which pauses a program's run and stops a move to a target, as a quiet
+        page does."""
         if self.request == "stop":
             return self.reason or "the operator pressed Stop"
         if self.request == "pause":
@@ -632,7 +636,10 @@ class Runner:
         if self.manual and time.monotonic() - self.panel.heard_at > PAGE_SILENT_S:
             self.request, self.reason = "stop", "the jog page went quiet"
             return "the jog page went quiet"
-        return None
+        lapsed = self.panel.hold_lapsed() if self.mode != "dry" else None
+        if lapsed and self.manual:
+            self.request, self.reason = "stop", lapsed
+        return lapsed
 
     def _check_live(self):
         """Between and during non-move steps: a controller error or lost status ends the run."""
@@ -648,7 +655,8 @@ class Runner:
         speeds = program["speed"]
         base = s.get("speed", speeds["tcp"] if s["kind"] == "line" else speeds["joint"])
         speed = base * self.override / 100.0
-        capped = s["kind"] == "line" and not program.get("fullSpeed") and speed > REDUCED_SPEED_MM_S
+        capped = s["kind"] == "line" and (self.panel.reduced_speed or not program.get("fullSpeed")) and \
+            speed > REDUCED_SPEED_MM_S
         return (REDUCED_SPEED_MM_S if capped else speed), capped
 
     def _do(self, program, s, path):
@@ -667,8 +675,9 @@ class Runner:
         if kind == "move":
             speed, capped = self._speed(program, s)
             if capped:
-                self.log("speed.capped", speed=REDUCED_SPEED_MM_S, reason="reduced speed: the program isn't marked "
-                                                                         "for full speed")
+                why = "the program isn't marked for full speed" if not program.get("fullSpeed") else \
+                    "the server's reduced speed is on"
+                self.log("speed.capped", speed=REDUCED_SPEED_MM_S, reason=f"reduced speed: {why}")
             if s["kind"] == "planned":
                 self._planned(program, s, speed)
                 return
@@ -731,8 +740,10 @@ class Runner:
 
     # -- steps the brain proposes ------------------------------------------------------------------------------------
     def _tool_cap(self, program):
-        """The tool point's speed limit for what the brain proposes (mm/s): reduced speed unless marked full speed."""
-        return plannermod.MAX_TOOL_SPEED_MM_S if program.get("fullSpeed") else REDUCED_SPEED_MM_S
+        """The tool point's speed limit for what the brain proposes (mm/s): reduced speed unless marked full speed and
+        the server's reduced speed is off."""
+        return plannermod.MAX_TOOL_SPEED_MM_S if program.get("fullSpeed") and not self.panel.reduced_speed \
+            else REDUCED_SPEED_MM_S
 
     def _ask_brain(self, kind, fields):
         """Ask the brain, waiting as long as its deadline allows but not a moment past a STOP or pause, which raise
