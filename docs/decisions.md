@@ -1060,3 +1060,96 @@ path.
   MuJoCo's default options, which leave it all out). Natively the shadow map costs nothing measurable: 4.4 and 3.7 ms
   a frame at the window's size with a 4096 and a 2048 map, reading the pixels back included, which the window doesn't
   do. The window keeps up with the screen, so nothing was taken away.
+
+## D100 to D109: reduced speed, hold-to-move and the launcher
+
+Decided on 2026-10-23, building what the owner's modes app asks of the spine. The app (Survey, Teach, Rehearse, Run and
+Review) starts the jog server itself and serves its own web app to a tablet and this PC, forwarding to the spine over
+loopback; its teaching mode is "reduced speed and a hold-to-move key". The requirement: the spine stays the only thing
+that moves the arm, and "the safety rules must be enforced here in the spine, not in a web page" or in the app.
+
+## D100. The manual-motion policy is the spine's own
+
+- **Decision:** reduced speed and hold-to-move are settings of the jog server: off unless `--reduced-speed` and
+  `--hold-to-move` start it so, changed by `POST /api/manual`, reported by `GET /api/status` (`manual`), and enforced
+  where moves are made: the jog and planned-move paths, the spine's planner (`scripts/planner.py`) that every program
+  step, move to a target and brain's proposal is planned with, and the runner's supervision. A change is refused while
+  the arm moves (a jog or planned move under way, or a run that isn't paused). With both off, every speed sent and
+  every message is as before.
+- **Alternatives:** enforcing them in the modes app or its web page (neither moves the arm, and anything reaching the
+  spine another way would get round them); a setting per request (any client could ask for full speed); changing them
+  mid-move (a move planned under one policy would run under the other).
+- **Why:** the spine is the one thing every move goes through, so a rule kept there can't be got round, and the
+  checks stay small enough to test here against the simulator. The app only asks.
+
+## D101. Reduced speed: a joint move is capped by a bound on its lever arms
+
+- **Decision:** with reduced speed on, every joint move (a jog step, a planned pose, a program's joint move, each
+  segment of the brain's paths and bursts) is sent no faster than keeps both the flange and the tool point in use under
+  250 mm/s: `planner.lever_bound`, the sum of each joint's share of the turn times the point's distance from its axis
+  (joints turning together add up), taken where no joint turns more than 1° between samples, plus the most that sum
+  can grow between them (a point's distance from an axis changes no faster than the joints beyond it turn, times its
+  reach: at most the links from the shoulder, 1145 mm, and the tool's offset). The speed is lowered, never refused,
+  and the message says why ("..., keeping the tool point and flange under 250 mm/s (reduced speed)"). A program's
+  `"fullSpeed": true` is overridden. Without the arm model, every joint is taken to swing the tool 1150 mm out.
+- **Alternatives:** D45's bound as it was (the tool point only, at 17 samples, so not a bound between them); the page's
+  redline (one joint at a time from the pose now, and only a warning); refusing moves in the red (the requirement was
+  to slow them); one cap from the arm's full reach (about 12 °/s for every joint, even the wrist's).
+- **Why:** by the triangle inequality the sum bounds the speed of any point the turns carry, and the growth term makes
+  it hold between samples, so the cap holds for the actual pose and the joints that turn. Tested in-process, 46 random
+  moves at their caps, sampled at 400 points, never passed 250 mm/s; with one joint turning the bound is exact but for
+  the 0.1 °/s rounding (248.9 mm/s at least). When several turn it's up to about 40% cautious, as their contributions
+  seldom line up: a planned move of J1, J2 and J6 was capped at 11.1 °/s, which carried the tool point at 177.8 mm/s
+  at most (177.5 measured in the simulator).
+
+## D102. Reduced speed: a straight move, and how fast a turn is taken to go
+
+- **Decision:** a tool step or a program's straight line is sent at 250 mm/s at most, the controller's line speed
+  being the flange's, and slower when it turns. Each segment is taken to last at least its length, or its turn at
+  25 mm a radian, over the speed sent, while a point r mm from the flange travels at most the length plus the turn
+  times r; the speed sent keeps that under 250 mm/s (`planner.reduced_line_speed`). So a 5° turn of a 200 mm tool,
+  asked for at 1000 mm/s, is sent at 31.2 mm/s, and a slide at 250.
+- **Alternatives:** the simulator's pace for a turn, 1 rad as 100 mm (D11, unverified); the arm's fitted pace, 1 rad as
+  50 mm (D54, from four turns of one size); bounding the flange only (a long tool's point would sweep past 250 mm/s
+  on a turn).
+- **Why:** how the controller paces a turn isn't known. The arm turned faster than the simulator assumes, and D54's
+  fit rests on four turns, so the bound allows for turns twice as fast as fitted; slides, which don't turn, keep the
+  full 250 mm/s. Measuring turns of 5, 30 and 90° at 10, 25 and 100 mm/s (D54) would let it be relaxed. Known limits:
+  as for the redline, only the tool point and the flange's centre are bounded, not what sticks out further; and the
+  controller's own speed error (long lines ran 0.25% fast, D54) isn't allowed for.
+
+## D103. Hold-to-move is a hold renewed every 0.1 s, which the server watches
+
+- **Decision:** `POST /api/hold {"ms": N}` holds for N ms from now (100 to 1000, 400 by default) and `{"ms": 0}` lets
+  go. With hold-to-move on and no current hold, jogs, planned moves, moves to targets and starting, resuming or
+  stepping a run are refused, saying why; a dry run needs none, and Enable, STOP, freedrive, the cell's API and
+  pausing or stopping a run work regardless. When the hold lapses or is let go while the arm moves, a jog or planned
+  move is stopped by the watchdog as STOP does, within its 0.1 s cadence (a let-go wakes it at once); a program's run
+  pauses (its supervision checks every 0.05 s), and Resume with the key held again re-plans from where the arm
+  stopped; a move to a target stops, as it does when the page goes quiet. Freedrive is never stopped by it. The hold
+  is the server's, not a client's: while it's held, any client with the token may move the arm.
+- **Alternatives:** a hold per client (behind the modes app the server sees one client, and the app holds for the
+  device that asked); stopping a run outright (the requirement: holding again and resuming carries on); pausing a move
+  to a target (the page has no Resume for one); a hold-to-move key on this page (with a mouse, one key can't be held
+  while another is clicked, and the requirement left it optional).
+- **Why:** an enabling device must stop the arm both when it's let go and when its link fails, and a lease does both:
+  a client that crashes or loses its Wi-Fi stops renewing, and the arm stops half a second later. Measured against the
+  simulator: let go, a move stopped 1 to 16 ms after the server had the release; a lapse stopped one 0.42 to 0.51 s
+  after the last renewal, which held for 0.4 s.
+
+## D104. The launcher's token, and "simulated"
+
+- **Decision:** if `UMBRATEK_PANEL_TOKEN` is set when the server starts, it's the page's token, so the program that
+  started the server can call its POST API too. A value shorter than 16 characters, or with anything but URL-safe
+  base64's letters, digits, `-` and `_` (so no `=` padding either), stops the server before it connects to the
+  controller, with exit code 2 and a message that says what's wanted without echoing the value; the token is never
+  printed.
+  `GET /api/status` says `"simulated": true` when the controller's address is this PC's own: 127.0.0.0/8 or ::1
+  (IPv4-mapped too), or localhost when it resolves to those alone. Any other address or name is reported live.
+- **Alternatives:** a token file, or the token printed for the launcher to read (a file outlives the server, and a
+  console may be logged); the launcher saying whether it started the simulator (it could be wrong; the address can't);
+  resolving any name (a name for this PC is still a name).
+- **Why:** the token still keeps other web pages and programs out while letting in the one that started the server,
+  and checking it first makes a misconfigured launcher fail at once. Only the simulator and the twin can serve on this
+  PC's own addresses, so "simulated" errs towards LIVE: a LIVE banner over the simulator costs some caution, the other
+  way round could cost the arm.

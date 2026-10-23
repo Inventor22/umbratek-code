@@ -1,11 +1,13 @@
 """Tests for scripts/jog_server.py against tools/utra_sim.py. Usage: python tests/panel_tests.py [python-exe-for-server]"""
 import json
+import math
 import os
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -67,10 +69,18 @@ def idle(s):
 THREE_WRAPPER = ("import json, sys; sys.path.insert(0, sys.argv[1]); import jog_server as j; o = json.loads(sys.argv[2]); "
                  "j.THREE_DIR, j.THREE_MIRRORS, j.THREE_FILES = o['dir'], tuple(o['mirrors']), o['files']; "
                  "sys.exit(j.main(sys.argv[3:]))")
+TOKEN_ENV = "UMBRATEK_PANEL_TOKEN"
+
+
+def server_env(extra=None):
+    """The server's environment: this one, without a launcher's token unless a test sets one."""
+    env = {k: v for k, v in os.environ.items() if k != TOKEN_ENV}
+    env.update(extra or {})
+    return env
 
 
 class Rig:
-    def __init__(self, name, sim_args=(), controller=None, three=None):
+    def __init__(self, name, sim_args=(), controller=None, three=None, server_args=(), env=None):
         controller = controller or HOST
         self.name, self.log_path = name, log_path(f"panel_{name}.log")
         self.cell_dir = log_path(f"cell_{name}")
@@ -79,11 +89,12 @@ class Rig:
         self.output = ""  # the server's console, once closed
         if controller == HOST:
             self.sim, _ = start_sim(sim_args, f"panel_{name}.log")
-        command = [PY, SERVER, controller, "--port", str(PORT), "--cell", self.cell_dir]
+        command = [PY, SERVER, controller, "--port", str(PORT), "--cell", self.cell_dir, *server_args]
         if three is not None:
             command = [PY, "-c", THREE_WRAPPER, os.path.dirname(SERVER), json.dumps(three), controller, "--port", str(PORT),
                        "--cell", self.cell_dir]
-        self.server = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.server = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                       env=server_env(env))
         self.token = None
         if wait_port(PORT, 10, host="127.0.0.1"):
             code, html = request("GET", "/")
@@ -798,9 +809,352 @@ def scenario_stop_unconfirmed():
 def scenario_unreachable():
     print("== controller unreachable")
     t0 = time.monotonic()
-    proc = subprocess.run([PY, SERVER, "192.0.2.1", "--port", str(PORT)], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    proc = subprocess.run([PY, SERVER, "192.0.2.1", "--port", str(PORT)], cwd=ROOT, capture_output=True, text=True, timeout=30,
+                          env=server_env())
     check("server exits with a clear error", proc.returncode == 1 and "Cannot reach" in proc.stderr, proc.stderr)
     check("and quickly", time.monotonic() - t0 < 8, time.monotonic() - t0)
+
+
+# ---- the manual-motion policy (reduced speed, hold-to-move) and a launcher's token ----------------------------------
+
+class Ctl:
+    """The simulator's control port (tools/utra_sim.py): the arm's state as the simulator has it, at once."""
+
+    def __init__(self):
+        self.sock = socket.create_connection((HOST, 30099), timeout=5)
+        self.buf = b""
+
+    def state(self):
+        self.sock.sendall(b'{"cmd": "state"}\n')
+        while b"\n" not in self.buf:
+            self.buf += self.sock.recv(65536)
+        line, self.buf = self.buf.split(b"\n", 1)
+        return json.loads(line)
+
+    def stopped_by(self, deadline):
+        """When (monotonic) the simulator first reports the arm stopped, polling until `deadline`; None if it doesn't."""
+        while time.perf_counter() < deadline:
+            if self.state()["status"] == 4:
+                return time.perf_counter()
+            time.sleep(0.005)
+        return None
+
+    def close(self):
+        self.sock.close()
+
+
+class HoldKey:
+    """A client's hold-to-move key, as the modes app's works: pressed, it holds for 400 ms and renews that every 100 ms."""
+
+    def __init__(self, token):
+        self.token, self.renewed, self.thread, self.done = token, None, None, threading.Event()
+
+    def press(self):
+        r = api("/api/hold", self.token, {"ms": 400})
+        self.renewed = time.perf_counter()
+        self.done.clear()
+        self.thread = threading.Thread(target=self._renew, daemon=True)
+        self.thread.start()
+        return r
+
+    def _renew(self):
+        while not self.done.wait(0.1):
+            api("/api/hold", self.token, {"ms": 400})
+            self.renewed = time.perf_counter()
+
+    def _halt(self):
+        self.done.set()
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+
+    def let_go(self):
+        """Releases the key ({"ms": 0}); returns when the server has had it (monotonic)."""
+        self._halt()
+        api("/api/hold", self.token, {"ms": 0})
+        return time.perf_counter()
+
+    def drop(self):
+        """Stops renewing without letting go, as a lost link would; returns when the last renewal was answered."""
+        self._halt()
+        return self.renewed
+
+
+def sent_moves(rig, label="MOVEJ_P2P"):
+    """Every move of this kind in the simulator's log: (goal: deg, or mm and deg for lines; speed)."""
+    found = re.findall(label + r": goal=\[([^\]]*)\] speed=([\d.]+)", rig.log())
+    return [([float(v) for v in goal.split()], float(speed)) for goal, speed in found]
+
+
+_kin = {}
+
+
+def kinematics():
+    """(utra_model's arm, the kinematics module), loaded once."""
+    if not _kin:
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import kinematics as kin
+        import utra_model
+        _kin.update(model=utra_model.ArmModel(), kin=kin)
+    return _kin["model"], _kin["kin"]
+
+
+def sampled_speed(start, goal, speed, tools=()):
+    """The fastest the flange or any of `tools`' points (mm/s) moves on the joint move start -> goal (deg), its leading
+    joint at `speed` deg/s and every joint in step, sampled at 400 points: an independent check of the server's bound."""
+    model, kin = kinematics()
+    lead = max(abs(g - s) for s, g in zip(start, goal))
+    if lead <= 0:
+        return 0.0
+    dt = lead / speed / 400
+    flanges = [model.frames([s + (g - s) * k / 400 for s, g in zip(start, goal)])[-1] for k in range(401)]
+    worst = 0.0
+    for tool in [kin.IDENTITY, *tools]:
+        points = [kin.position(kin.mul(f, tool)) for f in flanges]
+        worst = max(worst, max(math.dist(a, b) for a, b in zip(points, points[1:])) / dt)
+    return worst
+
+
+def measured_speed(ctl, tools=(), timeout=12.0, window=0.1):
+    """Samples the simulator's joints until the arm has moved and come to rest, and returns the fastest the flange or
+    any of `tools`' points (mm/s) went, over spans of at least `window` s. It polls the server's status meanwhile, as
+    the page does, so the server doesn't stop the move for a quiet page."""
+    model, kin = kinematics()
+    samples, moved, deadline, polled = [], False, time.perf_counter() + timeout, 0.0
+    while time.perf_counter() < deadline:
+        state = ctl.state()
+        samples.append((time.perf_counter(), state["joints"]))
+        moved = moved or state["status"] == 1
+        if moved and state["status"] != 1:
+            break
+        if time.perf_counter() - polled > 0.2:
+            status()
+            polled = time.perf_counter()
+        time.sleep(0.01)
+    worst = 0.0
+    for tool in [kin.IDENTITY, *tools]:
+        points = [(at, kin.position(kin.mul(model.frames(q)[-1], tool))) for at, q in samples]
+        j = 0
+        for i, (at, p) in enumerate(points):
+            while j < len(points) and points[j][0] - at < window:
+                j += 1
+            if j < len(points):
+                worst = max(worst, math.dist(p, points[j][1]) / (points[j][0] - at))
+    return worst
+
+
+def wait_moving(ctl, timeout=5.0):
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline and ctl.state()["status"] != 1:
+        time.sleep(0.01)
+
+
+TOOL_200 = {"name": "long", "tcp": {"xyz": [0.0, 60.0, 190.0], "rpy": [0.0, 0.0, 0.0]}, "mass": 0.5, "cog": [0, 0, 100],
+            "capsules": []}
+
+
+def scenario_manual():
+    print("== the manual-motion policy: reduced speed and hold-to-move, for jogs and planned moves")
+    rig = Rig("manual")
+    ctl, key = None, None
+    try:
+        t = rig.token
+        key = HoldKey(t)
+        s = wait_for(lambda s: s.get("live"))
+        check("the status says the controller is the simulator (a loopback address), and the policy starts off",
+              s.get("simulated") is True and s.get("manual") == {"reducedSpeed": False, "holdToMove": False, "held": False,
+                                                                 "holdLeftMs": 0}, (s.get("simulated"), s.get("manual")))
+        ctl = Ctl()
+        api("/api/enable", t)
+        wait_for(lambda s: s["enabled"] and s["state"] in (0, 2))
+        r = jog(rig, "joint", 1, 1, step=5.0, speed=120.0)
+        check("both off: a J2 step asked for at 120 deg/s is capped at J2's top speed only, as before",
+              r["ok"] and r["message"].endswith("at 84\u00b0/s, J2's top speed") and last_move(rig)[0] == 84.0,
+              (r, last_move(rig)))
+        wait_for(idle, timeout=8)
+        rev = json.loads(request("GET", "/api/cell")[1])["cell"]["revision"]
+        rev = api("/api/cell/tool", t, dict(TOOL_200, revision=rev))["cell"]["revision"]
+        api("/api/cell/tool/activate", t, {"name": "long", "revision": rev})
+        _, kin = kinematics()
+        tool = kin.pose_to_matrix(TOOL_200["tcp"])
+        reach = math.dist(TOOL_200["tcp"]["xyz"], (0, 0, 0))
+
+        r = api("/api/manual", t, {"reducedSpeed": True})
+        check("POST /api/manual turns reduced speed on, saying so; the status reports it",
+              r["ok"] and r["manual"]["reducedSpeed"] is True and r["manual"]["holdToMove"] is False
+              and "under 250 mm/s" in r["message"] and status()["manual"]["reducedSpeed"] is True, r)
+        before = status()["joints"]
+        r = jog(rig, "joint", 1, 1, step=5.0, speed=120.0)
+        goal, speed = sent_moves(rig)[-1]
+        fastest = sampled_speed(before, goal, speed, [tool])
+        check(f"reduced speed: that J2 step is sent at {speed:g} deg/s, saying why; sampled, the flange and the tool's "
+              f"point (about 200 mm out) go {fastest:.1f} mm/s at most, under 250 and hardly less",
+              r["ok"] and r["moved"] and r["message"].endswith(f"at {speed:g}\u00b0/s, keeping the tool point and flange "
+                                                                 "under 250 mm/s (reduced speed)")
+              and 245.0 <= fastest <= 250.5, (r, speed, fastest))
+        wait_for(idle, timeout=8)
+        r = jog(rig, "tool", 3, 1, rot=5.0, speed=1000.0)
+        expected = math.floor(250.0 * 25.0 / reach * 10) / 10
+        check(f"a 5\u00b0 turn of the tool asked for at 1000 mm/s is sent at {expected:g} mm/s: the turn is taken to run "
+              "as fast as 1 rad/s for every 25 mm/s, and the tool point is about 200 mm out",
+              r["ok"] and r["moved"] and last_move(rig, "MOVET_LINE")[0] == expected and "(reduced speed)" in r["message"],
+              (r, last_move(rig, "MOVET_LINE")))
+        wait_for(idle, timeout=12)
+        r = jog(rig, "tool", 2, -1, step=50.0, speed=1000.0)
+        check("a 50 mm slide asked for at 1000 mm/s is sent at 250", r["ok"] and r["moved"]
+              and last_move(rig, "MOVET_LINE")[0] == 250.0 and "(reduced speed)" in r["message"],
+              (r, last_move(rig, "MOVET_LINE")))
+        wait_for(idle, timeout=8)
+        j = status()["joints"]
+        r = api("/api/move", t, {"targets": [j[0] + 30, j[1] - 15, None, None, None, j[5] + 20], "speed": 120})
+        goal, speed = sent_moves(rig)[-1]
+        fastest = sampled_speed(j, goal, speed, [tool])
+        measured = measured_speed(ctl, [tool])
+        s = wait_for(idle, timeout=12)
+        check(f"a planned move of J1, J2 and J6 asked for at 120 deg/s is sent at {speed:g}, saying why; sampled, the "
+              f"flange and tool point go {fastest:.1f} mm/s at most, and measured in the simulator {measured:.1f}",
+              r["ok"] and r["moved"] and r["message"].endswith("(reduced speed)") and fastest <= 250.5
+              and 0 < measured <= min(250.0, fastest * 1.05) and abs(s["joints"][0] - goal[0]) < 0.05,
+              (r, speed, fastest, measured, s["note"]))
+
+        r = api("/api/manual", t, {"holdToMove": True})
+        check("POST /api/manual turns hold-to-move on too, leaving reduced speed as it was",
+              r["ok"] and r["manual"] == {"reducedSpeed": True, "holdToMove": True, "held": False, "holdLeftMs": 0}, r)
+        sent = len(sent_moves(rig)) + len(sent_moves(rig, "MOVET_LINE"))
+        j = status()["joints"]
+        refused = [jog(rig, "joint", 5, 1), jog(rig, "tool", 2, 1),
+                   api("/api/move", t, {"targets": [None] * 5 + [j[5] + 5], "speed": 10})]
+        check("hold-to-move: without a hold, joint and tool jogs and a planned move are refused, saying why, and nothing "
+              "is sent", all(not r["ok"] and r["message"] == "Not moving: hold-to-move is on, and the hold-to-move key "
+                             "isn't held." for r in refused)
+              and len(sent_moves(rig)) + len(sent_moves(rig, "MOVET_LINE")) == sent, refused)
+        r = api("/api/hold", t, {"ms": 1000})
+        s = status()
+        check("POST /api/hold holds it, and the status says so and for how long", r["ok"] and r["manual"]["held"]
+              and 900 <= r["manual"]["holdLeftMs"] <= 1000 and s["manual"]["held"] and 0 < s["manual"]["holdLeftMs"] <= 1000,
+              (r, s["manual"]))
+        r = api("/api/hold", t, {"ms": 0})
+        check("{ms: 0} lets go", r["ok"] and r["manual"]["held"] is False and r["manual"]["holdLeftMs"] == 0, r)
+        r = api("/api/hold", t, {})
+        check("a hold without ms lasts 400 ms", r["ok"] and r["manual"]["held"] and 300 <= r["manual"]["holdLeftMs"] <= 400, r)
+        api("/api/hold", t, {"ms": 0})
+        for body in ({"ms": 99}, {"ms": 1001}, {"ms": -5}, {"ms": "400"}, {"ms": True}, {"ms": None}):
+            r = api("/api/hold", t, body)
+            check(f"hold rejects {body}", not r["ok"] and "Unsupported hold" in r["message"], r)
+        code, data = request("POST", "/api/hold", raw=b'{"ms": NaN}', token=t)
+        check("hold rejects NaN", code == 200 and not json.loads(data)["ok"], data)
+        for body in ({"reducedSpeed": "yes"}, {"holdToMove": 1}, {"reducedSpeed": None}):
+            r = api("/api/manual", t, body)
+            check(f"manual rejects {body}", not r["ok"] and "Unsupported" in r["message"], r)
+        r = api("/api/manual", t, {})
+        check("an empty manual request changes nothing and says what's on", r["ok"] and r["manual"]["reducedSpeed"]
+              and r["manual"]["holdToMove"], r)
+
+        key.press()
+        r = jog(rig, "joint", 5, 1, step=1.0, speed=10.0)
+        check("with the key held (renewed every 100 ms), a jog moves", r["ok"] and r["moved"], r)
+        wait_for(idle, timeout=8)
+        j = status()["joints"]
+        r = api("/api/move", t, {"targets": [None] * 5 + [j[5] + 60], "speed": 10})
+        wait_moving(ctl)
+        busy = [api("/api/manual", t, {"reducedSpeed": False}), api("/api/manual", t, {"holdToMove": False}),
+                api("/api/manual", t, {"reducedSpeed": True, "holdToMove": True})]
+        check("while the arm moves the policy can't change, saying why; asking for what it already is is fine",
+              not busy[0]["ok"] and not busy[1]["ok"] and "The arm is moving" in busy[0]["message"] and busy[2]["ok"]
+              and status()["manual"]["reducedSpeed"] and status()["manual"]["holdToMove"], busy)
+        time.sleep(0.4)
+        released = key.let_go()
+        stopped = ctl.stopped_by(released + 2.0)
+        s = wait_for(lambda s: s["state"] == 4)
+        check(f"letting go of the key mid-move stops the arm as STOP does, within the watchdog's 0.1 s "
+              f"({(stopped or 99) - released:.3f} s after the server had it), saying why", r["ok"] and r["moved"]
+              and stopped is not None and stopped - released <= 0.25
+              and s["note"].startswith("Stopped because the hold-to-move key was let go."), (r, stopped, released, s["note"]))
+        check("well short of the goal", s["joints"][5] < j[5] + 20, (j[5], s["joints"][5]))
+        r = api("/api/enable", t)
+        wait_for(lambda s: s["enabled"] and s["state"] in (0, 2))
+        check("Enable works without a hold", r["ok"], r)
+
+        key.press()
+        j = status()["joints"]
+        r = api("/api/move", t, {"targets": [None] * 5 + [j[5] - 60], "speed": 10})
+        wait_moving(ctl)
+        time.sleep(0.4)
+        last = key.drop()
+        stopped = ctl.stopped_by(last + 3.0)
+        s = wait_for(lambda s: s["state"] == 4)
+        check(f"a hold that isn't renewed (a lost link) lapses after its 400 ms and the arm stops within 0.1 s more: "
+              f"{(stopped or 99) - last:.3f} s after the last renewal", r["ok"] and r["moved"] and stopped is not None
+              and 0.35 <= stopped - last <= 0.75 and s["note"].startswith("Stopped because the hold-to-move key's hold "
+                                                                           "lapsed."), (r, stopped, last, s["note"]))
+        r = api("/api/stop", t)
+        rev = json.loads(request("GET", "/api/cell")[1])["cell"]["revision"]
+        z = api("/api/cell/zone", t, {"name": "box", "frame": "base", "pose": {"xyz": [-900, 0, -500], "rpy": [0, 0, 0]},
+                                     "size": [10, 10, 10], "revision": rev})
+        check("STOP and the cell's API work without a hold", r["ok"] and z["ok"], (r, z))
+        api("/api/enable", t)
+        wait_for(lambda s: s["enabled"] and s["state"] in (0, 2))
+        r = api("/api/freedrive", t, {"on": True})
+        s = wait_for(lambda s: s.get("freedrive"))
+        time.sleep(1.0)  # no hold, and nobody asking for one
+        s2 = status()
+        r2 = api("/api/freedrive", t, {"on": False})
+        s3 = wait_for(lambda s: not s["freedrive"] and s["enabled"] and s["state"] in (0, 2))
+        check("freedrive goes on and off without a hold, and the hold never stops it", r["ok"] and s["freedrive"]
+              and s2["freedrive"] and s2["state"] != 4 and r2["ok"] and s3["state"] in (0, 2), (r, s2.get("note"), r2))
+
+        r = api("/api/manual", t, {"reducedSpeed": False, "holdToMove": False})
+        s = status()
+        r2 = jog(rig, "joint", 1, -1, step=5.0, speed=120.0)
+        check("once still, both go off again, and jogs move without a hold at the speeds they did before",
+              r["ok"] and s["manual"] == {"reducedSpeed": False, "holdToMove": False, "held": False, "holdLeftMs": 0}
+              and r2["ok"] and r2["moved"] and last_move(rig)[0] == 84.0, (r, s["manual"], r2, last_move(rig)))
+        wait_for(idle, timeout=8)
+    finally:
+        if key is not None:
+            key._halt()
+        if ctl is not None:
+            ctl.close()
+        rig.close()
+
+
+def scenario_token():
+    print("== a launcher's token (UMBRATEK_PANEL_TOKEN), the policy from the command line, and 'simulated'")
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import jog_server
+    for host, local in [("127.0.0.1", True), ("127.255.255.254", True), ("::1", True), ("[::1]", True), ("localhost", True),
+                        ("LocalHost.", True), ("::ffff:127.0.0.1", True), ("192.168.2.1", False), ("10.0.0.5", False),
+                        ("0.0.0.0", False), ("::", False), ("128.0.0.1", False), ("127.1", False), ("example.com", False),
+                        ("", False)]:
+        check(f"a controller at {host!r} is {'the simulator or the twin' if local else 'not known to be simulated'}",
+              jog_server.local_controller(host) is local, host)
+    token = "Launcher_test-token_0123456789abc"
+    rig = Rig("token", server_args=["--reduced-speed", "--hold-to-move"], env={TOKEN_ENV: token})
+    try:
+        check("the page carries the launcher's token", rig.token == token, rig.token)
+        r = api("/api/manual", token)
+        check("which works for the POST API, from a program as from the page", r.get("ok") and r["manual"]["reducedSpeed"]
+              and r["manual"]["holdToMove"], r)
+        code, _ = request("POST", "/api/manual", {}, token=token[:-1] + "x")
+        check("another token is still refused", code == 403, code)
+        s = wait_for(lambda s: s.get("live"))
+        check("--reduced-speed and --hold-to-move start the server with both on", s["simulated"] is True
+              and s["manual"] == {"reducedSpeed": True, "holdToMove": True, "held": False, "holdLeftMs": 0}, s.get("manual"))
+    finally:
+        rig.close()
+    check("and the console says so, without printing the token", "Reduced speed on" in rig.output
+          and "hold-to-move on" in rig.output and token not in rig.output, rig.output[-600:])
+    for bad, why in [("abcdefghijklmno", "15 characters"), ("", "empty"), ("abcdefghijklmnop!", "a '!'"),
+                     ("abcdefghijklmnopqrstuv==", "base64's padding"), ("abcdefgh ijklmnop", "a space"),
+                     ("abcdefghijklmnop\u00e9", "a letter outside ASCII")]:
+        t0 = time.monotonic()
+        proc = subprocess.run([PY, SERVER, "192.0.2.1", "--port", str(PORT)], cwd=ROOT, capture_output=True, text=True,
+                              timeout=30, env=server_env({TOKEN_ENV: bad}), encoding="utf-8", errors="replace")
+        took = time.monotonic() - t0
+        check(f"the server won't start with {why} in {TOKEN_ENV}: it says what the token must be before connecting "
+              f"({took:.1f} s), without echoing it", proc.returncode == 2 and TOKEN_ENV in proc.stderr
+              and "URL-safe base64" in proc.stderr and (not bad or bad not in proc.stderr + proc.stdout)
+              and "Cannot reach" not in proc.stderr and took < 6, (proc.returncode, proc.stderr[-300:], took))
 
 
 if __name__ == "__main__":
@@ -808,7 +1162,7 @@ if __name__ == "__main__":
     for fn in (scenario_main, scenario_assets, scenario_three, scenario_move, scenario_tight, scenario_speeds, scenario_stalls,
                scenario_watchdog,
                scenario_error_mid_move, scenario_ik_fail, scenario_no_report, scenario_estop,
-               scenario_stop_unconfirmed, scenario_unreachable):
+               scenario_stop_unconfirmed, scenario_unreachable, scenario_manual, scenario_token):
         try:
             fn()
         except Exception as e:  # report and continue

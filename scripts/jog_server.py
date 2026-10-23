@@ -13,6 +13,11 @@ itself, the cart it stands on or the floor (tool steps aren't checked: the contr
 joint angles). The server listens on this PC only, stops the arm if the page goes quiet mid-move, and
 refuses to move when the arm's state is unknown. The physical E-stop is still the real safety.
 
+The manual-motion policy (--reduced-speed, --hold-to-move, POST /api/manual): with reduced speed on, every move is sent
+slowly enough that neither the tool point in use nor the flange can pass 250 mm/s; with hold-to-move on, nothing moves
+without a current hold (POST /api/hold, an enabling device), and a move stops, or a run pauses, when the hold lapses.
+The program that starts the server may set its token (UMBRATEK_PANEL_TOKEN) to call the POST API itself.
+
 Programs may also have planned and learned steps, whose motion the brain proposes: a separate process on this PC that
 the server asks (--brain, docs/brain-interface.md), and whose every proposal the server checks before it runs.
 """
@@ -21,10 +26,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.client
+import ipaddress
 import json
 import math
 import os
+import re
 import secrets
+import socket
 import struct
 import sys
 import threading
@@ -82,9 +90,10 @@ ROT_STEPS = (0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0)  # deg per click
 TOOL_SPEEDS = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0)  # mm/s
 DEFAULTS = {"jointStep": 1.0, "jointSpeed": 10.0, "toolStep": 5.0, "rotStep": 2.0, "toolSpeed": 20.0}
 # The speed faders' redline, like a speedometer's red zone: speeds that could move the tool faster than ISO
-# 10218-1's limit for jogging by hand (reduced speed, 250 mm/s at the tool) show red. They still work. On the
-# joint speed fader the redline follows the arm's pose; until the pose is known it assumes full reach.
-TOOL_REDLINE_MM_S = 250.0
+# 10218-1's limit for jogging by hand (reduced speed, 250 mm/s at the tool) show red. They still work, unless reduced
+# speed is on (below). On the joint speed fader the redline follows the arm's pose; until the pose is known it assumes
+# full reach.
+TOOL_REDLINE_MM_S = plannermod.REDUCED_SPEED_MM_S
 ARM_REACH_MM = 1000.0
 # Each joint's top speed, from its own servo. Read from this arm through the SDK's pass-through to the servo bus
 # (RS485 line 92, servo ids 1-6): the servos' speed limits (VEL_LIMIT_MAX, register 0x42, rad/s at the motor) are
@@ -129,6 +138,15 @@ FREEDRIVE_CONFIRM_S = 2.0  # how long the controller has to report a change of m
 TEACH_SENSITIVITIES = (90, 100, 110)
 TEACH_SENSITIVITY_DEFAULT = 90
 MAX_BODY_BYTES = 262144  # programs can be long
+# The token every POST must carry. The program that starts the server may choose it, in this environment variable, to
+# call the POST API itself; otherwise it's random (docs/jog-panel.md).
+TOKEN_ENV = "UMBRATEK_PANEL_TOKEN"
+TOKEN_MIN_CHARS = 16
+TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]+")  # URL-safe base64, unpadded, as secrets.token_urlsafe writes it
+# The manual-motion policy (docs/jog-panel.md): reduced speed keeps every move's tool point and flange under
+# plannermod.REDUCED_SPEED_MM_S; hold-to-move, an enabling device, lets nothing move without a current hold, which a
+# client renews about every 100 ms while its key is down (POST /api/hold).
+HOLD_DEFAULT_MS, HOLD_MIN_MS, HOLD_MAX_MS = 400, 100, 1000
 
 
 def wrap(angle):
@@ -163,14 +181,47 @@ def blocked(hit):
     return f"Not moving: {hit['part']} would come within {utra_model.MARGIN_M * 1000:.0f} mm of {hit['other']}."
 
 
+def panel_token(environ=os.environ):
+    """The token the page and every POST carry: TOKEN_ENV's value if the program that started the server set it, so it
+    can call the POST API too, else a random one. ValueError if it's set but too short or not URL-safe base64."""
+    given = environ.get(TOKEN_ENV)
+    if given is None:
+        return secrets.token_urlsafe(24)
+    if len(given) < TOKEN_MIN_CHARS or not TOKEN_CHARS.fullmatch(given):
+        raise ValueError(f"{TOKEN_ENV} must be at least {TOKEN_MIN_CHARS} characters of URL-safe base64 (A-Z, a-z, "
+                         "0-9, '-' and '_', no padding), or unset for a random token.")
+    return given
+
+
+def local_controller(host):
+    """Whether the controller's address is this PC's own: a loopback address (127.0.0.0/8, ::1) or localhost, when it
+    resolves to loopback only. Only the simulator or the twin can serve there, so the status says "simulated"."""
+    name = host.strip().lower().rstrip(".")
+    if name.startswith("[") and name.endswith("]"):
+        name = name[1:-1]
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        if name != "localhost":
+            return False
+        try:
+            found = {info[4][0] for info in socket.getaddrinfo(name, None)}
+        except OSError:
+            return False
+        return bool(found) and all(local_controller(a) for a in found)  # addresses, never names
+    mapped = getattr(address, "ipv4_mapped", None)
+    return (mapped or address).is_loopback
+
+
 capped_joint_speed = plannermod.capped_joint_speed
 
 
 class Panel:
     """Owns the arm connection, the live status and the commanded goal."""
 
-    def __init__(self, ip, model=None, cell_dir=CELL_DIR, brain=None):
+    def __init__(self, ip, model=None, cell_dir=CELL_DIR, brain=None, reduced_speed=False, hold_to_move=False):
         self.ip = ip
+        self.simulated = local_controller(ip)
         self.model = model  # utra_model.ArmModel, or None when planned moves are off
         self.lock = threading.Lock()  # one SDK conversation at a time
         self.arm = arm.open_arm(ip)
@@ -199,6 +250,10 @@ class Panel:
         self.pending_poses = {}  # tool name -> flange poses (4x4) touching one point
         self.freedrive_since = None
         self.teach_level = None  # the teach sensitivity this server last set for freedrive
+        # The manual-motion policy, and the hold: until when (monotonic) it's held, and whether it was let go.
+        self.reduced_speed, self.hold_to_move = bool(reduced_speed), bool(hold_to_move)
+        self.hold_until, self.hold_released = 0.0, False
+        self._wake = threading.Event()  # wakes the watchdog when the hold is let go
         threading.Thread(target=self._read_reports, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
         if self.brain is not None:
@@ -294,8 +349,9 @@ class Panel:
     def status(self):
         frame = self.frame
         age = time.monotonic() - self.frame_at if frame is not None else None
-        out = {"ip": self.ip, "note": self.note, "noteOk": self.note_ok, "stopAlarm": self.stop_alarm,
-               "live": age is not None and age <= LOST_S, "age": None if age is None else round(age, 2)}
+        out = {"ip": self.ip, "simulated": self.simulated, "note": self.note, "noteOk": self.note_ok,
+               "stopAlarm": self.stop_alarm, "live": age is not None and age <= LOST_S,
+               "age": None if age is None else round(age, 2), "manual": self.manual_status()}
         out["brain"] = self.brain.status() if self.brain is not None else \
             {"url": None, "ok": False, "error": "the brain is off (the server was started with --brain off)"}
         if frame is None:
@@ -385,6 +441,80 @@ class Panel:
         why = f" The stop was sent because {cause}." if cause else ""
         return False, self._say(f"STOP NOT CONFIRMED: press the hardware E-stop now.{why}", ok=False)
 
+    # ---- the manual-motion policy: reduced speed and hold-to-move --------------------------------------------------
+
+    def manual_status(self):
+        left = self.hold_until - time.monotonic()
+        return {"reducedSpeed": self.reduced_speed, "holdToMove": self.hold_to_move, "held": left > 0,
+                "holdLeftMs": max(0, int(left * 1000))}
+
+    def manual_text(self):
+        reduced = (f"Reduced speed on: moves keep the tool point and flange under {TOOL_REDLINE_MM_S:g} mm/s"
+                   if self.reduced_speed else "Reduced speed off")
+        hold = ("hold-to-move on: nothing moves unless the hold-to-move key is held" if self.hold_to_move
+                else "hold-to-move off")
+        return f"{reduced}; {hold}."
+
+    def set_manual(self, body):
+        """POST /api/manual {"reducedSpeed": bool, "holdToMove": bool}, either optional. A change is refused while the
+        arm moves: the server's moves follow one policy from start to end."""
+        wanted = {}
+        for key in ("reducedSpeed", "holdToMove"):
+            if key in body:
+                if not isinstance(body[key], bool):
+                    raise arm.ArmError(f"Unsupported {key}: {body[key]!r} (true or false).")
+                wanted[key] = body[key]
+        # Under both locks, so no jog, planned move or run can plan by one policy and be sent under the other.
+        with self.lock, self.runner.lock:
+            reduced = wanted.get("reducedSpeed", self.reduced_speed)
+            hold = wanted.get("holdToMove", self.hold_to_move)
+            if (reduced, hold) != (self.reduced_speed, self.hold_to_move):
+                if self.runner.moving:
+                    raise arm.ArmError("A program is running. Pause or stop it first.")
+                if self._page_move_under_way():
+                    raise arm.ArmError("The arm is moving. Wait for it to stop, or press STOP.")
+                self.reduced_speed, self.hold_to_move = reduced, hold
+        return self._say(self.manual_text())
+
+    def hold(self, ms):
+        """POST /api/hold {"ms": N}: hold-to-move held for N ms from now (HOLD_MIN_MS to HOLD_MAX_MS), or let go (0)."""
+        if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not math.isfinite(ms) \
+                or not (ms == 0 or HOLD_MIN_MS <= ms <= HOLD_MAX_MS):
+            raise arm.ArmError(f"Unsupported hold: {ms!r} ms (0 lets go; hold for {HOLD_MIN_MS} to {HOLD_MAX_MS}).")
+        if ms == 0:
+            self.hold_until, self.hold_released = 0.0, True
+            if self.hold_to_move:
+                self._wake.set()  # the watchdog stops a move at once
+        else:
+            self.hold_until, self.hold_released = time.monotonic() + ms / 1000.0, False
+        return self.manual_status()
+
+    def hold_lapsed(self):
+        """Why motion must stop, when hold-to-move is on and nothing holds it (the key let go, or its hold lapsed);
+        None otherwise."""
+        if not self.hold_to_move or time.monotonic() < self.hold_until:
+            return None
+        return "the hold-to-move key was let go" if self.hold_released else "the hold-to-move key's hold lapsed"
+
+    def require_hold(self):
+        """Refuses (ArmError) to start motion while hold-to-move is on and nothing holds it."""
+        if self.hold_lapsed():
+            raise arm.ArmError("Not moving: hold-to-move is on, and the hold-to-move key isn't held.")
+
+    def _page_move_under_way(self):
+        """Whether a jog or planned move sent from the page is still moving the arm, or about to (not freedrive)."""
+        frame = self.frame
+        return frame is not None and frame["mode"] != 2 and bool(self.sent_at) and self._busy(frame)
+
+    def _reduced_joint_cap(self, before, after):
+        """Reduced speed's cap (deg/s) on a joint move between two sets of joint targets (rad), or None."""
+        return plannermod.reduced_joint_speed(self.model, [math.degrees(v) for v in before[:self.axis]],
+                                              [math.degrees(v) for v in after[:self.axis]], [self.cell.tool_matrix()])
+
+    def _tool_reach_mm(self):
+        """How far the tool point in use is from the flange (mm)."""
+        return math.dist(kin.position(self.cell.tool_matrix()), (0.0, 0.0, 0.0))
+
     # ---- the cell, planning and the runner's needs -------------------------------------------------------------
 
     def cell_model(self):
@@ -397,7 +527,8 @@ class Panel:
     def planner(self):
         if self.model is None:
             raise arm.ArmError("The arm model didn't load, so planned moves are off.")
-        return plannermod.Planner(self.cell_model(), self.joint_acc_max, self.tool_acc_max)
+        return plannermod.Planner(self.cell_model(), self.joint_acc_max, self.tool_acc_max,
+                                  reduced=self.cell.tool_matrix() if self.reduced_speed else None)
 
     def send_payload(self):
         """Tell the controller the active tool's payload (mass kg, centre of gravity mm from the flange), as the SDK
@@ -724,6 +855,7 @@ class Panel:
                 raise arm.ArmError("A program is running. Pause or stop it first.")
             if frame["mode"] == 2:
                 raise arm.ArmError("The arm is in freedrive. Leave freedrive to jog.")
+            self.require_hold()
             busy = self._busy(frame)
             if self.goal is None or not busy:
                 self.goal, self.goal_kind = self._synced_goal(kind, frame), kind
@@ -743,10 +875,15 @@ class Panel:
                     if hit is not None:
                         raise arm.ArmError(blocked(hit))
                 sent, limiting = capped_joint_speed(speed, [step if i == index else 0.0 for i in range(self.axis)])
+                why = f", J{index + 1}'s top speed" if limiting is not None else ""
+                if self.reduced_speed:  # the step from the goal before it, where the controller takes it from
+                    cap = self._reduced_joint_cap(self.goal, goal)
+                    if cap is not None and cap < sent:
+                        sent, why = cap, plannermod.REDUCED_WHY
                 ret = self.arm.moveto_joint_p2p(goal, math.radians(sent), math.radians(self._joint_acc(sent)), 0)
                 text = f"J{index + 1} {sign}{step:g}\u00b0 \u2192 {math.degrees(goal[index]):.2f}\u00b0"
-                if limiting is not None:
-                    text += f" at {sent:g}\u00b0/s, J{index + 1}'s top speed"
+                if why:
+                    text += f" at {sent:g}\u00b0/s{why}"
             else:
                 if index < 3:
                     goal[index] += direction * step
@@ -756,14 +893,22 @@ class Panel:
                 rot_lead = max(abs(math.degrees(wrap(g - m))) for g, m in zip(goal[3:], frame["pose"][3:6]))
                 if pos_lead > MAX_LEAD_STEPS * step + 1.0 or rot_lead > MAX_LEAD_STEPS * rot_step + 0.5:
                     return False, self._say("Holding: the arm is still catching up with earlier clicks.")
+                sent, why = speed, ""
+                if self.reduced_speed:  # a slide moves the flange `step` mm; a turn turns it rot_step about itself
+                    cap = plannermod.reduced_line_speed(step if index < 3 else 0.0, rot_step if index >= 3 else 0.0,
+                                                        self._tool_reach_mm())
+                    if cap < sent:
+                        sent, why = cap, plannermod.REDUCED_WHY
                 if self.model is not None:  # the line this click adds, planned and checked like a program's
-                    self._check_tool_step(frame, self.goal, goal, speed)
-                ret = self.arm.moveto_cartesian_line(goal, speed, self._tool_acc(speed), 0)
+                    self._check_tool_step(frame, self.goal, goal, sent)
+                ret = self.arm.moveto_cartesian_line(goal, sent, self._tool_acc(sent), 0)
                 axis_name = ("X", "Y", "Z", "Roll", "Pitch", "Yaw")[index]
                 value = goal[index] if index < 3 else math.degrees(goal[index])
                 unit = " mm" if index < 3 else "\u00b0"
                 amount = step if index < 3 else rot_step
                 text = f"{axis_name} {sign}{amount:g}{unit} \u2192 {value:.1f}{unit}"
+                if why:
+                    text += f" at {sent:g} mm/s{why}"
             if ret not in arm.OK_CODES:
                 self.goal = None
                 raise arm.abort_motion(self.ip, self.arm, f"The controller rejected the move (code {ret}).", STOP_LOCK_WAIT_S)
@@ -829,6 +974,7 @@ class Panel:
                 raise arm.ArmError("The arm is still moving. Wait for it to settle, or press STOP.")
             if frame["mode"] == 2:
                 raise arm.ArmError("The arm is in freedrive. Leave freedrive first.")
+            self.require_hold()
             start = self._synced_goal("joint", frame)
             start_deg = [math.degrees(v) for v in start]
             moving = [i for i, angle in enumerate(targets) if angle is not None and abs(angle - start_deg[i]) >= 0.05]
@@ -843,13 +989,17 @@ class Panel:
             # Joints not in the plan stay exactly at their current targets.
             goal = [math.radians(goal_deg[i]) if i in moving else start[i] for i in range(self.axis)]
             sent, limiting = capped_joint_speed(speed, [abs(math.degrees(g - s)) for g, s in zip(goal, start)])
+            why = f", J{limiting + 1}'s top speed" if limiting is not None else ""
+            if self.reduced_speed:
+                cap = self._reduced_joint_cap(start, goal)
+                if cap is not None and cap < sent:
+                    sent, why = cap, plannermod.REDUCED_WHY
             ret = self.arm.moveto_joint_p2p(goal, math.radians(sent), math.radians(self._joint_acc(sent)), 0)
             if ret not in arm.OK_CODES:
                 self.goal = None
                 raise arm.abort_motion(self.ip, self.arm, f"The controller rejected the move (code {ret}).", STOP_LOCK_WAIT_S)
             self.goal, self.goal_kind, self.sent_at = goal, "joint", time.monotonic()
             self.heard_at = self.sent_at  # the page is waiting on this very request, so it isn't quiet
-        why = f", J{limiting + 1}'s top speed" if limiting is not None else ""
         if len(moving) == 1:
             return True, self._say(f"J{moving[0] + 1} \u2192 {goal_deg[moving[0]]:.1f}\u00b0 at {sent:g}\u00b0/s{why}")
         names = ", ".join(f"J{i + 1}" for i in moving)
@@ -878,7 +1028,8 @@ class Panel:
 
     def _watch(self):
         while not self.closing:
-            time.sleep(0.1)
+            self._wake.wait(0.1)
+            self._wake.clear()
             frame, sent_at = self.frame, self.sent_at
             if self.freedrive_since is not None and time.monotonic() - self.freedrive_since > FREEDRIVE_MAX_S:
                 try:
@@ -893,7 +1044,10 @@ class Panel:
             now = time.monotonic()
             if not (frame["status"] == 1 or frame["queued"] > 0 or now - sent_at < BUSY_AFTER_SEND_S):
                 continue
-            if now - self.heard_at > PAGE_SILENT_S:
+            lapsed = self.hold_lapsed() if frame["mode"] != 2 else None  # freedrive is the hand's
+            if lapsed:
+                self.stop(lapsed)
+            elif now - self.heard_at > PAGE_SILENT_S:
                 self.stop("the jog page went quiet")
             elif now - self.frame_at > WATCHDOG_STALE_S:
                 self.stop("the controller's status went quiet")
@@ -1228,11 +1382,15 @@ def api_post(panel, path, body):
         panel.programs.delete(body.get("name"))
         return {"ok": True, "message": f"Program {body.get('name')} deleted."}
     if path == "/api/run/start":
+        if body.get("mode", "run") != "dry":  # a dry run only plans
+            panel.require_hold()
         runner.start(body.get("name"), body.get("mode", "run"), body.get("from"))
         return {"ok": True, "run": runner.status(), "message": f"Running {body.get('name')}"
                 + {"run": ".", "step": ", one step at a time.", "dry": " dry: planning only, nothing moves."}[
                     body.get("mode", "run")]}
     if path in ("/api/run/pause", "/api/run/resume", "/api/run/step", "/api/run/reset"):
+        if path in ("/api/run/resume", "/api/run/step") and runner.state == "paused" and runner.mode != "dry":
+            panel.require_hold()
         getattr(runner, path.rsplit("/", 1)[1])()
         return {"ok": True, "run": runner.status()}
     if path == "/api/run/stop":
@@ -1254,6 +1412,7 @@ def api_post(panel, path, body):
             speed = s.get("speed", checked["speed"]["tcp" if s["kind"] == "line" else "joint"])
             plan = panel.plan_move(s, panel.current_joints(), speed, checked["speed"]["ori"])
             return {"ok": True, "plan": plan.summary(), "message": plan.text}
+        panel.require_hold()
         runner.start(program=program, manual=True)
         return {"ok": True, "run": runner.status(), "message": f"Moving to {body.get('target')}."}
     if path == "/api/io/set":
@@ -1264,6 +1423,13 @@ def api_post(panel, path, body):
         return {"ok": True, "io": panel.io_state(), "message": f"{body.get('output')} set to {1 if body.get('value') else 0}."}
     if path == "/api/freedrive":
         return {"ok": True, "message": panel.freedrive(bool(body.get("on")), body.get("sensitivity"))}
+    if path == "/api/manual":
+        message = panel.set_manual(body)
+        return {"ok": True, "manual": panel.manual_status(), "message": message}
+    if path == "/api/hold":
+        manual = panel.hold(body.get("ms", HOLD_DEFAULT_MS))
+        return {"ok": True, "manual": manual, "message": f"Held for {manual['holdLeftMs']} ms." if manual["held"]
+                else "Let go."}
     return None
 
 
@@ -1319,11 +1485,21 @@ def main(argv=None):
                         help=f"the brain's address, on this PC (default {brain_link.DEFAULT_URL}), or 'off'")
     parser.add_argument("--brain-timeout", type=float, default=brain_link.PLAN_TIMEOUT_S,
                         help=f"how long the brain may take to plan a path, s (default {brain_link.PLAN_TIMEOUT_S:g})")
+    parser.add_argument("--reduced-speed", action="store_true",
+                        help="start with reduced speed on: every move keeps the tool point and flange under "
+                             f"{TOOL_REDLINE_MM_S:g} mm/s (POST /api/manual changes it)")
+    parser.add_argument("--hold-to-move", action="store_true",
+                        help="start with hold-to-move on: nothing moves without a current hold (POST /api/hold)")
     args = parser.parse_args(argv)
     if not 1024 <= args.port <= 65535:
         parser.error("--port must be between 1024 and 65535")
     if not 0.5 <= args.brain_timeout <= 120:
         parser.error("--brain-timeout must be between 0.5 and 120 s")
+    try:
+        token = panel_token()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
     link = None
     if args.brain != "off":
         try:
@@ -1337,7 +1513,7 @@ def main(argv=None):
         print(f"Warning: couldn't load the arm model ({e}). The 3D view and planned moves are off.", file=sys.stderr)
         model = None
     try:
-        panel = Panel(args.ip, model, args.cell, link)
+        panel = Panel(args.ip, model, args.cell, link, args.reduced_speed, args.hold_to_move)
     except (arm.ArmError, cellmod.CellError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1345,7 +1521,6 @@ def main(argv=None):
         print(f"Warning: the arm model has {len(model.joints)} joints but the arm has {panel.axis}. "
               "The 3D view and planned moves are off.", file=sys.stderr)
         panel.model = None
-    token = secrets.token_urlsafe(24)
     model = panel.model
     three, missing = load_three() if model else ({}, None)  # with no model there's no 3D view to draw
     if missing:
@@ -1371,6 +1546,8 @@ def main(argv=None):
     server.daemon_threads = True
     print(f"Jog panel for {args.ip}: open http://127.0.0.1:{args.port}  (Ctrl+C to quit)")
     print(f"Planned and learned steps ask the brain at {link.url}." if link else "The brain is off (--brain off).")
+    if panel.reduced_speed or panel.hold_to_move:
+        print(panel.manual_text())
     limits = [f"joints {panel.joint_acc_max:.0f}\u00b0/s\u00b2" if panel.joint_acc_max else "",
               f"tool {panel.tool_acc_max:.0f} mm/s\u00b2" if panel.tool_acc_max else ""]
     if any(limits):

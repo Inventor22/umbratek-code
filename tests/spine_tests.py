@@ -1051,8 +1051,324 @@ def scenario_run_logs():
         rig.close()
 
 
-SCENARIOS = (unit_protocol, unit_link, unit_shell, scenario_end_to_end, scenario_blind_brain, scenario_bad_replies,
-             scenario_stop, scenario_learned, scenario_no_brain, scenario_run_logs)
+# ---- reduced speed and hold-to-move (jog_server.py's manual-motion policy) ---------------------------------------------
+
+def joint_move_speed(a, b, speed, tools=(TOOL,)):
+    """The fastest the flange or any of `tools`' points (mm/s) moves on the joint move a -> b (deg), its leading joint
+    at `speed` deg/s and every joint in step, sampled at 400 points along it."""
+    lead = max(abs(y - x) for x, y in zip(a, b))
+    if lead <= 0:
+        return 0.0
+    dt = lead / speed / 400
+    flanges = [MODEL.frames([x + (y - x) * k / 400 for x, y in zip(a, b)])[-1] for k in range(401)]
+    worst = 0.0
+    for tool in (kin.IDENTITY, *tools):
+        points = [kin.position(kin.mul(f, tool)) for f in flanges]
+        worst = max(worst, max(math.dist(p, q) for p, q in zip(points, points[1:])) / dt)
+    return worst
+
+
+def line_move_speed(fa, fb, speed, tool=TOOL, pace=plannermod.REDUCED_TURN_MM_PER_RAD):
+    """The fastest the flange or the tool point (mm/s) moves on a straight move of the flange from fa to fb (4x4) sent at
+    `speed` mm/s, its turn keeping pace with it at 1 rad/s for every `pace` mm/s, sampled at 400 points along it."""
+    length, turn = kin.pose_distance(fa, fb)
+    rate = speed / max(length, math.radians(turn) * pace, 1e-12)  # of the way, per second
+    worst = 0.0
+    for t in (kin.IDENTITY, tool):
+        points = [kin.position(kin.mul(kin.interpolate(fa, fb, k / 400), t)) for k in range(401)]
+        worst = max(worst, max(math.dist(p, q) for p, q in zip(points, points[1:])) * 400 * rate)
+    return worst
+
+
+def unit_reduced():
+    print("== reduced speed's caps: joint moves by their lever arms (joints turning together add up), lines by their turn")
+    import random
+    rng = random.Random(11)
+    other = kin.pose_to_matrix({"xyz": [40.0, -30.0, 160.0], "rpy": [0.0, 30.0, 0.0]})
+    worst, single, fallback, n = 0.0, 1.0, True, 0
+    for trial in range(48):
+        start = [rng.uniform(lo * 0.8, hi * 0.8) for lo, hi in LIMITS]
+        moving = rng.sample(range(6), rng.choice([1, 1, 2, 3, 6]))
+        goal = [max(lo, min(hi, s + rng.uniform(-60, 60))) if i in moving else s
+                for i, (s, (lo, hi)) in enumerate(zip(start, LIMITS))]
+        tool = (TOOL, other)[trial % 2]
+        cap = plannermod.reduced_joint_speed(MODEL, start, goal, [tool])
+        if cap is None or max(abs(g - s) for s, g in zip(start, goal)) < 1.0:
+            continue  # nothing of interest moves
+        ratio = joint_move_speed(start, goal, cap, [tool]) / 250.0
+        worst = max(worst, ratio)
+        if len(moving) == 1:
+            single = min(single, ratio)
+        fallback = fallback and plannermod.reduced_joint_speed(None, start, goal, [tool]) <= cap
+        n += 1
+    check(f"{n} random joint moves at their reduced-speed caps, sampled at 400 points: the flange and the tool point never "
+          f"pass 250 mm/s ({worst * 250:.1f} at most), and with one joint turning come within 1.5% of it "
+          f"({single * 250:.1f} at least)", n >= 30 and worst <= 1.0 + 1e-9 and single >= 0.985, (n, worst, single))
+    check("without the arm model, every joint taken to swing the tool 1150 mm out, the cap is never higher", fallback)
+
+    free = plannermod.Planner(cell_model(zone=False), reduced=TOOL)  # A to C straight would cross the post zone
+    cap = plannermod.reduced_joint_speed(MODEL, A, C, [TOOL])
+    plan = free.joint(A, C, 120.0, "C", tool=TOOL, tool_speed=plannermod.MAX_TOOL_SPEED_MM_S)
+    plain = plannermod.Planner(cell_model(zone=False)).joint(A, C, 120.0, "C")
+    check(f"with reduced speed on, the planner sends a joint move at that cap ({cap:g} deg/s), even with full speed's "
+          "1000 mm/s for the tool, saying why; with it off, as before", plan.segments[0][1] == cap
+          and "keeping the tool point and flange under 250 mm/s (reduced speed)" in plan.text
+          and plain.segments[0][1] > cap and "reduced" not in plain.text, (plan.text, plain.text))
+    reply = stub_brain.StubBrain().handle(plan_request())
+    path = safety.check_path(plannermod.Planner(cell_model(), reduced=TOOL), reply["path"], A, 120.0, TOOL, 250.0,
+                             "C (offset)", goal=C_UP)
+    fastest = max(joint_move_speed(a, goal, speed) for (goal, speed, _), a in zip(path.segments, path.path))
+    check(f"and the shell's plan of the brain's path keeps to it, segment by segment ({fastest:.1f} mm/s at most, "
+          f"sampled), saying why", fastest <= 250.0 and "(reduced speed)" in path.text, (fastest, path.text))
+
+    flange = MODEL.frames(A)[-1]
+    for name, target in [("a slide", target_pose([60, 30, 120])),
+                         ("a turn of 40\u00b0 about the tool point", kin.mul(target_pose(POINTS["A"]),
+                                                                       kin.offset_matrix(rpy=[0, 0, 40]))),
+                         ("a slide that turns 30\u00b0 and tilts 15\u00b0", kin.mul(target_pose([60, 30, 140]),
+                                                                              kin.offset_matrix(rpy=[0, 15, 30])))]:
+        plan = free.line(A, target, TOOL, 1000.0, 60.0, label=name)
+        speeds, start, fastest = [], flange, 0.0
+        for pose, speed, _ in plan.segments:
+            end = kin.from_controller_pose(pose)
+            fastest = max(fastest, line_move_speed(start, end, speed))
+            speeds.append(speed)
+            start = end
+        check(f"with reduced speed on, {name} asked for at 1000 mm/s is sent at {max(speeds):g} mm/s in "
+              f"{len(speeds)} segment(s): sampled with the turn at the bound's pace, the flange and the tool point go "
+              f"{fastest:.1f} mm/s at most", max(speeds) <= 250.0 and fastest <= 250.0 * (1 + 1e-6)
+              and "(reduced speed)" in plan.text, (plan.text, speeds, fastest))
+
+
+class HoldKey:
+    """A client's hold-to-move key, as the modes app's works: pressed, it holds for 400 ms and renews that every 100 ms."""
+
+    def __init__(self, rig):
+        self.rig, self.renewed, self.thread, self.done = rig, None, None, threading.Event()
+
+    def press(self):
+        r = self.rig.post("/api/hold", {"ms": 400})
+        self.renewed = time.perf_counter()
+        self.done.clear()
+        self.thread = threading.Thread(target=self._renew, daemon=True)
+        self.thread.start()
+        return r
+
+    def _renew(self):
+        while not self.done.wait(0.1):
+            self.rig.post("/api/hold", {"ms": 400})
+            self.renewed = time.perf_counter()
+
+    def halt(self):
+        self.done.set()
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+
+    def let_go(self):
+        """Releases the key ({"ms": 0}); returns when the server has had it (perf_counter)."""
+        self.halt()
+        self.rig.post("/api/hold", {"ms": 0})
+        return time.perf_counter()
+
+    def drop(self):
+        """Stops renewing without letting go, as a lost link would; returns when the last renewal was answered."""
+        self.halt()
+        return self.renewed
+
+
+def timed_sampler():
+    """Samples the simulator's joints over a control connection of its own, with the time (perf_counter), until
+    stopped: returns finish() -> [(time, joints)]."""
+    sock = socket.create_connection((HOST, 30099), timeout=5)
+    samples, done = [], threading.Event()
+
+    def run():
+        buf = b""
+        while not done.is_set():
+            sock.sendall(b'{"cmd": "state"}\n')
+            while b"\n" not in buf:
+                buf += sock.recv(65536)
+            line, buf = buf.split(b"\n", 1)
+            samples.append((time.perf_counter(), json.loads(line)["joints"]))
+            time.sleep(0.01)
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    def finish():
+        done.set()
+        thread.join()
+        sock.close()
+        return samples
+    return finish
+
+
+def fastest_measured(samples, window=0.1):
+    """The fastest the flange or the tool point (mm/s) went in the samples, over spans of at least `window` s."""
+    worst = 0.0
+    for tool in (kin.IDENTITY, TOOL):
+        points = [(at, kin.position(kin.mul(MODEL.frames(q)[-1], tool))) for at, q in samples]
+        j = 0
+        for at, p in points:
+            while j < len(points) and points[j][0] - at < window:
+                j += 1
+            if j == len(points):
+                break
+            worst = max(worst, math.dist(p, points[j][1]) / (points[j][0] - at))
+    return worst
+
+
+def sent_speeds(rig, mark, joints):
+    """[(kind, speed sent, fastest the flange or tool point went)] for each move the simulator took after `mark`
+    characters of its log, sampled at 400 points along it as sent: joint moves from where the move before ended
+    (`joints` before the first), lines with their turn at the bound's pace."""
+    out, q, flange = [], list(joints), MODEL.frames(joints)[-1]
+    for kind, goal, speed in re.findall(r"(MOVEJ_P2P|MOVET_LINE): goal=\[([^\]]*)\] speed=([\d.]+)", rig.log()[mark:]):
+        goal, speed = [float(v) for v in goal.split()], float(speed)
+        if kind == "MOVEJ_P2P":
+            out.append((kind, speed, joint_move_speed(q, goal, speed)))
+            q, flange = goal, MODEL.frames(goal)[-1]
+        else:
+            end = kin.from_controller_pose(goal[:3] + [math.radians(v) for v in goal[3:]])
+            out.append((kind, speed, line_move_speed(flange, end, speed)))
+            solved = KIN.solve(q, end, LIMITS, kin.IDENTITY)  # the joints it ended at, for a joint move after it
+            q, flange = (solved["joints"] if solved["ok"] else q), end
+    return out
+
+
+FAST = {"name": "fast", "fullSpeed": True, "speed": {"joint": 120, "tcp": 1000}, "steps": [
+    {"type": "move", "kind": "joint", "target": "A"},
+    {"type": "move", "kind": "planned", "target": "C", "offset": {"frame": "tool", "xyz": [0, 0, -50]}},
+    {"type": "move", "kind": "line", "target": "C"},
+    {"type": "move", "kind": "line", "target": "Ct"},
+    {"type": "move", "kind": "line", "target": "C", "offset": {"frame": "tool", "xyz": [0, 0, -50]}}]}
+SWING = {"name": "swing", "fullSpeed": True, "speed": {"joint": 120}, "steps": [
+    {"type": "move", "kind": "joint", "target": "home"}, {"type": "move", "kind": "joint", "target": "A"},
+    {"type": "move", "kind": "joint", "target": "home"}]}
+SLIDE = {"name": "slide", "fullSpeed": True, "speed": {"tcp": 1000}, "steps": [
+    {"type": "move", "kind": "line", "target": "C"},
+    {"type": "move", "kind": "line", "target": "C", "offset": {"frame": "tool", "xyz": [0, 0, -50]}}]}
+
+
+def scenario_reduced():
+    print("== reduced speed and hold-to-move in runs: full speed overridden, every move capped; the hold pauses a run")
+    rig = Rig("reduced", brain="stub")
+    key = HoldKey(rig)
+    try:
+        rig.enable()
+        setup(rig)
+        rev = rig.get("/api/cell")["cell"]["revision"]
+        rig.post("/api/cell/target", {"name": "Ct", "frame": "table", "pose": {"xyz": POINTS["C"], "rpy": [180, 0, 30]},
+                                      "seed": C, "revision": rev})
+        for program in (FAST, SWING, SLIDE):
+            save(rig, program)
+        r = rig.post("/api/manual", {"holdToMove": True})
+        estimates = {}
+        for reduced in (False, True):
+            rig.post("/api/manual", {"reducedSpeed": reduced})
+            r = rig.post("/api/run/start", {"name": "fast", "mode": "dry"})
+            s = rig.run_state("done", "faulted", "stopped", timeout=60)
+            estimates[reduced] = rig.get("/api/run")["run"]["estimateS"] if r["ok"] and s["run"]["state"] == "done" \
+                else None
+        check(f"with hold-to-move on, a dry run needs no hold; with reduced speed on, it plans at reduced speed "
+              f"({estimates[True]} s against {estimates[False]} s)", estimates[False] and estimates[True]
+              and estimates[True] > estimates[False] * 1.3, estimates)
+        moves = rig.moves()
+        refused = [rig.post("/api/run/start", {"name": "fast"}), rig.post("/api/run/start", {"name": "fast", "mode": "step"}),
+                   rig.post("/api/moveto", {"target": "A", "kind": "joint", "speed": 60})]
+        check("without a hold, a run, a stepped run and a move to a target are refused, saying why; nothing moves",
+              all(not r["ok"] and "the hold-to-move key isn't held" in r["message"] for r in refused)
+              and rig.moves() == moves and rig.status()["run"]["state"] == "done", refused)
+
+        key.press()
+        finish = timed_sampler()
+        r = rig.post("/api/run/start", {"name": "swing"})
+        s = rig.wait(lambda s: s["run"]["path"] == [1] and s.get("state") == 1, 60, 0.02)
+        busy = rig.post("/api/manual", {"reducedSpeed": False})
+        time.sleep(0.5)
+        last = key.drop()
+        stopped = None
+        while time.perf_counter() < last + 3.0 and stopped is None:
+            if rig.ctl(cmd="state")["status"] == 4:
+                stopped = time.perf_counter()
+            time.sleep(0.005)
+        s = rig.run_state("paused", "done", "faulted", "stopped", timeout=10)
+        rig.wait(lambda s: s.get("state") == 4, 5)  # resuming re-enables once the status shows the stop
+        check("while a run moves the policy can't change, saying why", not busy["ok"]
+              and busy["message"] == "A program is running. Pause or stop it first.", busy)
+        check(f"a hold that lapses mid-run (no renewal) pauses the run at its step, the arm stopped "
+              f"{(stopped or 99) - last:.2f} s after the last renewal (which held for 0.4 s), saying why", r["ok"]
+              and s["run"]["state"] == "paused" and s["run"]["path"] == [1] and stopped is not None
+              and 0.35 <= stopped - last <= 0.8 and s["run"]["reason"] == "the hold-to-move key's hold lapsed",
+              (s["run"], stopped, last))
+        refused = [rig.post("/api/run/resume"), rig.post("/api/run/step")]
+        changed = [rig.post("/api/manual", {"reducedSpeed": False}), rig.post("/api/manual", {"reducedSpeed": True})]
+        check("paused, it won't resume or step without a hold, saying why; the policy may change while it's paused",
+              all(not r["ok"] and "the hold-to-move key isn't held" in r["message"] for r in refused)
+              and rig.status()["run"]["state"] == "paused" and all(c["ok"] for c in changed), (refused, changed))
+        key.press()
+        r = rig.post("/api/run/resume")
+        s = rig.run_state("done", "faulted", "stopped", timeout=90)
+        samples = finish()
+        check("holding again and resuming carries on: the run ends at home", r["ok"] and s["run"]["state"] == "done"
+              and max(abs(a - b) for a, b in zip(rig.sim_joints(), HOME)) < 0.1, (s["run"], rig.sim_joints()))
+        measured = fastest_measured(samples)
+        check(f"measured in the simulator through the run, the flange and the tool point went {measured:.1f} mm/s at most "
+              "(within 2%, the measurement's own error, of 250)", 0 < measured <= 255.0, measured)
+
+        r = rig.post("/api/moveto", {"target": "A", "kind": "joint", "speed": 60})
+        rig.wait(lambda s: s.get("state") == 1, 10, 0.02)
+        time.sleep(0.5)
+        key.let_go()
+        s = rig.run_state("stopped", "done", "faulted", "paused", timeout=10)
+        check("a move to a target stops, as STOP does, when the key is let go: the run ends stopped, not paused, saying "
+              "why", r["ok"] and s["run"]["state"] == "stopped" and s["run"]["manual"]
+              and s["run"]["reason"] == "the hold-to-move key was let go" and rig.ctl(cmd="state")["status"] == 4,
+              s["run"])
+
+        rig.wait(lambda s: s.get("state") == 4, 5)  # Enable waits for status showing the stop, as the page does
+        enabled = rig.enable()
+        key.press()
+        mark, joints = len(rig.log()), rig.sim_joints()
+        finish = timed_sampler()
+        r = rig.post("/api/run/start", {"name": "fast"})
+        s = rig.run_state("done", "faulted", "stopped", "paused", timeout=120)
+        samples = finish()
+        key.let_go()
+        events = rig.run_log()
+        texts = [e["text"] for e in events if e["event"] in ("move.planned", "brain.plan")]
+        capped = [e["reason"] for e in events if e["event"] == "speed.capped"]
+        sent = sent_speeds(rig, mark, joints)
+        check("a program marked full speed runs at reduced speed: its three lines asked for at 1000 mm/s are capped at "
+              "250, saying it's the server's reduced speed", r["ok"] and s["run"]["state"] == "done"
+              and capped == ["reduced speed: the server's reduced speed is on"] * 3, (enabled, r, s["run"], capped))
+        check("its joint moves, the brain's path and the line that turns are slowed further, each saying why",
+              len(texts) == 5 and all("(reduced speed)" in texts[i] for i in (0, 1, 3)), texts)
+        joint_moves = [f for kind, _, f in sent if kind == "MOVEJ_P2P"]
+        lines = [(speed, f) for kind, speed, f in sent if kind == "MOVET_LINE"]
+        check(f"as sent, sampled along each move: {len(joint_moves)} joint moves, the flange and tool point "
+              f"{max(joint_moves or [0]):.1f} mm/s at most; {len(lines)} lines at {', '.join(f'{v:g}' for v, _ in lines)} "
+              f"mm/s, {max([f for _, f in lines] or [0]):.1f} at most with their turns at the bound's pace",
+              len(joint_moves) >= 3 and max(joint_moves) <= 250.5 and len(lines) >= 3
+              and all(v <= 250.0 and f <= 250.5 for v, f in lines), sent)
+        measured = fastest_measured(samples)
+        check(f"and measured in the simulator, {measured:.1f} mm/s at most (within 2% of 250)", 0 < measured <= 255.0,
+              measured)
+
+        r = rig.post("/api/manual", {"reducedSpeed": False, "holdToMove": False})
+        mark = len(rig.log())
+        r2 = rig.post("/api/run/start", {"name": "slide"})
+        s = rig.run_state("done", "faulted", "stopped", timeout=60)
+        speeds = [float(v) for v in re.findall(r"MOVET_LINE: goal=\[[^\]]*\] speed=([\d.]+)", rig.log()[mark:])]
+        check("with both off again, full speed is full speed and no hold is needed: its lines are sent at 1000 mm/s",
+              r["ok"] and r2["ok"] and s["run"]["state"] == "done" and speeds == [1000.0, 1000.0], (r2, s["run"], speeds))
+    finally:
+        key.halt()
+        rig.close()
+
+
+SCENARIOS = (unit_protocol, unit_link, unit_shell, unit_reduced, scenario_end_to_end, scenario_blind_brain,
+             scenario_bad_replies, scenario_stop, scenario_learned, scenario_no_brain, scenario_run_logs, scenario_reduced)
 
 
 def main(names):
