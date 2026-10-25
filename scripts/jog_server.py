@@ -1155,13 +1155,15 @@ class Panel:
 
     def world(self, passable=()):
         """What the spine knows of the cell, for the brain (mm, base frame): the active tool's point and shape, and
-        the zones as boxes, leaving out the guarded zones in `passable` (open while their interlocks hold)."""
+        the zones as boxes, leaving out the guarded zones in `passable` (open while their interlocks hold); a guarded one
+        sent (closed) is marked `guarded`, as no part may get into it from outside, even by the 1 mm allowance."""
         with self.cell.lock:
             data = self.cell.data
             name = data["active"]["tool"]
             tool = data["tools"][name]
-            zones = [{"name": o.zone, "centre": [round(v * 1000.0, 3) for v in o.centre],
-                      "axes": [[round(v, 9) for v in axis] for axis in o.axes], "size": [round(h * 2000.0, 3) for h in o.half]}
+            zones = [dict({"name": o.zone, "centre": [round(v * 1000.0, 3) for v in o.centre],
+                           "axes": [[round(v, 9) for v in axis] for axis in o.axes],
+                           "size": [round(h * 2000.0, 3) for h in o.half]}, **({"guarded": True} if o.guarded else {}))
                      for o in self.cell.zone_obstacles(passable)]
             return {"cellRevision": data["revision"], "marginMm": utra_model.MARGIN_M * 1000.0,
                     "tool": {"name": name, "tcp": {"xyz": list(tool["tcp"]["xyz"]), "rpy": list(tool["tcp"]["rpy"])},

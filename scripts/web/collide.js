@@ -316,6 +316,13 @@ export function createChecker(config) {
   const names = ([c, o, fixed]) => [capsules[c].label || labels[capsules[c].body],
     fixed ? obstacles[o].label : capsules[o].label || labels[capsules[o].body]];
 
+  // How close a pair already that near where a move begins may come: config.slack closer at most, but a part outside
+  // a guarded zone (closed: an open one's pairs are left out) no further than its face (ArmModel._close_limit).
+  function closeLimit([, o, fixed], gap) {
+    const limit = gap - config.slack;
+    return gap >= 0 && fixed && obstacles[o].guarded ? Math.max(limit, 0) : limit;
+  }
+
   // Where a straight joint-space move first brings two things closer than the margin, or null; see
   // ArmModel.check_path for how the continuous check works (the page checks whole moves, never one in parts).
   function checkPath(start, goal, margin = config.margin) {
@@ -354,7 +361,7 @@ export function createChecker(config) {
             return {part, other, obstacle: pairs[p][2] ? pairs[p][1] : null, gap, at: t, pose, points,
               inside: inside[p]};
           }
-          limit[p] = gap - config.slack;  // already this close: may move apart, not closer
+          limit[p] = closeLimit(pairs[p], gap);  // already this close: may move apart, not closer
           inside[p] = gap < 0;
         }
         if (speed > 0) step = Math.min(step, (gap - limit[p]) / speed);

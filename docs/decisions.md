@@ -1167,7 +1167,8 @@ A review of the work found a move from inside a guarded zone unchecked, and gaps
 watchdog and tool jogs. D120 to D124 and the revisions marked in D105, D106, D110, D111, D114 and D118 are its fixes
 (D124 from a second look at them), decided the same day. A review of those fixes then revised D105, D106, D110 and
 D121 again: an Enable the server runs on its own could still undo a STOP, and the page could slide the arm through a
-closed zone while backing it out.
+closed zone while backing it out. A third review revised D121 and D124: the 1 mm allowance for parts already close
+could carry a part into a closed zone from just outside it, shutting the arm in.
 
 ## D105. A gripper is bound to outputs, and optionally to inputs; without one to confirm, it takes a set time
 
@@ -1499,6 +1500,14 @@ closed zone while backing it out.
   direction is away from the middle, out through the far face included. And with the door's interlock not holding,
   the door may be shut on the arm, where backing out the way it came drags it through the door. So the page is
   refused too.
+- **Revised a third time:** a part within the margin of a closed zone but outside it (left there while the door was
+  open) could be carried in by the 1 mm a part already that close may come closer, by a jog or any move, the
+  interlocks unread; once in, nothing moved it. The allowance now stops at a closed zone's face (D124), so a move that
+  would take a part in reads the interlocks instead, and is refused while they don't hold. Known limit: switching the
+  motors on shifts the arm a little (0.46 mm at the tool, measured on 2026-10-21; the simulator plays it at every
+  Enable), so an Enable with a part within about half a millimetre of a closed zone's face, after a STOP or a fault,
+  can still carry it in, and the arm is then in the zone, as above. Unverified on the arm: whether an Enable shifts it
+  with the motors already on, and which way at a given pose.
 - **Alternatives:** letting any move back out that never goes further in (the first version, above); a retreat rule
   (above); a zone's door face, taught, so that "out" is known (more to teach, and a door that's shut is still in the
   way); retracing the path the arm went in by (the server knows it only for a run's last move).
@@ -1540,11 +1549,12 @@ closed zone while backing it out.
 ## D124. A move checked in parts has one allowance for parts already close; once they're clear, the margin holds again
 
 - **Decision:** a part already within the margin of something where a move begins may come at most 1 mm closer (or
-  further in) over the whole move. A straight line is checked sample by sample (every 2 mm or 1°), and a path from the
-  brain segment by segment: each part is now checked with the allowance worked out once, at the move's first pose
-  (`ArmModel.start_limits`), passed to every part (`check_path`'s `limits`), in the planner's lines, the shell's
-  paths, `zones_entered` and the stub brain alike. And once a pair is seen back beyond the margin during a move, the
-  margin holds for it again, so a move can't back out of a tight spot and come back closer than the margin.
+  further in) over the whole move, but never into a guarded zone that's closed: against one, a part outside it comes
+  no further than its face (`ArmModel._close_limit`). A straight line is checked sample by sample (every 2 mm or 1°),
+  and a path from the brain segment by segment: each part is now checked with the allowance worked out once, at the
+  move's first pose (`ArmModel.start_limits`), passed to every part (`check_path`'s `limits`), in the planner's lines,
+  the shell's paths, `zones_entered` and the stub brain alike. And once a pair is seen back beyond the margin during a
+  move, the margin holds for it again, so a move can't back out of a tight spot and come back closer than the margin.
 - **Alternatives:** each part working out its own allowance, as before (a line from 6 mm off anything could close in
   1 mm a sample: a 50 mm tool jog at 15° to a closed zone's face ended 6.9 mm inside it, without the zone being seen,
   so without its interlocks being read, and a brain's path the same, 1 mm a segment); one allowance for the whole move
@@ -1556,3 +1566,23 @@ closed zone while backing it out.
   closing in 0.9 mm a segment from 6 mm off the machine zone are both refused once 1 mm closer (both were let through
   before), a path backing out to 18 mm and coming back to 9 mm is held to the margin, and `collide.js`, which has the
   same rule for a whole move, still agrees with `utra_model.py`.
+- **Revised after the fixes were reviewed again:** the allowance could carry a part into a closed guarded zone from
+  just outside it. A tool left 0.3 mm above the machine's top face while its door was open could be jogged 0.5 mm down
+  once it shut, the interlock unread, and was then shut in (D121). Now a part outside a guarded zone in the check (a
+  guarded zone is in it only while it's closed) may still come 1 mm closer, but no further than its face: a move that
+  would take it in needs the zone, so reads its interlocks, refused while they don't hold and watched while they do.
+  The zone's obstacle is marked (`Obstacle.guarded`, set by `Cell.zone_obstacles`), in the page's model too
+  (`collide.js`), and in the brain's world (`"guarded": true`, `docs/brain-interface.md`), so the stub brain plans by
+  the same rule. A hit that takes a part into something from outside says so: "the tool would go into the machine
+  zone". Alternatives: no allowance at all against a closed guarded zone (the planner solves a line's samples to
+  0.01 mm, so a jog along its face would be refused on rounding, and a retreat whose first moments bring a part a
+  little closer, as safe home's can, would be refused); refusing only a move that ends in one (it could pass through
+  on the way); stopping the allowance at every obstacle's face (stricter near the cart, the floor and keep-out zones,
+  where being in doesn't shut the arm in, with less room to back a part out of a tight spot). Tested in-process: from
+  0.3 mm above the machine's top face, a joint move, a line and a brain's path ending 0.2 mm in are refused, and let
+  through against the same box as a keep-out zone, while a line 0.2 mm down and one 30 mm along the face go. Against
+  the simulator, with the door shut: a tool jog 0.5 mm down, a Move and a program's line there are refused with nothing
+  sent, a dry run of the line assumes the door, and the stub brain finds no way in; a jog 0.2 mm down and back up goes;
+  with the door open, the jog in goes. And `collide.js` agrees with `utra_model.py` on 24 moves from 0.1 to 0.6 mm
+  outside a guarded zone to less than 1 mm into it, all refused. Those checks fail on the code before this revision,
+  where the jog ended 0.20 mm in.

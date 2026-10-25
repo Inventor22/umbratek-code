@@ -86,11 +86,16 @@ class StubBrain:
 
     # ---- planned moves ---------------------------------------------------------------------------------------------
     def cell_model(self, world, zones=True):
-        """The arm on its cart, with the tool's shape and (unless it's ignoring them) the zones the spine sent."""
+        """The arm on its cart, with the tool's shape and (unless it's ignoring them) the zones the spine sent, a guarded
+        one marked so: the shell lets no part into it from outside, even by the allowance for parts already close."""
         capsules = [(6, [v / 1000.0 for v in c["a"]], [v / 1000.0 for v in c["b"]], c["r"] / 1000.0, "the tool")
                     for c in world["tool"]["capsules"]]
-        obstacles = [utra_model.Obstacle(f"the {z['name']} zone", "box", [v / 1000.0 for v in z["centre"]], z["axes"],
-                                         [v / 1000.0 for v in z["size"]]) for z in world["zones"]] if zones else []
+        obstacles = []
+        for z in world["zones"] if zones else []:
+            o = utra_model.Obstacle(f"the {z['name']} zone", "box", [v / 1000.0 for v in z["centre"]], z["axes"],
+                                    [v / 1000.0 for v in z["size"]])
+            o.guarded = bool(z.get("guarded"))
+            obstacles.append(o)
         return self.model.with_cell(capsules, obstacles)
 
     def plan(self, request):

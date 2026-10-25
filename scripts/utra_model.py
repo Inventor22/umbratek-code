@@ -119,7 +119,11 @@ class Obstacle:
     """Something fixed around the arm, in the base frame: a box or a cylinder, with the label messages use.
 
     `body` is 0 for the arm's own base (which its neighbouring links never check against) and None otherwise.
+    `guarded` marks a zone that interlocks guard, which a check holds only while they don't (an open one is left out
+    of it): a part outside it never gets into it, even by the allowance for parts already close (ArmModel._close_limit).
     """
+
+    guarded = False
 
     def __init__(self, label, kind, centre, axes, size, body=None):
         self.label, self.kind, self.centre, self.body = label, kind, list(centre), body
@@ -302,6 +306,8 @@ class Obstacle:
             out.update(axes=self.axes, half=self.half)
         else:
             out.update(axis=self.axis, radius=self.radius, halfLength=self.half_length)
+        if self.guarded:
+            out["guarded"] = True
         return out
 
 
@@ -506,6 +512,15 @@ class ArmModel:
     def _label(self, c):
         return self.capsule_labels[c] or BODY_LABELS[self.capsules[c][0]]
 
+    def _close_limit(self, pair, gap):
+        """How close a pair already `gap` (m) apart, nearer than the margin where a move begins, may come on it: SLACK_M
+        closer at most; but a part outside a guarded zone (one in the check is closed) no further than its face, as in
+        it the arm would be shut in until the interlocks hold (jog_server's Panel.plan_guarded)."""
+        limit = gap - SLACK_M
+        if gap >= 0.0 and pair[2] and self.obstacles[pair[1]].guarded:
+            return max(limit, 0.0)
+        return limit
+
     def start_limits(self, joints_deg, margin=MARGIN_M):
         """What check_path allows each pair on a move that begins at `joints_deg`, as (limits, inside), for a move
         checked in parts (a line's samples, a path's segments): passed to check_path for every part, they make the
@@ -517,7 +532,7 @@ class ArmModel:
                 continue
             gap, _ = self._gap(placed, pair)
             if gap < margin:
-                limits[p], inside[p] = gap - SLACK_M, gap < 0.0
+                limits[p], inside[p] = self._close_limit(pair, gap), gap < 0.0
         return limits, inside
 
     def check_path(self, start_deg, goal_deg, margin=MARGIN_M, limits=None):
@@ -527,7 +542,8 @@ class ArmModel:
         point can move faster than its reach times its joints' turn). Pairs already closer than the margin
         at the start may move apart, or SLACK_M closer at most, so the arm can always be backed out of a tight
         spot; against the cart, the floor and the zones, a part already inside one may move further in by no more
-        than that either, the gap being signed (Obstacle.segment_gap). Once a pair is seen back beyond the margin, the
+        than that either, the gap being signed (Obstacle.segment_gap); and a part outside a guarded zone may come no
+        further than its face (_close_limit). Once a pair is seen back beyond the margin, the
         margin holds for it again. A move checked in parts passes each the same `limits` (start_limits at the move's
         first pose), which are updated in place. A hit is {"part", "other", "obstacle" (index, or None for the arm
         itself), "gap", "at" (0..1 along the move), "pose", "points" (closest points), "inside" (the part was already
@@ -565,7 +581,7 @@ class ArmModel:
                         part, other = self._names(pair)
                         return {"part": part, "other": other, "obstacle": pair[1] if pair[2] else None, "gap": gap,
                                 "at": t, "pose": pose, "points": points, "inside": inside[p]}
-                    limit[p] = gap - SLACK_M  # already this close: may move apart, not closer
+                    limit[p] = self._close_limit(pair, gap)  # already this close: may move apart, not closer
                     inside[p] = gap < 0.0
                 if speed > 0.0:
                     step = min(step, (gap - limit[p]) / speed)

@@ -529,7 +529,8 @@ class Cell:
 
     def zone_obstacles(self, passable=()):
         """The zones as utra_model obstacles, in the base frame, leaving out those in `passable` (guarded zones whose
-        interlocks hold). Each carries its zone's name (`zone`)."""
+        interlocks hold). Each carries its zone's name (`zone`), and a guarded one is marked so (`guarded`): no part
+        gets into it from outside, even by the allowance for parts already close (utra_model.ArmModel._close_limit)."""
         out = []
         for name, zone in self.data["zones"].items():
             if name in passable:
@@ -539,6 +540,7 @@ class Cell:
             o = utra_model.Obstacle(f"the {name} zone", "box", [t[0][3], t[1][3], t[2][3]], axes,
                                     [v / 1000.0 for v in zone["size"]])
             o.zone = name
+            o.guarded = bool(zone.get("interlocks"))
             out.append(o)
         return out
 

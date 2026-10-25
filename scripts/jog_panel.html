@@ -1673,12 +1673,14 @@ function measuredPose() {
 const stagedJoints = (targets) => (targets ? targets.flatMap((q, i) => (Number.isFinite(q) ? [i] : [])) : []);
 
 // What blocks a move, as the server words it: "the forearm would come within 10 mm of a cart brace", "the tool would
-// go further into the machine zone" (it's already inside), or a closed zone the arm is in, where nothing moves it.
+// go further into the machine zone" (it's already inside), "the tool would go into the machine zone" (from within the
+// margin, past its face), or a closed zone the arm is in, where nothing moves it.
 const blockedBy = (hit) => (!hit ? "it would collide"
   : hit.staying ? `${hit.part} is in ${hit.other}, which is closed: nothing moves the arm there until it opens (or guide `
       + "it out by hand, in freedrive)"
     : hit.inside ? `${hit.part} would go further into ${hit.other}`
-      : `${hit.part} would come within ${Math.round(CONFIG.collision.margin * 1000)} mm of ${hit.other}`);
+      : hit.gap < 0 ? `${hit.part} would go into ${hit.other}`
+        : `${hit.part} would come within ${Math.round(CONFIG.collision.margin * 1000)} mm of ${hit.other}`);
 
 // The plan with one joint staged at `angle`, or taken out when that's where the arm already is.
 function withJoint(base, joint, angle, actual) {

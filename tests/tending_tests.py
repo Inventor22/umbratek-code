@@ -48,9 +48,11 @@ DOWN = [180, 0, 0]
 HOME = [0, 0, 90, 0, 90, 0]
 # Tool points in the table's frame, pointing down: a working point A and one beside it, B; a tray of 3 rows x 4 columns
 # (columns 40 mm apart, rows 35 mm apart) taught at three corners; a machine's opening, a point 30 mm past it, the
-# point inside it, and one 20 mm from its +x side.
+# point inside it, and one 20 mm from its +x side; and two over its top face (z 150), the pointer's capsule (which
+# reaches 2 mm past its point) 0.3 mm above it and 0.2 mm into it.
 POINTS = {"A": [0, 0, 120], "B": [100, 0, 120], "T1": [0, 0, 90], "T4": [120, 0, 90], "T9": [0, 70, 90],
-          "Mout": [0, 120, 120], "Min": [0, 180, 120], "M": [0, 200, 120], "Mside": [30, 180, 120]}
+          "Mout": [0, 120, 120], "Min": [0, 180, 120], "M": [0, 200, 120], "Mside": [30, 180, 120],
+          "Mtop": [0, 200, 152.3], "Mdip": [0, 200, 151.8]}
 MACHINE = ({"xyz": [0, 200, 100], "rpy": [0, 0, 0]}, [100, 100, 100])  # the machine's work area, a guarded zone
 PNEU = {"name": "pneu", "close": [{"output": "tool.0", "value": 1}], "open": [{"output": "tool.0", "value": 0}],
         "seconds": 0.3, "timeout": 1.0, "closed": {"input": "tool.1"}, "opened": {"input": "tool.2"},
@@ -477,6 +479,54 @@ def unit_parts():
         error = refused(lambda: safety.check_path(planner, back, back[0], 20.0, TOOL, 250.0, "M"), safety.Refused)
         check(f"and a path that backs out beyond the margin and comes back is held to the margin again ({error})",
               error and "segment 4" in error and "the machine zone" in error, error)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def unit_face():
+    print("== in-process: a part already within the margin of a guarded zone that's closed may come up to 1 mm closer, "
+          "as near anything, but never into it, where the arm would be shut in until the interlock holds")
+    import safety
+    folder = tempfile.mkdtemp(prefix="umbratek-tending-")
+    try:
+        cell = cellmod.Cell(folder)
+        cell.set_tool("pointer", TOOL_POSE, TOOL_MASS, TOOL_COG, [CAPSULE])
+        cell.activate_tool("pointer")
+        cell.set_frame("table", "base", FRAME_POSE)
+        cell.set_interlock("door_open", "controller.2", 1)
+        cell.set_zone("machine", "table", MACHINE[0], MACHINE[1], interlocks=["door_open"])
+        closed = cell.collision_model(MODEL)  # the machine in the check: closed
+        plain_zone = cell.zone_obstacles()[0]
+        plain_zone.guarded = False  # the same box, as a keep-out zone
+        plain = MODEL.with_cell(cell.tool_capsules(), [plain_zone])
+        zone = [o for o in closed.obstacles if getattr(o, "zone", None) == "machine"]
+        config = [o for o in closed.collision_config()["obstacles"] if o["label"] == "the machine zone"]
+        check("the cell marks a guarded zone as such, in the server's model and the page's copy of it",
+              len(zone) == 1 and getattr(zone[0], "guarded", False) is True and config[0].get("guarded") is True, config)
+
+        def gap_mm(q):
+            return min(g for g, _, other in closed.clearances(q) if other == "the machine zone") * 1000.0
+
+        top, dip = joints_for(POINTS["Mtop"]), joints_for(POINTS["Mdip"])
+        hit = closed.check_path(top, dip)
+        check(f"from {gap_mm(top):.2f} mm above the closed machine's top face, a move ending {-gap_mm(dip):.2f} mm into "
+              "it is refused, though a part already within the margin may otherwise come 1 mm closer",
+              hit is not None and hit["other"] == "the machine zone" and hit["gap"] < 0 and not hit["inside"], hit)
+        check("while against the same box as a keep-out zone, the 1 mm holds as before: it's let through",
+              plain.check_path(top, dip) is None, plain.check_path(top, dip))
+        planner = plannermod.Planner(closed)
+        error = refused(lambda: planner.line(top, table_pose(POINTS["Mdip"]), TOOL, 20.0), plannermod.PlanError)
+        check(f"a straight line there is refused ({error})", error and "the tool would go into the machine zone" in error,
+              error)
+        error = refused(lambda: safety.check_path(planner, [top, dip], top, 20.0, TOOL, 250.0, "Mdip"), safety.Refused)
+        check(f"and so is a brain's path, by the shell ({error})",
+              error and "segment 1: the tool would go into the machine zone" in error, error)
+        lower = POINTS["Mtop"][:2] + [POINTS["Mtop"][2] - 0.2]
+        along = [POINTS["Mtop"][0] + 30.0] + POINTS["Mtop"][1:]
+        moves = {name: refused(lambda: planner.line(top, table_pose(xyz), TOOL, 20.0), plannermod.PlanError)
+                 for name, xyz in (("down", lower), ("along", along))}
+        check("but a line 0.2 mm down, ending 0.1 mm above the face, goes, and so does one 30 mm along it: up to the "
+              "face, the 1 mm still holds", moves == {"down": None, "along": None}, moves)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 
@@ -1156,6 +1206,91 @@ def scenario_inside():
         rig.close()
 
 
+def scenario_face():
+    print("== at a closed zone's face: the arm, brought within 1 mm of the machine with its door open, can't be "
+          "jogged or moved into it once the door shuts (it would be shut in there), but can come up to it and back")
+    rig = Rig("face", brain=True)
+    door = {"open": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=1),
+            "shut": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=0)}
+
+    def idle():
+        rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 10)
+
+    def above():  # how far the pointer's capsule, 2 mm past its point, is above the machine's top face (mm)
+        return table_mm(rig.sim_joints())[2] - 2.0 - 150.0
+
+    def jog_z(direction, step):
+        r = rig.post("/api/jog", {"kind": "tool", "index": 2, "dir": direction, "step": step, "rotStep": 1.0,
+                                  "speed": 20.0})
+        idle()
+        return r
+
+    def to_top():
+        """To Mtop with the door open, then shut it. (After a fault, Enable's switch-on shifts the arm about half a
+        millimetre, as the real arm's motors did, which here is down into the machine: so it goes back.)"""
+        door["open"]()
+        goto(rig, "Mtop", kind="line")
+        door["shut"]()
+        return above(), moves_sent(rig)
+
+    try:
+        rig.enable()
+        setup(rig, points=("Mout", "Mtop", "Mdip"))
+        rev = rig.post("/api/cell/interlock", {"name": "door_open", "input": "controller.2", "value": 1,
+                                               "revision": rig.rev()})["cell"]["revision"]
+        rig.post("/api/cell/zone", {"name": "machine", "frame": "table", "pose": MACHINE[0], "size": MACHINE[1],
+                                    "interlocks": ["door_open"], "revision": rev})
+        door["open"]()
+        goto(rig, "Mout")
+        start, sent = to_top()
+        r = jog_z(-1, 0.5)
+        check(f"with the door shut and the tool {start:.2f} mm above the machine's top face, a tool jog 0.5 mm down, "
+              f"which would end 0.2 mm in, is refused ({r.get('message')})",
+              not r["ok"] and "the tool would go into the machine zone" in r["message"]
+              and "the machine zone is closed, as door_open doesn't hold" in r["message"] and moves_sent(rig) == sent
+              and abs(above() - start) < 0.01, (r, above()))
+        r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["Mdip"])], "speed": 30})
+        idle()
+        check(f"so is a Move there ({r.get('message')})", not r["ok"] and "would go into the machine zone" in r["message"]
+              and "door_open doesn't hold" in r["message"] and moves_sent(rig) == sent, r)
+        save(rig, {"name": "dip", "speed": {"tcp": 20}, "steps": [{"type": "move", "kind": "line", "target": "Mdip"}]})
+        r, s = rig.run("dip", "dry")
+        assumed = [e for e in named(rig.events(), "dry.assumed") if e.get("zone") == "machine"]
+        check("a program's line there depends on the door: a dry run assumes it will let the arm in",
+              s["run"]["state"] == "done" and assumed, (s["run"], assumed))
+        r, s = rig.run("dip")
+        check(f"and run, it fails, nothing sent ({s['run']['reason']})", s["run"]["state"] == "faulted"
+              and "the tool would go into the machine zone" in s["run"]["reason"]
+              and "door_open doesn't hold" in s["run"]["reason"] and moves_sent(rig) == sent, s["run"])
+        rig.recover()
+
+        start, sent = to_top()
+        rig.wait(lambda s: s["brain"].get("ok"), 10)
+        save(rig, {"name": "dip_planned", "speed": {"joint": 20}, "steps": [
+            {"type": "move", "kind": "planned", "target": "Mdip"}]})
+        r, s = rig.run("dip_planned", timeout=60)
+        check(f"the brain, told the machine is a guarded zone, plans by the same rule and finds no way in "
+              f"({s['run']['reason']})", s["run"]["state"] == "faulted"
+              and "the brain found no path to Mdip" in s["run"]["reason"] and moves_sent(rig) == sent, s["run"])
+        rig.recover()
+
+        start, sent = to_top()
+        r = jog_z(-1, 0.2)
+        down = above()
+        r2 = jog_z(1, 5.0)
+        check(f"up to the face, the 1 mm a part already that close may come holds: a jog 0.2 mm down goes (to {down:.2f} "
+              f"mm above it), and the arm, never shut in, jogs back up", r["ok"] and r["moved"] and 0.05 < down < 0.15
+              and r2["ok"] and r2["moved"] and abs(above() - down - 5.0) < 0.05, (r, r2, down, above()))
+        door["open"]()
+        goto(rig, "Mtop", kind="line")
+        r = jog_z(-1, 0.5)
+        check(f"with the door open, the jog in goes ({r.get('message')}; the tool {-above():.2f} mm in)",
+              r["ok"] and r["moved"] and -0.25 < above() < -0.15, (r, above()))
+        goto(rig, "Mout", kind="line")
+    finally:
+        rig.close()
+
+
 def shelf_over(q, rise):
     """A thin zone over the wrist at q, placed so that backing the tool straight up brings the arm within the margin
     of it after about `rise` mm: (pose in base, size)."""
@@ -1526,9 +1661,9 @@ def scenario_page_grip():
         rig.close()
 
 
-SCENARIOS = (unit_cell, unit_payload, unit_parts, scenario_grippers, scenario_payload_stops, scenario_payload_fault,
-             scenario_auto_enable, scenario_patterns, scenario_interlocks, scenario_inside, scenario_recovery,
-             scenario_touchup, scenario_compat, scenario_watch_lock, scenario_page_grip)
+SCENARIOS = (unit_cell, unit_payload, unit_parts, unit_face, scenario_grippers, scenario_payload_stops,
+             scenario_payload_fault, scenario_auto_enable, scenario_patterns, scenario_interlocks, scenario_inside,
+             scenario_face, scenario_recovery, scenario_touchup, scenario_compat, scenario_watch_lock, scenario_page_grip)
 
 
 def main(names):

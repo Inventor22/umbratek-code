@@ -159,6 +159,8 @@ def reduced_line_speed(length_mm, turn_deg, reach_mm, limit=REDUCED_SPEED_MM_S):
 def blocked(hit, margin_mm=10):
     if hit.get("inside"):
         return f"{hit['part']} would go further into {hit['other']}"
+    if hit.get("gap", 0.0) < 0.0:  # from within the margin, past what it may come closer (ArmModel._close_limit)
+        return f"{hit['part']} would go into {hit['other']}"
     return f"{hit['part']} would come within {margin_mm:.0f} mm of {hit['other']}"
 
 
@@ -302,7 +304,10 @@ class Planner:
         for k in range(1, n + 1):
             pose = kin.interpolate(t0, target, k / n)
             result = self.kin.solve(q, pose, DRAG_LIMITS_DEG, tool)
-            along = f"{length * k / n:.0f} mm along the line" if length >= 0.5 else f"{turn * k / n:.0f}\u00b0 into the turn"
+            # Where on the line: in mm, to a tenth on a short one (a jog may be a fraction of a millimetre), or for a
+            # turn in place, in degrees.
+            along = (f"{length * k / n:.{1 if length < 10 else 0}f} mm along the line" if length >= 0.5 or turn < 0.5
+                     else f"{turn * k / n:.0f}\u00b0 into the turn")
             clear = (k - 1) / n  # the samples before this one were fine
             if not result["ok"]:
                 if result["atLimit"] >= 0:

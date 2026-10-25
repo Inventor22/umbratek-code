@@ -220,10 +220,14 @@ def world(value, what="world"):
         where = f"{what}.zones[{i}]"
         if not isinstance(z, dict) or not isinstance(z.get("axes"), list) or len(z["axes"]) != 3:
             raise ProtocolError(f"{where} is {_show(z)}, not a zone")
-        out_zones.append({"name": text(z.get("name"), f"{where}.name"), "centre": triple(z.get("centre"), f"{where}.centre"),
-                          "axes": [triple(a, f"{where}.axes[{k}]", 1.0) for k, a in enumerate(z["axes"])],
-                          "size": [number(v, f"{where}.size[{k}]", 0.001, 20000.0)
-                                   for k, v in enumerate(triple(z.get("size"), f"{where}.size", 20000.0))]})
+        if not isinstance(z.get("guarded", False), bool):
+            raise ProtocolError(f"{where}.guarded is {_show(z['guarded'])}, not true or false")
+        out_zones.append(dict({"name": text(z.get("name"), f"{where}.name"),
+                               "centre": triple(z.get("centre"), f"{where}.centre"),
+                               "axes": [triple(a, f"{where}.axes[{k}]", 1.0) for k, a in enumerate(z["axes"])],
+                               "size": [number(v, f"{where}.size[{k}]", 0.001, 20000.0)
+                                        for k, v in enumerate(triple(z.get("size"), f"{where}.size", 20000.0))]},
+                              **({"guarded": True} if z.get("guarded") else {})))
     return {"cellRevision": integer(value.get("cellRevision"), f"{what}.cellRevision"),
             "marginMm": number(value.get("marginMm"), f"{what}.marginMm", 0, 1000),
             "tool": {"name": text(tool.get("name"), f"{what}.tool.name"), "tcp": pose(tool.get("tcp"), f"{what}.tool.tcp"),

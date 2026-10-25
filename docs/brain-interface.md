@@ -82,12 +82,14 @@ the active tool point's pose, and `inputs` (in `act` only) are the digital input
 
 `world` is what the spine knows of the cell: the active tool's point and shape, and the keep-out zones as boxes in the
 base frame. A zone that interlocks guard is left out while they all hold (the arm may pass through it then), so a brain
-plans into a machine only while its door is open; the spine checks the brain's answer against the same zones, and stops
-the arm if an interlock stops holding as it moves into one, or in it. While the arm is in a guarded zone whose
-interlocks don't hold, the spine doesn't ask at all (the step fails). As the spine checks it, a part of the arm already
-inside a zone may move out, but not further in: the gap to a zone, the cart and the floor is signed, minus the depth
-inside. The arm's own links and its cart are fixed: a brain takes them from the repo (`scripts/model/`, as
-`scripts/utra_model.py` reads them).
+plans into a machine only while its door is open; while it's in the world it carries `"guarded": true`. The spine
+checks the brain's answer against the same zones, and stops the arm if an interlock stops holding as it moves into
+one, or in it. While the arm is in a guarded zone whose interlocks don't hold, the spine doesn't ask at all (the step
+fails). As the spine checks it, a part of the arm already within the margin of something where a path begins may come
+1 mm closer over the whole path, but no further than the face of a guarded zone; and a part already inside a zone may
+move out, but not further in: the gap to a zone, the cart and the floor is signed, minus the depth inside. The arm's
+own links and its cart are fixed: a brain takes them from the repo (`scripts/model/`, as `scripts/utra_model.py`
+reads them; `ArmModel.start_limits` works out what a path may come closer to).
 
 ```json
 {"cellRevision": 12, "marginMm": 10.0,
