@@ -81,8 +81,10 @@ the active tool point's pose, and `inputs` (in `act` only) are the digital input
 `tool`). A dry run's state has `"seq": 0` and `"virtual": true`: it's where the run would be, not a measurement.
 
 `world` is what the spine knows of the cell: the active tool's point and shape, and the keep-out zones as boxes in the
-base frame. The arm's own links and its cart are fixed: a brain takes them from the repo (`scripts/model/`, as
-`scripts/utra_model.py` reads them).
+base frame. A zone that interlocks guard is left out while they all hold (the arm may pass through it then), so a brain
+plans into a machine only while its door is open; the spine checks the brain's answer against the same zones, and stops
+the arm if an interlock stops holding as it moves into one. The arm's own links and its cart are fixed: a brain takes
+them from the repo (`scripts/model/`, as `scripts/utra_model.py` reads them).
 
 ```json
 {"cellRevision": 12, "marginMm": 10.0,
@@ -109,7 +111,8 @@ Who the brain is and what it can do. The server asks every 5 s, for the panel, a
 ### plan: a path for a planned move
 
 The spine sends where the arm is and the joints the move must end at. It works the goal out itself, from the target's
-joints as taught, so the arm arrives in the taught configuration and the brain only finds the way.
+joints as taught, so the arm arrives in the taught configuration and the brain only finds the way. For a move to a
+pattern's slot, `target` names the slot ("tray slot 5") and the goal carries `pattern` and `slot` as well.
 
 ```json
 {"v": 1, "type": "plan", "id": "plan-123456-7", "state": {...}, "world": {...}, "limits": {...}, "timeoutS": 10,

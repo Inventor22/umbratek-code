@@ -1952,12 +1952,9 @@ def teach_target(panel, body):
         move = body.get("move") or ("joint" if "joints" in entry else "line")
         step = {"type": "move", "kind": move, "target": name}
         steps, at = program["steps"], body.get("at")
-        if at:  # insert after this step (a path of 0-based indexes)
-            container = steps
-            for i in at[:-1]:
-                node = container[i]
-                container = node.get("steps") or node.get("then") or []
-            container.insert(at[-1] + 1, step)
+        if at:  # insert after this step (a path of 0-based indexes, as runs number them)
+            container, index = runnermod.step_list(steps, at)
+            container.insert(index + 1, step)
         else:
             steps.append(step)
         saved = panel.programs.save(program, cell, program.get("revision"))

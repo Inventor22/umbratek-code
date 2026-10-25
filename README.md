@@ -42,7 +42,7 @@ In Tool mode, drag an arrow to slide the tool along X, Y or Z, or a ring to turn
 
 ![Teaching: Hold for freedrive, the arm moved by hand (the simulator's), Record here twice, then Run](docs/media/teach.gif)
 
-Hold for freedrive, guide the arm by hand, and press Record here at each pose: it joins the program as a move. The server runs programs itself, with straight lines, waits, I/O and steps the brain plans, and checks every move before it's sent. More in [programs, teaching and the cell](docs/programs.md).
+Hold for freedrive, guide the arm by hand, and press Record here at each pose: it joins the program as a move. The server runs programs itself, with straight lines, waits, I/O, grippers that confirm a grasp, grids of slots, zones a machine's interlocks open, retries and fallbacks, and steps the brain plans, and checks every move before it's sent. More in [programs, teaching and the cell](docs/programs.md).
 
 ### Ask a brain for paths and skills
 
@@ -60,7 +60,7 @@ A planned move asks the brain, a separate process, for its path, and a learned s
 | ---- | ------------ |
 | [Connecting to the arm](docs/connecting.md) | Wiring, booting and networking the controller; Umbratek Studio |
 | [The jog panel](docs/jog-panel.md) | Steps and speeds, the redline, planning a pose, the tool gizmo, collision checks, STOP and the watchdogs |
-| [Programs, teaching and the cell](docs/programs.md) | Programs and runs, freedrive, tools, frames, targets and keep-out zones, planned and learned steps, the server's API |
+| [Programs, teaching and the cell](docs/programs.md) | Programs and runs, freedrive and touch-up, tools and grippers, frames, targets and patterns of slots, keep-out zones and the interlocks that open them, recovery (Retry, Fallback, safe home, calling the owner), planned and learned steps, the server's API |
 | [Controlling the arm from Python](docs/python.md) | `scripts/arm.py` and Umbratek's SDK |
 | [Troubleshooting](docs/troubleshooting.md) | No arm found, E-stop and servo errors, network clashes, a joint past its limit |
 | [What's where](docs/repo-layout.md) | Every folder and file in this repo |

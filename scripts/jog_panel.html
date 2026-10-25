@@ -685,6 +685,7 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .key.small { min-width: 46px; height: 30px; padding: 0 10px; font-size: 12px; font-weight: 600; }
   .key.mini { min-width: 26px; height: 22px; padding: 0 6px; border-radius: 3px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
   .key[data-armed] { color: var(--alarm); }
+  .key.small[aria-disabled="true"] { color: var(--ink-2); }
   .run-panel { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; align-items: stretch; }
   .run-window {
     display: grid;
@@ -776,6 +777,18 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
   .events li { color: var(--ink-2); overflow-wrap: anywhere; }
   .events li time { color: #8f8b83; margin-right: 8px; }
   .events li.bad { color: var(--alarm); }
+  /* Calls to the owner: what a run asked someone to see to, until it's seen. A fault's call reads in Alarm Red, as a
+     failed run's lines in the log do; a program's own call in Legend Ink. */
+  .calls { display: grid; gap: 6px; }
+  .calls[hidden] { display: none; }
+  .calls-list { max-height: 160px; }
+  .calls-list .row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .calls-list time { color: #8f8b83; font-size: 12px; }
+  .calls-list .bad { color: var(--alarm); }
+  /* A lamp before a row's name: an interlock that holds is lit green, as live things are, and unlit while it doesn't. */
+  .row .what > .led { display: inline-block; margin-right: 7px; }
+  /* A container's empty list, and a fallback's "If it fails": rows that take new steps, printed, selectable. */
+  .steps .row.slot .text { color: var(--ink-2); }
   .split { display: grid; gap: 16px; }
   .group { display: grid; gap: 8px; align-content: start; }
   .group + .group { padding-top: 14px; border-top: 1px solid var(--seam); }
@@ -952,20 +965,50 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
         <button class="key" id="runReset" type="button">Reset</button>
       </div>
     </div>
+    <div class="calls" id="callsGroup" hidden>
+      <div class="field-row">
+        <span class="legend">Calls</span>
+        <span class="cue" id="callsCue">The runs that called you, until you've seen them.</span>
+        <button class="key small" id="callsSeen" type="button">Seen</button>
+      </div>
+      <ol class="well-list calls-list" id="calls" aria-label="Calls to the owner" aria-live="polite"></ol>
+    </div>
+    <div class="field-row" role="group" aria-label="Safe home: back along the tool, then a checked joint move to a target">
+      <span class="legend">Safe home</span>
+      <label><span class="legend">To</span><select class="field" id="homeTarget" aria-label="Target to go home to"></select></label>
+      <label><span class="legend">Back</span><input class="field" id="homeBack" type="number" min="0" max="500" step="5" value="50" aria-label="First back along the tool, up to (mm)"><span class="cue">mm along the tool first</span></label>
+      <button class="key small" id="homeKey" type="button">Go home</button>
+    </div>
     <ol class="well-list steps" id="steps" aria-label="Steps" data-empty="No steps yet. Record targets in Teach with “add a move”, or add a step below."></ol>
     <div class="field-row composer" id="composer" role="group" aria-label="Add a step after the selected one">
       <span class="legend">Add</span>
       <select class="field" id="stepType" aria-label="Step type">
         <option value="joint">Joint move</option><option value="line">Straight move</option>
         <option value="planned">Planned move</option><option value="learned">Learned skill</option>
+        <option value="gripper">Gripper</option><option value="count">Count a pattern</option>
         <option value="wait">Wait</option><option value="waitInput">Wait for input</option>
         <option value="set">Set output</option><option value="pulse">Pulse output</option>
+        <option value="retry">Retry</option><option value="fallback">Fallback</option>
+        <option value="home">Safe home</option><option value="notify">Call the owner</option>
         <option value="halt">Halt</option><option value="comment">Comment</option>
       </select>
       <select class="field" id="stepSkill" aria-label="Skill, from the brain"></select>
+      <div class="mode-keys" id="stepGrip" role="group" aria-label="What the gripper does">
+        <button class="key latch mode-key" type="button" data-value="open" aria-pressed="false">Open</button>
+        <button class="key latch mode-key" type="button" data-value="close" aria-pressed="false">Close</button>
+        <button class="key latch mode-key" type="button" data-value="grasp" aria-pressed="true">Grasp</button>
+      </div>
+      <select class="field" id="stepGripper" aria-label="Gripper"></select>
+      <label data-for="part"><span class="legend">Part</span><input class="field" id="stepPart" type="number" min="0" max="10" step="0.01" value="0" aria-label="The part's mass (kg), for the payload"><span class="cue">kg</span></label>
+      <div class="mode-keys" id="stepCount" role="group" aria-label="Count on, or back to the first slot">
+        <button class="key latch mode-key" type="button" data-value="next" aria-pressed="true">Next slot</button>
+        <button class="key latch mode-key" type="button" data-value="first" aria-pressed="false">Back to slot 1</button>
+      </div>
+      <select class="field" id="stepPattern" aria-label="Pattern"></select>
       <span class="legend" data-for="near">Near</span>
       <select class="field" id="stepTarget" aria-label="Target"></select>
       <label data-for="back"><span class="legend">Back</span><input class="field" id="stepBack" type="number" min="0" max="500" step="1" value="0" aria-label="Approach: mm back along the tool"><span class="cue">mm</span></label>
+      <label data-for="tries"><span class="legend">Up to</span><input class="field" id="stepTries" type="number" min="1" max="100" step="1" value="3" aria-label="Tries in all"><span class="cue">tries</span></label>
       <label data-for="learned"><span class="legend">Within</span><input class="field" id="stepWithin" type="number" min="5" max="500" step="5" value="100" aria-label="Region: how far the tool point may go from the target (mm)"><span class="cue">mm</span></label>
       <label data-for="learned"><span class="legend">Up to</span><input class="field" id="stepLimit" type="number" min="1" max="3600" step="1" value="60" aria-label="Time limit (s)"><span class="cue">s</span></label>
       <label data-for="speed"><span class="legend">Speed</span><input class="field" id="stepSpeed" type="number" min="1" max="1000" step="1" placeholder="default" aria-label="Speed (blank for the program's default)"><span class="cue" id="stepSpeedUnit">°/s</span></label>
@@ -1044,6 +1087,32 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
         </div>
       </div>
       <div class="group">
+        <p class="legend">Grippers</p>
+        <ul class="well-list" id="grippers" aria-label="Grippers" data-empty="No grippers: name one, and the output that closes it."></ul>
+        <div class="field-row" role="group" aria-label="New or changed gripper: the output that closes it">
+          <input class="field name" id="gripName" placeholder="gripper name" aria-label="Gripper name" spellcheck="false">
+          <span class="legend">Closes with</span>
+          <div class="mode-keys" id="gripLine" role="group" aria-label="Its output is on the tool or the controller">
+            <button class="key latch mode-key" type="button" data-value="tool" aria-pressed="true">Tool</button>
+            <button class="key latch mode-key" type="button" data-value="controller" aria-pressed="false">Controller</button>
+          </div>
+          <input class="field bit" id="gripBit" type="number" min="0" max="15" step="1" value="0" aria-label="Output line (0 to 15)">
+          <div class="mode-keys" id="gripValue" role="group" aria-label="The value that closes it (the other opens it)">
+            <button class="key latch mode-key" type="button" data-value="1" aria-pressed="true">On</button>
+            <button class="key latch mode-key" type="button" data-value="0" aria-pressed="false">Off</button>
+          </div>
+          <label><span class="legend">Takes</span><input class="field" id="gripSeconds" type="number" min="0" max="30" step="0.1" value="0.5" aria-label="How long it takes to open or close (s)"><span class="cue">s</span></label>
+        </div>
+        <div class="field-row" role="group" aria-label="The gripper's inputs, if it has any">
+          <span class="legend">Inputs</span>
+          <label><span class="legend">Closed</span><select class="field" id="gripClosed" aria-label="Input that reads on when it has closed"></select></label>
+          <label><span class="legend">Open</span><select class="field" id="gripOpened" aria-label="Input that reads on when it has opened"></select></label>
+          <label><span class="legend">On a part</span><select class="field" id="gripPart" aria-label="Input that reads on when it has closed on a part"></select></label>
+          <label><span class="legend">Timeout</span><input class="field" id="gripTimeout" type="number" min="0.1" max="60" step="0.5" value="3" aria-label="How long an input may take to confirm (s)"><span class="cue">s</span></label>
+          <button class="key small" id="gripSave" type="button">Save gripper</button>
+        </div>
+      </div>
+      <div class="group">
         <p class="legend">Frames</p>
         <ul class="well-list" id="frames" aria-label="Frames" data-empty="No frames yet: touch a fixture's origin, +X and XY with the tool point, then Fit."></ul>
         <div class="field-row" role="group" aria-label="Calibrate a frame by touching three points">
@@ -1061,6 +1130,42 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
         <ul class="well-list" id="targets" aria-label="Targets" data-empty="No targets yet: move the arm there (freedrive or jog) and Record in Teach."></ul>
       </div>
       <div class="group">
+        <p class="legend">Patterns</p>
+        <ul class="well-list" id="patterns" aria-label="Patterns" data-empty="No patterns: teach a tray's first slot, the last of its first row and the last of its first column as targets, then pick them here."></ul>
+        <div class="field-row" role="group" aria-label="New or changed pattern: its size">
+          <input class="field name" id="patName" placeholder="pattern name" aria-label="Pattern name" spellcheck="false">
+          <label><input class="field" id="patRows" type="number" min="1" max="100" step="1" value="3" aria-label="Rows"><span class="cue">rows ×</span></label>
+          <label><input class="field" id="patColumns" type="number" min="1" max="100" step="1" value="4" aria-label="Columns"><span class="cue">columns ×</span></label>
+          <label><input class="field" id="patLayers" type="number" min="1" max="100" step="1" value="1" aria-label="Layers"><span class="cue">layers,</span></label>
+          <label><input class="field" id="patPitch" type="number" min="-1000" max="1000" step="1" value="0" aria-label="Layer pitch along the frame's z (mm)"><span class="cue">mm a layer</span></label>
+        </div>
+        <div class="field-row" role="group" aria-label="The targets taught at its corners">
+          <label><span class="legend">First</span><select class="field" id="patFirst" aria-label="Target taught at its first slot"></select></label>
+          <label><span class="legend">Row end</span><select class="field" id="patRowEnd" aria-label="Target taught at the last slot of its first row"></select></label>
+          <label><span class="legend">Column end</span><select class="field" id="patColumnEnd" aria-label="Target taught at the last slot of its first column"></select></label>
+          <button class="key small" id="patSave" type="button">Save pattern</button>
+        </div>
+      </div>
+      <div class="group">
+        <p class="legend">Interlocks</p>
+        <ul class="well-list" id="interlocks" aria-label="Interlocks" data-empty="No interlocks: name an input condition (a door open, a spindle stopped) that lets the arm into a zone."></ul>
+        <div class="field-row" role="group" aria-label="New interlock: an input and the value that lets the arm in">
+          <input class="field name" id="lockName" placeholder="interlock name" aria-label="Interlock name" spellcheck="false">
+          <span class="legend">Holds while</span>
+          <div class="mode-keys" id="lockLine" role="group" aria-label="Its input is on the tool or the controller">
+            <button class="key latch mode-key" type="button" data-value="tool" aria-pressed="false">Tool</button>
+            <button class="key latch mode-key" type="button" data-value="controller" aria-pressed="true">Controller</button>
+          </div>
+          <input class="field bit" id="lockBit" type="number" min="0" max="15" step="1" value="0" aria-label="Input line (0 to 15)">
+          <span class="legend">reads</span>
+          <div class="mode-keys" id="lockValue" role="group" aria-label="The value it holds at">
+            <button class="key latch mode-key" type="button" data-value="1" aria-pressed="true">On</button>
+            <button class="key latch mode-key" type="button" data-value="0" aria-pressed="false">Off</button>
+          </div>
+          <button class="key small" id="lockSave" type="button">Save interlock</button>
+        </div>
+      </div>
+      <div class="group">
         <p class="legend">Keep-out zones</p>
         <ul class="well-list" id="zones" aria-label="Keep-out zones" data-empty="No zones: the arm is checked against itself, its cart, the floor and the tool."></ul>
         <div class="field-row" role="group" aria-label="New keep-out zone">
@@ -1068,6 +1173,7 @@ FORM: Candidate 6 of 7, mixing-console channel strips; staging: tension-commit (
           <label><span class="legend">In</span><select class="field" id="zoneFrame" aria-label="Zone's frame"></select></label>
           <label><span class="legend">Centre</span><input class="field" id="zoneX" type="number" step="1" value="0" aria-label="Centre x (mm)"><input class="field" id="zoneY" type="number" step="1" value="0" aria-label="Centre y (mm)"><input class="field" id="zoneZ" type="number" step="1" value="0" aria-label="Centre z (mm)"></label>
           <label><span class="legend">Size</span><input class="field" id="zoneW" type="number" step="1" min="1" value="100" aria-label="Size x (mm)"><input class="field" id="zoneD" type="number" step="1" min="1" value="100" aria-label="Size y (mm)"><input class="field" id="zoneH" type="number" step="1" min="1" value="100" aria-label="Size z (mm)"><span class="cue">mm</span></label>
+          <label><span class="legend">Open while</span><select class="field" id="zoneGuard" aria-label="Interlock that lets the arm in (none: always kept out)"></select></label>
           <button class="key small" id="zoneSave" type="button">Save zone</button>
         </div>
       </div>

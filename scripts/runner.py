@@ -330,6 +330,22 @@ def walk(steps):
                 yield from walk(s.get(key))
 
 
+def step_list(steps, path):
+    """The list the step at `path` (0-based indexes, as runs number steps: a fallback's else steps after its own) is in,
+    and its index there."""
+    container, index = steps, path[0]
+    for nxt in path[1:]:
+        node = container[index]
+        own = node.get("steps") or []
+        if node.get("type") == "fallback" and nxt >= len(own):
+            container, index = node.get("else") or [], nxt - len(own)
+        elif node.get("type") == "if":
+            container, index = node.get("then") or [], nxt  # an if's branches share their numbers
+        else:
+            container, index = own, nxt
+    return container, index
+
+
 def programs_using(programs, name, what="target"):
     """The saved programs that use the target `name` (a move to it, a learned step near it, safe home to it), or with
     `what` "pattern" the pattern (a move to one of its slots, or counting it), or "gripper" the gripper, as

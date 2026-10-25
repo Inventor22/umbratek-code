@@ -301,6 +301,30 @@ export async function createArmView(host, options) {
   dotTexture.colorSpace = THREE.SRGBColorSpace;
   const targetDot = new THREE.SpriteMaterial({map: dotTexture, depthTest: false, depthWrite: false, transparent: true,
                                               fog: false, sizeAttenuation: true});
+  // A guarded zone (one its interlocks open) is edged with dashes, like a door's outline; while open it loses its fill.
+  const zoneDash = new THREE.LineDashedMaterial({color: 0x8f8b83, transparent: true, opacity: 0.8, dashSize: 0.012,
+                                                 gapSize: 0.008});
+  const zoneOpen = new THREE.MeshBasicMaterial({visible: false});
+  // Where a touched-up target was: a hollow ring in Scale ink, joined to where it is now by a faint line.
+  const ringCanvas = document.createElement("canvas");
+  ringCanvas.width = ringCanvas.height = 32;
+  const ringPen = ringCanvas.getContext("2d");
+  ringPen.lineWidth = 5;
+  ringPen.strokeStyle = "#0e0f10";
+  ringPen.beginPath();
+  ringPen.arc(16, 16, 11, 0, Math.PI * 2);
+  ringPen.stroke();
+  ringPen.lineWidth = 2.5;
+  ringPen.strokeStyle = "#8f8b83";
+  ringPen.stroke();
+  const ringTexture = new THREE.CanvasTexture(ringCanvas);
+  ringTexture.colorSpace = THREE.SRGBColorSpace;
+  const wasRing = new THREE.SpriteMaterial({map: ringTexture, depthTest: false, depthWrite: false, transparent: true,
+                                            fog: false, sizeAttenuation: true});
+  const wasLine = new THREE.LineBasicMaterial({color: 0x8f8b83, depthTest: false, transparent: true, opacity: 0.7});
+  // A pattern's slots: smaller dots in Scale ink.
+  const slotDot = new THREE.SpriteMaterial({map: dotTexture, color: 0x8f8b83, depthTest: false, depthWrite: false,
+                                            transparent: true, opacity: 0.75, fog: false, sizeAttenuation: true});
   // A frame's name, printed small in Printed Grey over a Well Black outline, a constant size on screen.
   function textSprite(text, color) {
     const canvas = document.createElement("canvas");
@@ -1295,9 +1319,10 @@ export async function createArmView(host, options) {
     },
     checkPath,
     // The cell, from the server: its collision model (the active tool's shape and the keep-out zones join the
-    // check, as on the server), and the zones, frames and targets to draw. Zones are faint boxes with grey edges
-    // (red only when a plan would hit one), frames a grey x and y and their name, targets small light dots; none
-    // wear the gizmo's axis colours.
+    // check, as on the server, but for guarded zones open now), and the zones, frames, targets and patterns' slots to
+    // draw. Zones are faint boxes with grey edges (red only when a plan would hit one), dashed for a guarded zone,
+    // which loses its fill while open; frames a grey x and y and their name, targets small light dots (a touched-up
+    // one with a grey ring where it was), slots smaller grey dots; none wear the gizmo's axis colours.
     setCell(cell) {
       if (cell && cell.collision) {
         collision = cell.collision;
@@ -1311,13 +1336,17 @@ export async function createArmView(host, options) {
         cellGroup.remove(child);
         child.traverse((node) => {
           if (node.geometry) node.geometry.dispose();
-          if (node.material && node.material.map) node.material.map.dispose();
+          if (node.material && node.material.map && node.material.map !== dotTexture
+              && node.material.map !== ringTexture) node.material.map.dispose();
         });
       }
       for (const zone of (cell && cell.zones) || []) {
         const geometry = new THREE.BoxGeometry(zone.half[0] * 2, zone.half[1] * 2, zone.half[2] * 2);
-        const box = new THREE.Mesh(geometry, zoneFill);
-        box.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), zoneEdge));
+        const guarded = Boolean(zone.interlocks && zone.interlocks.length);
+        const box = new THREE.Mesh(geometry, guarded && zone.open ? zoneOpen : zoneFill);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), guarded ? zoneDash : zoneEdge);
+        if (guarded) edges.computeLineDistances();
+        box.add(edges);
         box.position.set(...zone.centre);
         const [x, y, z] = zone.axes.map((axis) => new THREE.Vector3(...axis));
         box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
@@ -1339,6 +1368,23 @@ export async function createArmView(host, options) {
         dot.scale.set(0.012, 0.012, 1);
         dot.position.set(...target.p);
         dot.renderOrder = 9;
+        cellGroup.add(dot);
+        if (target.was) {  // touched up: where it was, and the way it moved
+          const ring = new THREE.Sprite(wasRing);
+          ring.scale.set(0.014, 0.014, 1);
+          ring.position.set(...target.was);
+          ring.renderOrder = 9;
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+            [new THREE.Vector3(...target.was), new THREE.Vector3(...target.p)]), wasLine);
+          line.renderOrder = 8;
+          cellGroup.add(ring, line);
+        }
+      }
+      for (const slot of (cell && cell.slots) || []) {
+        const dot = new THREE.Sprite(slotDot);
+        dot.scale.set(0.007, 0.007, 1);
+        dot.position.set(...slot.p);
+        dot.renderOrder = 8;
         cellGroup.add(dot);
       }
       if (shown) updateGhost();

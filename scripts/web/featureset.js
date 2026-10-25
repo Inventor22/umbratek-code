@@ -1,8 +1,9 @@
 // The jog panel's Program, Teach and Cell sections: running programs on the server (Run, Step, Dry run, Pause,
-// Stop run, Reset and the speed override), editing their steps, teaching targets in freedrive, and setting up the
-// cell's tools, frames, targets and keep-out zones. The server keeps and checks all of it (docs/programs.md);
-// this module shows it and sends the operator's requests. It builds on the panel's own script through
-// window.jogPanel and runs after it.
+// Stop run, Reset, the speed override and safe home), editing their steps (retries and fallbacks included), the calls
+// a run makes to the owner, teaching targets in freedrive and touching them up, and setting up the cell's tools,
+// grippers, frames, targets, patterns, interlocks and zones. The server keeps and checks all of it
+// (docs/programs.md); this module shows it and sends the operator's requests. It builds on the panel's own script
+// through window.jogPanel and runs after it.
 const P = window.jogPanel;
 const {el, setText} = P;
 const $ = (id) => document.getElementById(id);
@@ -16,6 +17,7 @@ const SENSITIVITIES = [90, 100, 110];  // the teach sensitivity in % (Umbratek's
 
 let status = null;
 let cell = null;  // GET /api/cell's reply: the cell, its frames and targets in the base frame, and what to draw
+let io = null;  // GET /api/io's last reply: the digital lines, and the interlocks and grippers as they read
 let cellAsked = null;  // the revision being fetched
 let drawnIn = null;  // the 3D view the cell was last drawn in
 let programs = [];
@@ -60,7 +62,6 @@ const fix = (v, digits = 1) => {
 };
 const triple = (values, digits = 1) => `(${values.map((v) => fix(v, digits)).join(", ")})`;
 const pathText = (path) => path.map((i) => i + 1).join(".");
-const samePath = (a, b) => Boolean(a && b) && a.length === b.length && a.every((v, i) => v === b[i]);
 const num = (id) => {
   const value = Number($(id).value);
   return Number.isFinite(value) ? value : 0;
@@ -307,6 +308,7 @@ function renderRun(s) {
   gate($("runStart"), whyNotStart(s, "run"));
   gate($("runStepKey"), paused ? (live ? null : "There's no status from the controller.") : whyNotStart(s, "step"));
   gate($("runDry"), whyNotStart(s, "dry"));
+  gate($("homeKey"), whyNotHome(s));
   setText($("runPause"), paused ? "Resume" : "Pause");
   $("runPause").disabled = !((paused && live) || (r.state === "running" && !r.manual));
   $("runStop").disabled = !RUN_BUSY.includes(r.state);
@@ -324,7 +326,8 @@ $("runDry").addEventListener("click", (e) => {
 $("runStepKey").addEventListener("click", (e) => {
   if (refused(e.currentTarget)) return;
   if (runOf(status).state === "paused") send("/api/run/step", {}, e.currentTarget);
-  else send("/api/run/start", {name: program.name, mode: "step", from: selected}, e.currentTarget);
+  else send("/api/run/start", {name: program.name, mode: "step", from: selected && !selected.into ? selected.path : null},
+    e.currentTarget);
 });
 $("runPause").addEventListener("click", (e) => send(runOf(status).state === "paused" ? "/api/run/resume" : "/api/run/pause",
   {}, e.currentTarget));
@@ -396,10 +399,17 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // ---- Program: the steps ----
+const GRIP_WORDS = {open: "Open", close: "Close", grasp: "Grasp with"};
+
+function moveTo(s) {
+  if (s.pattern === undefined) return s.target;
+  return s.slot !== undefined ? `${s.pattern} slot ${s.slot}` : `${s.pattern}'s next slot`;
+}
+
 function describeStep(s) {
   switch (s.type) {
     case "move": {
-      let text = `${s.kind === "line" ? "Straight move" : s.kind === "planned" ? "Planned move" : "Joint move"} to ${s.target}`;
+      let text = `${s.kind === "line" ? "Straight move" : s.kind === "planned" ? "Planned move" : "Joint move"} to ${moveTo(s)}`;
       const o = s.offset;
       if (o && o.frame === "tool" && !o.xyz[0] && !o.xyz[1] && o.xyz[2] < 0 && !(o.rpy || []).some(Boolean)) {
         text += `, ${fix(-o.xyz[2], 0)} mm back along the tool`;
@@ -415,6 +425,18 @@ function describeStep(s) {
       if (s.check) text += `, then ${s.check.input} = ${s.check.value}`;
       return text;
     }
+    case "gripper": {
+      const mass = s.part && s.part.mass;
+      return `${GRIP_WORDS[s.action] || s.action} ${s.gripper}${s.action === "grasp" && mass ? `, a ${fix(mass, 2)} kg part` : ""}`;
+    }
+    case "count":
+      if (s.to === undefined) return `Count ${s.pattern} on to its next slot`;
+      return s.to === 1 ? `Count ${s.pattern} back to slot 1` : `Set ${s.pattern}'s counter to slot ${s.to}`;
+    case "retry": return `Retry: up to ${s.tries} tries of the steps below`;
+    case "fallback": return "Fallback: if a step below fails, the steps under If it fails run instead";
+    case "home":
+      return `Safe home to ${s.target}${s.retract ? `, first up to ${fix(s.retract, 0)} mm back along the tool` : ""}`;
+    case "notify": return `Call the owner: ${s.message}`;
     case "wait":
       return s.input !== undefined ? `Wait for ${s.input} = ${s.value} (up to ${s.timeout} s)` : `Wait ${s.seconds} s`;
     case "set": return `Set ${s.output} to ${s.value}`;
@@ -428,23 +450,52 @@ function describeStep(s) {
   }
 }
 
-// Every step as a row: its path, depth, whether this page can edit it (the top level and repeats' steps; an if's
-// branches are edited in its JSON file), and the label rows "Else" and "Then" for if steps.
-function flatten(steps, path = [], depth = 0, editable = true, out = []) {
+// Every step as a row: its path as the server numbers it (a fallback's If it fails steps carry on from its own),
+// its depth, `at` (where it lives in the program: indexes and the keys of the lists between them, for editing) and
+// whether this page edits it (the top level, repeats, retries and fallbacks; an if's branches are edited in its JSON
+// file). Label rows: "Else" for an if; "If it fails" for a fallback, and an empty list's row, which can be selected
+// to add steps into that list (`into`).
+function flatten(steps, path = [], depth = 0, editable = true, out = [], at = [], offset = 0) {
   steps.forEach((s, i) => {
-    const p = [...path, i];
-    out.push({s, path: p, depth, editable});
-    if (s.type === "repeat") flatten(s.steps, p, depth + 1, editable, out);
+    const p = [...path, offset + i];
+    const here = [...at, i];
+    out.push({s, path: p, depth, editable, at: here});
+    if (s.type === "repeat" || s.type === "retry") {
+      flatten(s.steps, p, depth + 1, editable, out, [...here, "steps"]);
+      if (!s.steps.length && editable) out.push({label: "No steps yet: select this, then add them", depth: depth + 1, into: [...here, "steps"]});
+    }
+    if (s.type === "fallback") {
+      flatten(s.steps, p, depth + 1, editable, out, [...here, "steps"]);
+      if (!s.steps.length && editable) out.push({label: "No steps yet: select this, then add them", depth: depth + 1, into: [...here, "steps"]});
+      out.push({label: "If it fails", depth, into: editable ? [...here, "else"] : null});
+      flatten(s.else, p, depth + 1, editable, out, [...here, "else"], s.steps.length);
+    }
     if (s.type === "if") {
-      flatten(s.then, p, depth + 1, false, out);
+      flatten(s.then, p, depth + 1, false, out, [...here, "then"]);
       if (s.else.length) {
         out.push({label: "Else", depth});
-        flatten(s.else, p, depth + 1, false, out);
+        flatten(s.else, p, depth + 1, false, out, [...here, "else"]);
       }
     }
   });
   return out;
 }
+
+// The list a location's step lives in, and its index: `at` alternates indexes and list keys, ending with an index.
+function listAt(steps, at) {
+  let list = steps;
+  for (let k = 0; k + 1 < at.length; k += 2) list = list[at[k]][at[k + 1]];
+  return [list, at[at.length - 1]];
+}
+
+// The list named by `into` (indexes and keys, ending with a key).
+function listInto(steps, into) {
+  let list = steps;
+  for (let k = 0; k < into.length; k += 2) list = list[into[k]][into[k + 1]];
+  return list;
+}
+
+const sameAt = (a, b) => Boolean(a && b) && a.length === b.length && a.every((v, i) => v === b[i]);
 
 // What the brain does for a step ("" for steps it has no part in).
 function brainPart(s) {
@@ -452,17 +503,39 @@ function brainPart(s) {
   return s.type === "move" && s.kind === "planned" ? "the brain plans the path" : "";
 }
 
-// A step's problem, shown in Alarm Red: a target that's gone or out of reach, or a brain it needs that isn't there.
+// A step's problem, shown in Alarm Red: a target, gripper or pattern that's gone, a target out of reach, a pattern used
+// up, or a brain it needs that isn't there.
 function stepProblem(s) {
-  const name = s.type === "move" ? s.target : s.type === "learned" ? s.near : null;
-  if (!name || !cell) return "";
-  const target = cell.cell.targets[name];
+  if (!cell) return "";
+  const data = cell.cell;
+  if (s.type === "gripper" && !data.grippers[s.gripper]) return "no such gripper";
+  if (s.pattern !== undefined && (s.type === "move" || s.type === "count")) {
+    const info = cell.patterns[s.pattern];
+    if (!info) return "no such pattern";
+    if (info.error) return info.error;
+    const next = (status && status.counters && status.counters[s.pattern]) || 1;
+    if (s.type === "move" && s.slot === undefined && next > info.count) return `${s.pattern} is used up`;
+    return "";
+  }
+  const name = s.type === "move" || s.type === "home" ? s.target : s.type === "learned" ? s.near : null;
+  if (!name) return "";
+  const target = data.targets[name];
   if (!target) return "no such target";
   if (target.unreachable) return "out of reach since its frame moved";
   const brain = status && status.brain;
   if (!brainPart(s) || !brain || brain.ok === null || brain.ok === undefined) return "";
   if (!brain.ok) return "brain not answering";
   if (s.type === "learned" && !(s.skill in (brain.skills || {}))) return `the brain has no skill ${s.skill}`;
+  return "";
+}
+
+// A step's note in Printed Grey: the brain's part, or where a pattern's counter stands.
+function stepCue(s) {
+  if (brainPart(s)) return brainPart(s);
+  if (s.type === "move" && s.pattern !== undefined && s.slot === undefined && cell && cell.patterns[s.pattern]) {
+    const next = (status && status.counters && status.counters[s.pattern]) || 1;
+    return `slot ${next} of ${cell.patterns[s.pattern].count} next`;
+  }
   return "";
 }
 
@@ -476,13 +549,31 @@ function renderSteps() {
   const r = runOf(status);
   const busy = Boolean(program) && RUN_BUSY.includes(r.state) && r.program === program.name;
   const rows = program ? flatten(program.steps) : [];
-  if (selected && !rows.some((x) => x.s && samePath(x.path, selected))) selected = null;
+  if (selected && !rows.some((x) => (selected.into ? sameAt(x.into, selected.into) : x.s && sameAt(x.at, selected.at)))) {
+    selected = null;
+  }
   list.replaceChildren(...rows.map((x) => {
     const li = el("li", "row");
     li.dataset.depth = String(Math.min(x.depth, 3));
     if (x.label) {
       li.classList.add("comment");
-      li.append(el("span"), el("span", "pick text", x.label), el("span"));
+      if (!x.into) {
+        li.append(el("span"), el("span", "pick text", x.label), el("span"));
+        return li;
+      }
+      // A row that takes new steps: selecting it adds them at the start of that list.
+      li.classList.add("slot");
+      const pick = el("button", "pick");
+      pick.type = "button";
+      pick.append(el("span", "num", ""), el("span", "text", x.label));
+      const isSelected = Boolean(selected && sameAt(selected.into, x.into));
+      li.classList.toggle("selected", isSelected);
+      pick.setAttribute("aria-pressed", String(isSelected));
+      pick.addEventListener("click", () => {
+        selected = isSelected ? null : {into: x.into};
+        renderSteps();
+      });
+      li.append(el("span"), pick, el("span", "acts"));
       return li;
     }
     li.dataset.path = pathText(x.path);
@@ -493,12 +584,12 @@ function renderSteps() {
     pick.append(el("span", "num", pathText(x.path)), el("span", "text", describeStep(x.s)));
     const problem = stepProblem(x.s);
     if (problem) pick.lastChild.append(el("span", "cue bad", ` ${problem}`));
-    else if (brainPart(x.s)) pick.lastChild.append(el("span", "cue", ` · ${brainPart(x.s)}`));
-    const isSelected = samePath(x.path, selected);
+    else if (stepCue(x.s)) pick.lastChild.append(el("span", "cue", ` · ${stepCue(x.s)}`));
+    const isSelected = Boolean(selected && !selected.into && sameAt(x.at, selected.at));
     li.classList.toggle("selected", isSelected);
     pick.setAttribute("aria-pressed", String(isSelected));
     pick.addEventListener("click", () => {
-      selected = samePath(x.path, selected) ? null : x.path;
+      selected = isSelected ? null : {at: x.at, path: x.path};
       renderSteps();
     });
     const acts = el("span", "acts");
@@ -507,12 +598,11 @@ function renderSteps() {
       {name: program.name, mode: "run", from: x.path}, key), busy || !ready(status));
     acts.append(start);
     if (x.editable) {
-      const container = containerOf(program.steps, x.path);
-      const i = x.path[x.path.length - 1];
+      const [container, i] = listAt(program.steps, x.at);
       acts.append(
-        miniKey("\u2191", `Move ${where} up`, () => moveStep(x.path, -1), busy || i === 0),
-        miniKey("\u2193", `Move ${where} down`, () => moveStep(x.path, 1), busy || i === container.length - 1),
-        miniKey("\u00d7", `Delete ${where}`, (key) => twice(key, () => deleteStep(x.path)), busy),
+        miniKey("\u2191", `Move ${where} up`, () => moveStep(x.at, -1), busy || i === 0),
+        miniKey("\u2193", `Move ${where} down`, () => moveStep(x.at, 1), busy || i === container.length - 1),
+        miniKey("\u00d7", `Delete ${where}`, (key) => twice(key, () => deleteStep(x.at)), busy),
       );
     }
     li.append(lamp, pick, acts);
@@ -561,12 +651,6 @@ function markCurrent() {
   }
 }
 
-function containerOf(steps, path) {
-  let list = steps;
-  for (const i of path.slice(0, -1)) list = list[i].steps || list[i].then || [];
-  return list;
-}
-
 async function saveProgram(next, select) {
   const reply = await send("/api/program", {program: next, revision: program.revision});
   if (!reply) return false;
@@ -576,29 +660,60 @@ async function saveProgram(next, select) {
   return true;
 }
 
-function moveStep(path, by) {
-  const next = structuredClone(program);
-  const list = containerOf(next.steps, path);
-  const i = path[path.length - 1];
-  [list[i], list[i + by]] = [list[i + by], list[i]];
-  saveProgram(next, [...path.slice(0, -1), i + by]);
+// The selection after an edit: the step at `at`, with its path as the server numbers it.
+function selectAt(at) {
+  const row = flatten(program.steps).find((x) => x.s && sameAt(x.at, at));
+  return row ? {at: row.at, path: row.path} : null;
 }
 
-function deleteStep(path) {
+async function saveAndSelect(next, at) {
+  const reply = await send("/api/program", {program: next, revision: program.revision});
+  if (!reply) return false;
+  program = reply.program;
+  selected = selectAt(at);
+  renderSteps();
+  return true;
+}
+
+function moveStep(at, by) {
   const next = structuredClone(program);
-  containerOf(next.steps, path).splice(path[path.length - 1], 1);
+  const [list, i] = listAt(next.steps, at);
+  [list[i], list[i + by]] = [list[i + by], list[i]];
+  saveAndSelect(next, [...at.slice(0, -1), i + by]);
+}
+
+function deleteStep(at) {
+  const next = structuredClone(program);
+  const [list, i] = listAt(next.steps, at);
+  list.splice(i, 1);
   saveProgram(next, null);
 }
 
+// Adds a step after the selected one, or at the start of the selected empty list or If it fails, or at the end.
 function insertStep(step) {
   const next = structuredClone(program);
+  if (selected && selected.into) {
+    listInto(next.steps, selected.into).unshift(step);
+    return saveAndSelect(next, [...selected.into, 0]);
+  }
   if (selected) {
-    const i = selected[selected.length - 1] + 1;
-    containerOf(next.steps, selected).splice(i, 0, step);
-    return saveProgram(next, [...selected.slice(0, -1), i]);
+    const [list, i] = listAt(next.steps, selected.at);
+    list.splice(i + 1, 0, step);
+    return saveAndSelect(next, [...selected.at.slice(0, -1), i + 1]);
   }
   next.steps.push(step);
-  return saveProgram(next, [next.steps.length - 1]);
+  return saveAndSelect(next, [next.steps.length - 1]);
+}
+
+// Where the next step goes, in words: "after 3", "into 4" (an empty list), "under If it fails of 4", "at the end".
+function insertWhere() {
+  if (!selected) return "at the end";
+  if (selected.into) {
+    const row = flatten(program.steps).find((x) => x.s && sameAt(x.at, selected.into.slice(0, -1)));
+    const of = row ? pathText(row.path) : "";
+    return selected.into[selected.into.length - 1] === "else" ? `under If it fails of ${of}` : `into ${of}`;
+  }
+  return `after ${pathText(selected.path)}`;
 }
 
 // ---- Program: adding a step ----
@@ -607,30 +722,41 @@ const SHOWN = {
   learned: ["near", "stepTarget", "stepSkill", "learned", "speed"], wait: ["seconds"],
   waitInput: ["stepIoLine", "stepIoBit", "stepValue", "timeout"], set: ["stepIoLine", "stepIoBit", "stepValue"],
   pulse: ["stepIoLine", "stepIoBit", "seconds"], halt: ["stepText"], comment: ["stepText"],
+  gripper: ["stepGrip", "stepGripper", "part"], count: ["stepPattern", "stepCount"], retry: ["tries"], fallback: [],
+  home: ["stepTarget", "back", "speed"], notify: ["stepText"],
 };
+const PATTERN = "pattern:";  // a move's target select lists patterns too, as "pattern:<name>"
 
 function renderComposer() {
   const type = $("stepType").value;
   const shown = SHOWN[type];
-  for (const id of ["stepTarget", "stepSkill", "stepIoLine", "stepIoBit", "stepValue", "stepText"]) {
+  for (const id of ["stepTarget", "stepSkill", "stepIoLine", "stepIoBit", "stepValue", "stepText", "stepGrip",
+    "stepGripper", "stepPattern", "stepCount"]) {
     $(id).hidden = !shown.includes(id);
   }
   for (const node of $("composer").querySelectorAll("[data-for]")) node.hidden = !shown.includes(node.dataset.for);
+  $("stepPart").closest("label").hidden = !(type === "gripper" && grip.value === "grasp");
   setText($("stepSpeedUnit"), type === "line" ? "mm/s" : "°/s");
   $("stepSpeed").max = type === "line" ? "1000" : "120";
   $("stepSpeed").placeholder = program ? fix(program.speed[type === "line" ? "tcp" : "joint"], 0) : "";
-  $("stepText").placeholder = type === "halt" ? "what the operator should do" : "note";
-  $("stepTarget").setAttribute("aria-label", type === "learned" ? "Near target" : "Target");
-  const targets = cell ? Object.entries(cell.cell.targets) : [];
-  fillSelect($("stepTarget"), targets.filter(([, t]) => type !== "line" || !t.joints)
-    .map(([name, t]) => [name, t.joints ? `${name} (joints)` : name]), type === "line" ? "No tool targets yet" : "No targets yet");
+  $("stepText").placeholder = type === "halt" ? "what the operator should do" : type === "notify" ? "what the owner should know" : "note";
+  $("stepTarget").setAttribute("aria-label", type === "learned" ? "Near target" : type === "home" ? "Home target" : "Target");
+  const data = cell ? cell.cell : {targets: {}, grippers: {}, patterns: {}};
+  const targets = Object.entries(data.targets);
+  const moves = ["joint", "line", "planned"].includes(type);
+  fillSelect($("stepTarget"), [
+    ...targets.filter(([, t]) => type !== "line" || !t.joints).map(([name, t]) => [name, t.joints ? `${name} (joints)` : name]),
+    ...(moves ? Object.keys(data.patterns).map((name) => [PATTERN + name, `${name}'s next slot (pattern)`]) : []),
+  ], type === "line" ? "No tool targets yet" : "No targets yet");
+  fillSelect($("stepGripper"), Object.keys(data.grippers).map((name) => [name, name]), "No grippers yet");
+  fillSelect($("stepPattern"), Object.keys(data.patterns).map((name) => [name, name]), "No patterns yet");
   const brain = status && status.brain;
   const skills = brain && brain.ok ? Object.keys(brain.skills || {}) : [];
   fillSelect($("stepSkill"), skills.map((name) => [name, name]), brain && brain.ok ? "The brain has no skills" : "No brain");
   const r = runOf(status);
   const busy = Boolean(program) && RUN_BUSY.includes(r.state) && r.program === program.name;
   $("stepAdd").disabled = !program || busy;
-  setText($("stepAdd"), selected ? `Add after ${pathText(selected)}` : "Add at the end");
+  setText($("stepAdd"), !program || !selected ? "Add at the end" : selected.into ? `Add ${insertWhere()}` : `Add after ${pathText(selected.path)}`);
 }
 
 // The step the add row describes, or {why} it can't be added yet.
@@ -643,8 +769,11 @@ function composedStep() {
     case "joint":
     case "line":
     case "planned": {
-      if (!$("stepTarget").value) return {why: "Record a target first (Teach), then add a move to it."};
-      const step = {type: "move", kind: type, target: $("stepTarget").value};
+      const to = $("stepTarget").value;
+      if (!to) return {why: "Record a target first (Teach), then add a move to it."};
+      const step = {type: "move", kind: type};
+      if (to.startsWith(PATTERN)) step.pattern = to.slice(PATTERN.length);
+      else step.target = to;
       const back = num("stepBack");
       if (back > 0) step.offset = {frame: "tool", xyz: [0, 0, -back]};
       if (speed !== undefined) step.speed = speed;
@@ -660,6 +789,27 @@ function composedStep() {
       if (speed !== undefined) step.speed = speed;
       return step;
     }
+    case "gripper": {
+      if (!$("stepGripper").value) return {why: "Add a gripper in the Cell section first: name it, and the output that closes it."};
+      const step = {type: "gripper", gripper: $("stepGripper").value, action: grip.value};
+      if (grip.value === "grasp") step.part = {mass: num("stepPart"), cog: [0, 0, 0]};
+      return step;
+    }
+    case "count": {
+      if (!$("stepPattern").value) return {why: "Add a pattern in the Cell section first, from three taught corners."};
+      return countWay.value === "first" ? {type: "count", pattern: $("stepPattern").value, to: 1}
+        : {type: "count", pattern: $("stepPattern").value};
+    }
+    case "retry": return {type: "retry", tries: Math.round(num("stepTries")), steps: []};
+    case "fallback": return {type: "fallback", steps: [], else: []};
+    case "home": {
+      const to = $("stepTarget").value;
+      if (!to || to.startsWith(PATTERN)) return {why: "Pick the target to go home to (record one in Teach first)."};
+      const step = {type: "home", target: to, retract: num("stepBack")};
+      if (speed !== undefined) step.speed = speed;
+      return step;
+    }
+    case "notify": return {type: "notify", message: $("stepText").value.trim() || "The run needs you."};
     case "wait": return {type: "wait", seconds: num("stepSeconds")};
     case "waitInput": return {type: "wait", input: io, value, timeout: num("stepTimeout")};
     case "set": return {type: "set", output: io, value};
@@ -669,10 +819,16 @@ function composedStep() {
   }
 }
 
-$("stepType").addEventListener("change", renderComposer);
+$("stepType").addEventListener("change", () => {
+  // Safe home backs off along the tool first: 50 mm unless asked otherwise; moves start without an approach offset.
+  if ($("stepType").value === "home" && num("stepBack") === 0) $("stepBack").value = "50";
+  renderComposer();
+});
 const ioLine = choice("stepIoLine");
 const ioValue = choice("stepValue");
-$("stepAdd").addEventListener("click", (event) => {
+const grip = choice("stepGrip", () => renderComposer());
+const countWay = choice("stepCount");
+$("stepAdd").addEventListener("click", async (event) => {
   const step = composedStep();
   if (!program) return;
   if (step.why) {
@@ -680,7 +836,16 @@ $("stepAdd").addEventListener("click", (event) => {
     P.refuse(event.currentTarget);
     return;
   }
-  insertStep(step);
+  const container = step.type === "retry" || step.type === "fallback";
+  if (await insertStep(step) && container) {
+    // Straight into the new container's list, so the next steps added go there.
+    const row = flatten(program.steps).find((x) => x.s && selected && sameAt(x.at, selected.at));
+    if (row) {
+      selected = {into: [...row.at, "steps"]};
+      renderSteps();
+      P.say(`${describeStep(step)}: the steps added next go into it. Select a step outside it to add after that instead.`, "ok");
+    }
+  }
 });
 
 // ---- Program: the run's log ----
@@ -703,9 +868,29 @@ function eventText(e) {
     case "io.waited": return `${at}: ${e.input} came after ${e.seconds} s`;
     case "io.set": return `${at}: ${e.output} set to ${e.value}`;
     case "dry.assumed":
+      if (e.zone) return `${at}: assumed ${e.interlocks.join(" and ")} will let it into the ${e.zone} zone (dry run)`;
       return e.skill ? `${at}: assumed ${e.skill} ends where it began (dry run)` : `${at}: assumed ${e.input} = ${e.value} (dry run)`;
     case "brain.plan": return `${at}: ${e.text}${e.note ? ` (the brain: ${e.note})` : ""}`;
     case "brain.refused": return `${at}: ${e.reason}`;
+    case "step.failed": return `${at}: failed: ${e.reason}`;
+    case "retry": return `${at}: try ${e.attempt} of ${e.of}, after ${e.reason}`;
+    case "retry.spent": return `${at}: no tries left of ${e.tries}`;
+    case "fallback": return `${at}: a step failed, so the steps under If it fails run`;
+    case "gripper.set": {
+      const outs = Object.entries(e.outputs || {}).map(([k, v]) => `${k} ${v ? "on" : "off"}`).join(", ");
+      return `${at}: ${e.action === "open" ? "opening" : e.action === "grasp" ? "grasping with" : "closing"} ${e.gripper} (${outs})`;
+    }
+    case "gripper.done":
+      return `${at}: ${e.gripper} ${e.action === "open" ? "opened" : e.action === "grasp" ? "holds the part" : "closed"} in ${e.seconds} s`
+        + `${e.payload !== undefined ? `; payload ${e.payload} kg` : ""}${e.note && /stopped/.test(e.note) ? `. ${e.note}` : ""}`;
+    case "dry.would-grip": return `${at}: would ${e.action === "grasp" ? "grasp with" : e.action} ${e.gripper} (dry run; ${e.note})`;
+    case "pattern.count":
+      return `${at}: ${e.pattern} counted to ${e.slot > e.of ? `past its last slot (used up)` : `slot ${e.slot} of ${e.of}`}`;
+    case "home.retract":
+      return `${at}: ${e.gotMm >= e.wantedMm ? `back ${e.gotMm} mm along the tool` : e.gotMm > 0
+        ? `back ${e.gotMm} of ${e.wantedMm} mm along the tool: ${e.short}` : `no room to back off: ${e.short}`}`;
+    case "owner.called": return `${at}: called the owner: ${e.message}`;
+    case "dry.would-notify": return `${at}: would call the owner: ${e.message} (dry run)`;
     case "skill.start": return `${at}: ${e.skill} starts, within ${e.within} mm of ${e.near}, for up to ${e.seconds} s`;
     case "skill.burst": return `${at}: burst ${e.tick + 1}: ${e.text}`;
     case "skill.hold": return `${at}: ${e.seconds} s still, as the skill asked`;
@@ -727,7 +912,7 @@ function eventText(e) {
   }
 }
 
-const BAD_EVENTS = ["run.faulted", "run.stopped", "step.interrupted", "brain.refused"];
+const BAD_EVENTS = ["run.faulted", "run.stopped", "step.interrupted", "brain.refused", "step.failed", "retry.spent"];
 
 async function refreshEvents(s) {
   if (!s || !s.run) return;
@@ -823,8 +1008,9 @@ function renderTeach(s) {
   recordAdd.key("joint").disabled = !intoOk;
   if (!intoOk && recordAdd.value !== "none") recordAdd.set("none");
   if (joint && recordAdd.value === "line") recordAdd.set("joint");  // a straight line needs a tool pose
+  const where = program ? insertWhere() : "";
   setText($("recordIntoText"), !program ? "(pick a program to add moves to it)"
-    : `to it in ${program.name}, ${selected ? `after step ${pathText(selected)}` : "at the end"}`);
+    : `to it in ${program.name}, ${where.startsWith("after ") ? `after step ${where.slice(6)}` : where}`);
   $("recordIntoText").hidden = Boolean(program) && recordAdd.value === "none";
   for (const id of ["toolTouch", "touchOrigin", "touchX", "touchXY"]) $(id).disabled = !live || moving;
 }
@@ -843,16 +1029,16 @@ $("recordKey").addEventListener("click", async (event) => {
   const name = $("recordName").value.trim();
   const body = {here: true, name, frame: $("recordFrame").value || "base", kind: recordAs.value, revision: revision()};
   const into = recordAdd.value !== "none" && program;
-  if (into) Object.assign(body, {program: program.name, at: selected, move: recordAdd.value});
-  const before = into ? program : null;
+  const move = recordAdd.value;
   const reply = await send("/api/cell/target", body, key);
   if (!reply) return;
   $("recordName").value = nextName(name);
   if (into) {
-    const at = selected ? [...selected.slice(0, -1), selected[selected.length - 1] + 1] : [before.steps.length];
+    // The move goes where the add row's would: after the selected step, into a selected empty list, or at the end.
     await loadProgram(program.name);
-    selected = at;
-    renderSteps();
+    if (await insertStep({type: "move", kind: move, target: name})) {
+      P.say(`${reply.message} Added a ${move === "line" ? "straight" : "joint"} move to it in ${program.name}.`, "ok");
+    }
   }
 });
 $("recordName").addEventListener("keydown", (event) => { if (event.key === "Enter") $("recordKey").click(); });
@@ -864,10 +1050,49 @@ function takeCell(reply) {
   renderCell();
   if (program) renderSteps();
   else renderComposer();
+  pollIo();
 }
 
 function frameChoices() {
   return [["base", "base"], ...Object.keys(cell.cell.frames).map((n) => [n, n])];
+}
+
+// Every digital line, for a gripper's inputs: "none", then tool.0 to tool.15 and controller.0 to controller.15.
+const LINES = ["tool", "controller"].flatMap((line) => [...Array(16).keys()].map((n) => `${line}.${n}`));
+function inputChoices() {
+  return [["", "none"], ...LINES.map((name) => [name, name])];
+}
+
+const signalText = (s, on = "on", off = "off") => `${s.input || s.output} ${s.value ? on : off}`;
+
+function gripperDetail(g) {
+  const close = g.close.map((o) => signalText(o)).join(" and ");
+  const bits = [`closes with ${close}`];
+  const inputs = [["closed", "closed"], ["opened", "open"], ["part", "a part"]].filter(([k]) => g[k])
+    .map(([k, what]) => `${what} on ${signalText(g[k], "", "off").trim()}`);
+  bits.push(inputs.length ? `confirms ${inputs.join(", ")} (within ${fix(g.timeout, 1)} s)` : `no inputs: waits ${fix(g.seconds, 1)} s`);
+  return bits.join(" · ");
+}
+
+// What /api/io last said of a gripper: its outputs closing it, its inputs and the part it holds.
+function gripperCue(name) {
+  const g = io && io.grippers && io.grippers[name];
+  if (!g) return "";
+  const parts = [g.outputs === "closed" ? "closed" : g.outputs === "open" ? "open" : "outputs between"];
+  if (g.held) parts.push(`holding ${fix(g.held.mass, 2)} kg`);
+  else if (g.part) parts.push("a part in it");
+  return parts.join(", ");
+}
+
+function patternDetail(name, p, info) {
+  const size = `${p.rows} × ${p.columns}${p.layers > 1 ? ` × ${p.layers}` : ""}`;
+  if (!info || info.error) return `${size} · from ${p.first}`;
+  const [along, down, up] = info.pitchMm;
+  const bits = [`${size} in ${info.frame}`];
+  if (p.columns > 1) bits.push(`columns ${fix(along)} mm apart`);
+  if (p.rows > 1) bits.push(`rows ${fix(down)} mm apart${info.angleDeg !== null && Math.abs(info.angleDeg - 90) >= 0.5 ? ` at ${fix(info.angleDeg)}°` : ""}`);
+  if (p.layers > 1) bits.push(`layers ${fix(up)} mm apart`);
+  return bits.join(" · ");
 }
 
 function renderCell() {
@@ -875,13 +1100,17 @@ function renderCell() {
   const data = cell.cell;
   const r = runOf(status);
   const moving = RUN_MOVING.includes(r.state);
+  const busy = RUN_BUSY.includes(r.state);
   for (const id of ["recordFrame", "frameParent", "zoneFrame"]) fillSelect($(id), frameChoices());
   const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  const tools = Object.keys(data.tools).length;
-  setText($("cellSummary"), `${counted(tools, "tool", "tools")} (${data.active.tool} in use), `
-    + `${counted(Object.keys(data.frames).length, "frame", "frames")}, `
-    + `${counted(Object.keys(data.targets).length, "target", "targets")}, `
-    + `${counted(Object.keys(data.zones).length, "keep-out zone", "keep-out zones")} · cell/cell.json, revision ${data.revision}`);
+  const tools = Object.keys(data.tools);
+  const n = (key) => Object.keys(data[key]).length;
+  setText($("cellSummary"), [`${counted(tools.length, "tool", "tools")} (${data.active.tool} in use)`,
+    n("grippers") ? counted(n("grippers"), "gripper", "grippers") : "", counted(n("frames"), "frame", "frames"),
+    counted(n("targets"), "target", "targets"), n("patterns") ? counted(n("patterns"), "pattern", "patterns") : "",
+    n("interlocks") ? counted(n("interlocks"), "interlock", "interlocks") : "",
+    counted(n("zones"), "zone", "zones")].filter(Boolean).join(", ")
+    + ` · cell/cell.json, revision ${data.revision}`);
 
   $("tools").replaceChildren(...Object.entries(data.tools).map(([name, t]) => {
     const bits = [`point ${triple(t.tcp.xyz)} mm`];
@@ -904,6 +1133,23 @@ function renderCell() {
     : "Name the tool, then rest its point on one fixed spike from 4 or more angles, pressing Touch at each.");
   $("toolFit").disabled = touches < 4;
   $("toolTouchClear").disabled = !touches;
+
+  // Grippers: what closes each and what confirms it, its state as last read, and the panel's own Open, Close and
+  // Grasp (a grasp from here holds a part of unknown mass: the payload stays the tool's).
+  const live = Boolean(status && status.live);
+  $("grippers").replaceChildren(...Object.entries(data.grippers).map(([name, g]) => {
+    const {li, acts} = row(name, gripperDetail(g), gripperCue(name));
+    const act = (action) => (key) => send("/api/gripper", {name, action}, key).then(() => pollIo(true));
+    acts.append(
+      miniKey("Open", `Open ${name}`, act("open"), busy || !live),
+      miniKey("Close", `Close ${name}`, act("close"), busy || !live),
+      miniKey("Grasp", `Grasp with ${name}, checking for a part`, act("grasp"), busy || !live),
+      miniKey("Edit", `Edit gripper ${name}`, () => editGripper(name)),
+      miniKey("\u00d7", `Delete gripper ${name}`, (key) => twice(key, () => send("/api/cell/gripper/delete", {name, revision: revision()}, key))),
+    );
+    return li;
+  }));
+  for (const id of ["gripClosed", "gripOpened", "gripPart"]) fillSelect($(id), inputChoices());
 
   $("frames").replaceChildren(...Object.entries(data.frames).map(([name, f]) => {
     const bits = [`in ${f.parent} · origin ${triple(f.pose.xyz)} mm · turned ${triple(f.pose.rpy)}°`];
@@ -933,6 +1179,8 @@ function renderCell() {
       + "Re-fitting a frame later moves its targets and zones with it.");
   $("frameFit").disabled = got.length < 3;
 
+  // Targets: Plan stages a joint move to one; Touch up re-teaches it where the arm is now, and the row then shows how
+  // far it moved, with Undo.
   const ok = ready(status) && !RUN_MOVING.includes(r.state);
   $("targets").replaceChildren(...Object.entries(data.targets).map(([name, t]) => {
     let detail;
@@ -942,19 +1190,74 @@ function renderCell() {
       detail = `in ${t.frame} · ${triple(t.pose.xyz)} mm · ${triple(t.pose.rpy)}°`;
       if (t.tool !== data.active.tool) detail += ` · taught with ${t.tool}`;
     }
-    const {li, acts} = row(name, detail, t.unreachable ? "out of reach since its frame moved" : "", t.unreachable);
-    acts.append(
-      miniKey("Plan", `Plan a joint move to ${name}`, (key) => planTarget(name, t, key), !ok || t.unreachable),
-      miniKey("\u00d7", `Delete target ${name}`, (key) => twice(key, () => send("/api/cell/target/delete", {name, revision: revision()}, key))),
-    );
+    const change = t.touchUp;
+    const cue = t.unreachable ? "out of reach since its frame moved"
+      : change ? `touched up ${change.at.slice(11, 16)}: ${change.movedMm !== undefined
+        ? `moved ${fix(change.movedMm, 2)} mm, turned ${fix(change.turnedDeg, 2)}°` : `joints by up to ${fix(change.jointsMaxDeg, 2)}°`}`
+      : "";
+    const {li, acts} = row(name, detail, cue, t.unreachable);
+    acts.append(miniKey("Plan", `Plan a joint move to ${name}`, (key) => planTarget(name, t, key), !ok || t.unreachable));
+    acts.append(miniKey("Touch up", `Touch up ${name}: re-teach it where the arm is now`, (key) => send(
+      "/api/cell/target/touchup", {name, revision: revision()}, key), !live || moving || (t.tool && t.tool !== data.active.tool)));
+    if (t.previous) {
+      acts.append(miniKey("Undo", `Undo ${name}'s touch-up`, (key) => send("/api/cell/target/undo", {name, revision: revision()}, key)));
+    }
+    acts.append(miniKey("\u00d7", `Delete target ${name}`, (key) => twice(key, () => send("/api/cell/target/delete", {name, revision: revision()}, key))));
     return li;
   }));
 
+  // Patterns: their size and pitches, where their counter stands, and Plan (its next slot), Reset (back to slot 1).
+  const counters = (status && status.counters) || cell.counters || {};
+  $("patterns").replaceChildren(...Object.entries(data.patterns).map(([name, p]) => {
+    const info = cell.patterns[name] || {};
+    const next = counters[name] || 1;
+    const usedUp = !info.error && next > info.count;
+    const cue = info.error ? info.error : usedUp ? `used up: all ${info.count} slots done` : `next: slot ${next} of ${info.count}`;
+    const {li, acts} = row(name, patternDetail(name, p, info), cue, Boolean(info.error) || usedUp);
+    acts.append(
+      miniKey("Plan", `Plan a joint move to ${name}'s next slot`, (key) => planSlot(name, key), !ok || usedUp || Boolean(info.error)),
+      miniKey("Reset", `Count ${name} back to slot 1`, (key) => send("/api/cell/pattern/counter", {name, slot: 1}, key), moving || next === 1),
+      miniKey("Edit", `Edit pattern ${name}`, () => editPattern(name)),
+      miniKey("\u00d7", `Delete pattern ${name}`, (key) => twice(key, () => send("/api/cell/pattern/delete", {name, revision: revision()}, key))),
+    );
+    return li;
+  }));
+  const toolTargets = Object.entries(data.targets).filter(([, t]) => !t.joints).map(([name]) => [name, name]);
+  fillSelect($("patFirst"), toolTargets, "No tool targets yet");
+  fillSelect($("patRowEnd"), [["", "none (one column)"], ...toolTargets]);
+  fillSelect($("patColumnEnd"), [["", "none (one row)"], ...toolTargets]);
+
+  // Interlocks: the input each reads, lit green while it holds (from the last read of the I/O).
+  $("interlocks").replaceChildren(...Object.entries(data.interlocks).map(([name, il]) => {
+    const state = io && io.interlocks && io.interlocks[name];
+    const guards = Object.entries(data.zones).filter(([, z]) => (z.interlocks || []).includes(name)).map(([z]) => z);
+    const cue = !state ? "" : state.holds ? `holds${guards.length ? `: the arm may enter ${guards.join(", ")}` : ""}`
+      : `doesn't hold${guards.length ? `: the arm keeps out of ${guards.join(", ")}` : ""}`;
+    const {li, acts} = row(name, `holds while ${il.input} reads ${il.value ? "on" : "off"}`, cue);
+    const lamp = el("span", "led");
+    if (state && state.holds) lamp.dataset.on = "live";
+    lamp.setAttribute("aria-hidden", "true");
+    li.querySelector(".what").prepend(lamp);
+    acts.append(miniKey("\u00d7", `Delete interlock ${name}`, (key) => twice(key, () => send("/api/cell/interlock/delete", {name, revision: revision()}, key))));
+    return li;
+  }));
+  fillSelect($("zoneGuard"), [["", "none: always kept out"], ...Object.keys(data.interlocks).map((name) => [name, name])]);
+
   $("zones").replaceChildren(...Object.entries(data.zones).map(([name, z]) => {
-    const {li, acts} = row(name, `in ${z.frame} · centre ${triple(z.pose.xyz, 0)} mm · ${z.size.map((v) => fix(v, 0)).join(" × ")} mm`);
+    const guards = z.interlocks || [];
+    let cue = "";
+    if (guards.length) {
+      const states = guards.map((g) => io && io.interlocks && io.interlocks[g]);
+      const open = states.every((s) => s && s.holds);
+      cue = `open while ${guards.join(" and ")} ${guards.length === 1 ? "holds" : "hold"}${states.every(Boolean) ? (open ? ": open" : ": closed") : ""}`;
+    }
+    const {li, acts} = row(name, `in ${z.frame} · centre ${triple(z.pose.xyz, 0)} mm · ${z.size.map((v) => fix(v, 0)).join(" × ")} mm`, cue);
     acts.append(miniKey("\u00d7", `Delete zone ${name}`, (key) => twice(key, () => send("/api/cell/zone/delete", {name, revision: revision()}, key))));
     return li;
   }));
+
+  fillSelect($("homeTarget"), Object.entries(data.targets).map(([name, t]) => [name, t.joints ? `${name} (joints)` : name]),
+    "No targets yet");
 }
 
 // A target's joint move, staged as the panel's plan (the shadow arm, the path check and the plan bar); Move sends it.
@@ -968,6 +1271,44 @@ async function planTarget(name, t, key) {
     joints = reply.plan.goal;
   }
   if (!P.stage(joints, `Joint move to ${name} planned. Press Move to go there, or Esc to clear the plan.`)) P.refuse(key);
+}
+
+// A pattern's next slot, staged as the panel's plan, as a target's is.
+async function planSlot(name, key) {
+  const speeds = {joint: P.settings().jointSpeed, tcp: P.settings().toolSpeed};
+  const reply = await send("/api/plan", {pattern: name, kind: "joint", defaults: speeds}, key);
+  if (!reply) return;
+  if (!P.stage(reply.plan.goal, `${reply.message.replace(/ at .*$/, "")} planned. Press Move to go there, or Esc to clear the plan.`)) {
+    P.refuse(key);
+  }
+}
+
+function editGripper(name) {
+  const g = cell.cell.grippers[name];
+  $("gripName").value = name;
+  const [line, bit] = g.close[0].output.split(".");
+  gripLine.set(line);
+  $("gripBit").value = bit;
+  gripValue.set(String(g.close[0].value));
+  $("gripSeconds").value = fix(g.seconds, 1);
+  $("gripTimeout").value = fix(g.timeout, 1);
+  for (const [id, key] of [["gripClosed", "closed"], ["gripOpened", "opened"], ["gripPart", "part"]]) {
+    $(id).value = g[key] ? g[key].input : "";
+  }
+  $("gripName").focus();
+}
+
+function editPattern(name) {
+  const p = cell.cell.patterns[name];
+  $("patName").value = name;
+  $("patRows").value = p.rows;
+  $("patColumns").value = p.columns;
+  $("patLayers").value = p.layers;
+  $("patPitch").value = fix(p.layerPitch, 1);
+  $("patFirst").value = p.first;
+  $("patRowEnd").value = p.rowEnd || "";
+  $("patColumnEnd").value = p.columnEnd || "";
+  $("patName").focus();
 }
 
 function editTool(name) {
@@ -1025,8 +1366,127 @@ $("frameName").addEventListener("input", renderCell);
 $("zoneSave").addEventListener("click", (e) => send("/api/cell/zone", {
   name: $("zoneName").value.trim(), frame: $("zoneFrame").value || "base",
   pose: {xyz: [num("zoneX"), num("zoneY"), num("zoneZ")], rpy: [0, 0, 0]},
-  size: [num("zoneW"), num("zoneD"), num("zoneH")], revision: revision(),
+  size: [num("zoneW"), num("zoneD"), num("zoneH")], interlocks: $("zoneGuard").value ? [$("zoneGuard").value] : [],
+  revision: revision(),
 }, e.currentTarget));
+
+// A gripper from its form: one output closes it (the other value opens it); inputs are read as on when they confirm.
+// A gripper given more outputs through the API keeps them, unless the form's first output changes.
+const gripLine = choice("gripLine");
+const gripValue = choice("gripValue");
+$("gripSave").addEventListener("click", (e) => {
+  const name = $("gripName").value.trim();
+  const output = `${gripLine.value}.${Math.round(num("gripBit"))}`;
+  const value = Number(gripValue.value);
+  const old = cell && cell.cell.grippers[name];
+  const same = old && old.close[0].output === output && old.close[0].value === value;
+  const input = (id) => ($(id).value ? {input: $(id).value, value: 1} : undefined);
+  send("/api/cell/gripper", {
+    name, close: same ? old.close : [{output, value}], open: same ? old.open : [{output, value: 1 - value}],
+    seconds: num("gripSeconds"), timeout: num("gripTimeout"), closed: input("gripClosed"), opened: input("gripOpened"),
+    part: input("gripPart"), revision: revision(),
+  }, e.currentTarget);
+});
+
+$("patSave").addEventListener("click", (e) => send("/api/cell/pattern", {
+  name: $("patName").value.trim(), rows: Math.round(num("patRows")), columns: Math.round(num("patColumns")),
+  layers: Math.round(num("patLayers")), layerPitch: num("patPitch"), first: $("patFirst").value,
+  rowEnd: $("patRowEnd").value || undefined, columnEnd: $("patColumnEnd").value || undefined, revision: revision(),
+}, e.currentTarget));
+
+const lockLine = choice("lockLine");
+const lockValue = choice("lockValue");
+$("lockSave").addEventListener("click", (e) => send("/api/cell/interlock", {
+  name: $("lockName").value.trim(), input: `${lockLine.value}.${Math.round(num("lockBit"))}`, value: Number(lockValue.value),
+  revision: revision(),
+}, e.currentTarget));
+
+// ---- Program: safe home, and the calls ----
+function whyNotHome(s) {
+  const r = runOf(s);
+  if (!$("homeTarget").value) return "Record a target to go home to first (Teach).";
+  if (RUN_BUSY.includes(r.state)) return `${r.manual ? "A move" : r.program} is under way: wait, or Stop run.`;
+  if (r.state === "faulted") return "The last run faulted: press Reset first.";
+  return ready(s) ? null : whyNotReady(s);
+}
+
+$("homeKey").addEventListener("click", (e) => {
+  if (refused(e.currentTarget)) return;
+  send("/api/home", {target: $("homeTarget").value, retract: num("homeBack"),
+    defaults: {joint: P.settings().jointSpeed, tcp: P.settings().toolSpeed}}, e.currentTarget);
+});
+
+let callsShown = "";
+let callsHeard = 0;  // the newest call said on the message line
+function renderCalls(s) {
+  const calls = (s && s.calls) || [];
+  const key = calls.map((c) => c.id).join(",");
+  if (key === callsShown) return;
+  callsShown = key;
+  $("callsGroup").hidden = !calls.length;
+  setText($("callsCue"), calls.length === 1 ? "A run called you." : `Runs called you ${calls.length} times.`);
+  $("calls").replaceChildren(...calls.slice().reverse().map((c) => {
+    const li = el("li", "row");
+    const time = el("time", "", c.at.slice(11, 19));
+    time.dateTime = c.at;
+    const what = el("span", `what${c.why === "step" ? "" : " bad"}`, c.message);
+    if (c.program && c.path) what.append(el("span", "cue", `${c.program}, step ${c.path}`));
+    const acts = el("span", "acts");
+    acts.append(miniKey("Seen", `Seen: ${c.message}`, (k) => send("/api/calls/ack", {id: c.id}, k)));
+    li.append(time, what, acts);
+    return li;
+  }));
+  const newest = calls.length ? calls[calls.length - 1] : null;
+  if (newest && newest.id > callsHeard) {
+    callsHeard = newest.id;
+    P.say(`The run called you: ${newest.message}`, newest.why === "step" ? "wait" : "bad");
+  }
+}
+$("callsSeen").addEventListener("click", (e) => send("/api/calls/ack", {}, e.currentTarget));
+
+// ---- the I/O, for the interlocks' lamps, the grippers' state and the guarded zones in the 3D view ----
+let ioAsked = 0;
+let ioKey = "";
+async function pollIo(now) {
+  if (!cell || document.hidden) return;
+  const wanted = Object.keys(cell.cell.interlocks).length || Object.keys(cell.cell.grippers).length;
+  if (!wanted || (!now && Date.now() - ioAsked < 1000)) return;
+  ioAsked = Date.now();
+  try {
+    const reply = await getJson("/api/io");
+    if (!reply.ok) return;
+    io = reply;
+  } catch (e) {
+    return;
+  }
+  const key = JSON.stringify([io.interlocks, io.grippers]);
+  if (key !== ioKey) {
+    ioKey = key;
+    drawnIn = null;  // guarded zones open or close in the 3D view and its check
+    renderCell();
+  }
+}
+
+// The guarded zones open now (their interlocks all hold, as last read), which the 3D view's check lets the arm enter,
+// as the server does.
+function openZones() {
+  const zones = new Set();
+  if (!cell || !io || !io.interlocks) return zones;
+  for (const [name, z] of Object.entries(cell.cell.zones)) {
+    const guards = z.interlocks || [];
+    if (guards.length && guards.every((g) => io.interlocks[g] && io.interlocks[g].holds)) zones.add(name);
+  }
+  return zones;
+}
+
+function viewCell() {
+  const open = openZones();
+  const collision = cell.collision && {
+    ...cell.collision,
+    pairs: cell.collision.pairs.filter(([, o, fixed]) => !(fixed && open.has(cell.collision.obstacles[o].zone))),
+  };
+  return {collision, ...cell.scene, zones: cell.scene.zones.map((z) => ({...z, open: open.has(z.name)}))};
+}
 
 // ---- every status ----
 let keysShown = "";
@@ -1059,18 +1519,22 @@ function onStatus(s) {
   const r = runOf(s);
   const view = P.view();
   if (view && view.setCell && cell && drawnIn !== view) {
-    view.setCell({collision: cell.collision, ...cell.scene});
+    view.setCell(viewCell());
     drawnIn = view;
   }
   if (view && view.setFault) view.setFault(r.state === "faulted" ? r.hit : null);
   if (s && s.run) sayRunChange(r);
   renderRun(s);
   renderTeach(s);
+  renderCalls(s);
   markCurrent();
   refreshEvents(s);
-  // Keys whose state follows the run, the arm's readiness and the brain: redraw the lists when any changes.
+  pollIo();
+  // Keys whose state follows the run, the arm's readiness, the brain and the patterns' counters: redraw the lists when
+  // any changes.
   const brain = (s && s.brain) || {};
-  const keys = `${r.state}|${r.program}|${ready(s)}|${Boolean(s && s.live)}|${brain.ok}|${Object.keys(brain.skills || {})}`;
+  const keys = `${r.state}|${r.program}|${ready(s)}|${Boolean(s && s.live)}|${brain.ok}|${Object.keys(brain.skills || {})}|`
+    + `${JSON.stringify((s && s.counters) || {})}|${JSON.stringify((s && s.held) || {})}`;
   if (keys !== keysShown) {
     keysShown = keys;
     if (program) renderSteps();

@@ -1061,7 +1061,7 @@ path.
   a frame at the window's size with a 4096 and a 2048 map, reading the pixels back included, which the window doesn't
   do. The window keeps up with the screen, so nothing was taken away.
 
-## D100 to D109: reduced speed, hold-to-move and the launcher
+## D100 to D104: reduced speed, hold-to-move and the launcher
 
 Decided on 2026-10-23, building what the owner's modes app asks of the spine. The app (Survey, Teach, Rehearse, Run and
 Review) starts the jog server itself and serves its own web app to a tablet and this PC, forwarding to the spine over
@@ -1153,3 +1153,248 @@ that moves the arm, and "the safety rules must be enforced here in the spine, no
   and checking it first makes a misconfigured launcher fail at once. Only the simulator and the twin can serve on this
   PC's own addresses, so "simulated" errs towards LIVE: a LIVE banner over the simulator costs some caution, the other
   way round could cost the arm.
+
+## D105 to D124: tending basics
+
+Decided on 2026-10-25, building what any machine-tending job needs before one is programmed: grippers that confirm a
+grasp and switch the payload, grids of slots with a counter, interlocks that guard a machine's zone, recovery (Retry,
+Fallback, safe home and calling the owner) and touch-up. They're general program and cell features; no job's program
+is written here. The requirements: everything stays checked by the spine as before (dry runs, collision checks against
+the zones and the tool, supervision and STOP), safe home's moves and whatever recovery and interlocks do included; the
+HTTP API keeps its endpoints and fields; old cells and programs load unchanged. D121 to D124 are unused.
+
+## D105. A gripper is bound to outputs, and optionally to inputs; without one to confirm, it takes a set time
+
+- **Decision:** a gripper is a cell object (`grippers`): the outputs, with their values, that close it (one, or up to
+  four, as a double-acting valve needs), those that open it, how long it takes (0.5 s by default), how long an input
+  may take to confirm it (3 s), and three optional inputs: closed, opened, and closed on a part. A program's gripper
+  step opens, closes or grasps: it sets the outputs, then waits for the input that confirms it, failing the step past
+  the timeout, or, with no such input, waits the set time. The rows in the Cell section do the same, refused while a
+  run is under way. STOP leaves the outputs as they are, so what's held stays held. A gripper a program uses can't be
+  deleted.
+- **Alternatives:** writing a gripper as set, wait and if steps, as before (nothing confirms it in one place, nothing
+  names it, and the payload can't follow it); making it part of a tool (a tool may carry two grippers, one to take a
+  finished part out and one holding the next blank, and tools and their API stay as they were).
+- **Why:** the only gripper there is, the Chess Gripper, has no sensor, and how the controller will drive it isn't
+  settled (an Arduino behind a tool output is one option). Bound to an output and a set time it works whatever drives
+  it, and grippers with sensors confirm. Unverified until a gripper is on the arm: the Chess Gripper's time, and its
+  drive.
+
+## D106. A grasp checks for a part where there's an input, and switches the payload to the tool and the part
+
+- **Decision:** a grasp closes the gripper as Close does, then reads its "closed on a part" input, if it has one, and
+  fails the step unless it reads true within 0.3 s; without that input, the close is trusted. Then the payload sent to
+  the controller (`set_tcp_load`, D14) becomes the tool's and the part's together: their mass, and their centre of
+  gravity from the flange, the part's given on the step in mm from the tool point, along the tool's axes (`"part":
+  {"mass", "cog"}`). Opening the gripper sends the tool's alone; closing it without a grasp changes nothing. The server
+  keeps what each gripper holds (`held`, in the status). In freedrive the payload waits, and is sent as freedrive ends.
+  If writing it stops a ready arm, as writing the teach sensitivity does (D34), Enable's checked sequence makes the arm
+  ready again, and the message says so.
+- **Alternatives:** a payload step of its own (a program could grasp and forget it, and the grasp is when the part's
+  weight arrives); switching on every close (closing an empty gripper, to pass through a gap say, would add a part
+  that isn't there); a part's centre of gravity from the flange (it's known from where the part is held, the tool
+  point).
+- **Why:** the controller's dynamics and collision detection need the payload (D14), and a part changes it.
+  Unverified: whether writing the payload stops the real arm (the simulator's `--payload-stops` plays the case where
+  it does, and both cases are tested), and how much the payload's accuracy matters to the arm. Known limits: what the
+  grippers hold is kept in memory, so after the server restarts they hold nothing and the payload is the tool's until
+  the next grasp; a grasp from the page doesn't know the part's mass.
+
+## D107. A pattern is taught by three targets, and its slots fill the parallelogram between them
+
+- **Decision:** a pattern (`patterns`) names three tool targets taught in one frame with one tool: its first slot, the
+  last slot of its first row and the last slot of its first column (the first and one other, for a single row or
+  column), with its rows, columns and layers (stacked a set pitch apart along the frame's z, negative to stack
+  downwards). Slot n, counted from 1 along the first row, then the next row, then the next layer, is the first slot's
+  position plus its column times the row's step (the row's last slot less the first, over the columns less one), plus
+  its row times the column's step, plus its layer times the layer pitch. It takes the first slot's orientation, and is
+  solved from the corners' taught joints interpolated the same way, so it keeps their configuration. The pattern holds
+  the targets' names, not copies, so touching one up or recalibrating its frame moves the grid. Each pattern is checked
+  as it's saved: slots at least 1 mm apart, rows and columns 20° to 160° apart, a layer pitch when there's more than
+  one layer, at most 100 a side and 10,000 slots. A corner can't be deleted while a pattern uses it.
+- **Alternatives:** pitches typed in (a tray's are nominal; teaching its corners measures the tray as it sits); four
+  corners, interpolated bilinearly (a tray isn't a trapezoid, and a fourth corner is one more to teach and keep
+  consistent); each slot's orientation interpolated from the corners' (a tray's pockets all face one way, and
+  interpolating three orientations isn't well defined); copies of the corners' poses (touching up a corner would leave
+  the grid where it was).
+- **Why:** three points fix a flat grid whose rows and columns needn't be square (a tray set down skewed), and the
+  corners are ordinary targets, taught and touched up as any are. Checked: 200 random grids, every slot against a
+  ground truth built with numpy, within 3.8e-13 mm (`tests/feature_oracle_tests.py`); a 3 x 4 tray in the simulator,
+  visited slot by slot, each slot within 1 mm of where the simulator's joints put the tool point (`tending`).
+  Unverified: a 3 x 4 tray taught at three corners on the arm, the pointer within 0.5 mm of each pocket's centre.
+
+## D108. A pattern's counter is kept apart from the cell, in `cell/counters.json`, and moved on by a step of its own
+
+- **Decision:** a pattern's counter is the next slot to use, from 1; one past the last means used up. Counters are kept
+  in `cell/counters.json`, written whole and atomically at each change, so they carry on after a restart, and they're
+  not part of the cell's revision. A move to a pattern without a slot goes to the slot its counter stands at, and fails
+  if the pattern is used up. A count step moves the counter on by one, or sets it (`"to": n`, from 1 to one past the
+  last); Reset on the page puts it back to 1. A dry run counts on a copy. Deleting a pattern drops its counter;
+  changing one keeps it. `GET /api/status` reports them (`counters`).
+- **Alternatives:** counters in `cell.json` (every count would bump the cell's revision, and an edit made on the page a
+  moment earlier would be refused: the run and the operator would fight); counters in memory (a restart would start a
+  half-full tray again from slot 1); a move that counts itself on (a failed pick would skip its slot, and a retried
+  place would use the next; with a step of its own, the program counts once the part is confirmed).
+- **Why:** how a counter persists was ours to decide, and a counter is the run's state, not the cell's. Tested: kept
+  through a restart, reset, set, used up (the move fails), and counted on a copy in a dry run.
+
+## D109. An interlock is a named condition on an input, and guards a zone
+
+- **Decision:** an interlock (`interlocks`) is an input and the value it holds at (a machine's door open:
+  `controller.2` reads 1). A keep-out zone may be guarded by up to four (`"interlocks"` on the zone): the arm may enter
+  it while they all hold, and it's a keep-out zone while any doesn't. An interlock that guards a zone can't be deleted.
+  The page shows each interlock's lamp, lit green while it holds, read once a second.
+- **Alternatives:** waits and ifs before the moves into a machine, as today (a program can leave one out, and jogs, Move
+  and the brain's paths never see them); conditions on steps (each step into the machine would carry them, and moves
+  that aren't steps would go unchecked); a zone's own unnamed input (a name says what's wrong in a refusal, and one
+  interlock can guard several zones).
+- **Why:** "checked before every move into a zone the condition guards": tying the condition to the zone makes "into
+  the zone" the collision check's question, which every move is already asked, whatever made it. An old cell's zones
+  have no interlocks and stay keep-out zones. Known limit: an interlock isn't a safety function. It's read through the
+  controller's ordinary inputs, a tenth of a second apart (D111), and a machine's own guarding protects people.
+
+## D110. A move is planned against every zone; a guarded zone opens only for a move that needs it, read just before
+
+- **Decision:** every move is planned with every zone closed first. If a guarded zone blocks it, that zone's
+  interlocks are read: if they all hold, it's planned again with the zone open; otherwise it's refused before anything
+  is sent, saying which interlock doesn't hold and what its input reads. The same goes for program steps, moves to
+  targets and slots, safe home, and the page's jogs and Move (the 3D view's own check uses the interlocks as last
+  read). The brain is told only of the closed zones; the shell checks its paths against those, and the zones a path
+  enters are read again just before it runs. A plan carries the guarded zones it enters. A dry run assumes the
+  interlocks hold, as it assumes inputs arrive, and logs each zone it assumed open.
+- **Alternatives:** reading every interlock before every move (moves nowhere near a machine would read inputs too, and
+  fail when they can't); opening zones from a reading kept by a poll (up to a poll old when the move starts); telling
+  the brain the interlocks (its interface would change, for something the spine decides anyway).
+- **Why:** a move that never comes near a guarded zone is planned and checked exactly as before, with nothing more
+  read, and one that does reads its interlocks at the last moment before it's sent. Since the collision check decides,
+  everything checked against zones is covered, dry runs and the page's check included. A move out of a zone needs no
+  interlock: the check already lets the arm move away from what it's within the margin of.
+
+## D111. A move into a guarded zone is watched: if an interlock stops holding, the arm stops and the run pauses
+
+- **Decision:** while a move into a guarded zone runs, its interlocks are read every 0.1 s (`INTERLOCK_POLL_S`) along
+  with the run's other checks. If one stops holding, or can't be read, the arm stops as for Pause: a program's run
+  pauses and calls the owner (D115), and a move from the page stops. Resume plans the rest again, reading them again,
+  and is refused while one doesn't hold.
+- **Alternatives:** checking only before the move (a door shut mid-move would go unnoticed); faulting the run (a door
+  shutting is a machine doing its job, and the run can carry on once it's open again).
+- **Why:** measured in the simulator, with the door's input dropped during a slow move into the zone: the run had
+  stopped the arm and paused 0.14 s later (the tending suite's bound is 1 s). Known limit: as D109 says, it isn't a
+  safety function.
+
+## D112. A step that fails is caught by Retry and Fallback; a fault never is
+
+- **Decision:** a step *fails* when it can't do its job, with the arm at rest: it can't be planned or reached, the
+  brain has no path, a wait or a gripper's input times out, a grasp finds no part, a pattern is used up, an interlock
+  keeps a zone closed. A *fault* is the controller reporting an error or losing status, the arm leaving its path or not
+  arriving, the brain's proposal refused, or a bug. A Retry or Fallback catches failures inside it, and carries on only
+  if the arm is still ready (fresh status, no error, motors on, not in freedrive); otherwise the run faults. A failure
+  nothing catches stops the arm and faults the run, as every failure did before; the log says `step.failed` before
+  `run.faulted`. STOP wins over both.
+- **Alternatives:** catching faults too (an arm off its path, or a controller error, needs a person, not another try);
+  catching by kind, written in the program (more to write and get wrong; it can come when a job needs it).
+- **Why:** a failure happens before anything is sent or once a move has arrived, so the arm is where the program
+  thinks; a fault leaves that in doubt. Programs without Retry or Fallback run as before.
+
+## D113. Retry runs its steps again from the first; a Fallback's "If it fails" steps are numbered on from its own
+
+- **Decision:** `retry {"tries": n, "steps"}` (3 by default, at most 100) runs its steps, and when one fails, runs them
+  again from the first, up to n tries in all; then the failure goes on out. `fallback {"steps", "else"}` runs its
+  steps, and when one fails, its else steps. The else steps' paths are numbered on from the steps' (under a fallback at
+  4 with three steps, the else steps are 4.4 on), so every step has one path, and Run from one of them goes straight
+  there. Each try is planned afresh from wherever the arm is: nothing of the failed step is resumed.
+- **Alternatives:** retrying only the step that failed (a missed pick needs its approach again: what's inside the
+  retry says what's tried again); else paths of their own form (the page and Foreman would have to learn it); numbering
+  else from 1, as an if's branches are (two steps would share a path, as an if's still do).
+- **Why:** the build line asks for Retry(n) and Fallback; a step's path is how the page, the log and Foreman point at
+  it, so it had to stay one number per level.
+
+## D114. Safe home backs out along the tool, as far as it's clear, then makes a checked joint move
+
+- **Decision:** `home {"target", "retract": mm, "speed"?}`: a straight line from where the tool point is, back along the
+  tool's own z (the way it went in) by the step's distance (50 mm by default, 0 to 500), then a joint move to the
+  target, each planned and checked as any move is, guarded zones included. If the whole line can't be planned, the arm
+  backs out as far as it's clear (the line's clear part, if it's 1 mm or more), and the log says how far and what
+  stopped it; then the joint move's own check decides whether home can be reached. A pause during either carries on
+  with the rest. On the page, Go home, beside the run keys, does it as a move from the page (stopping if the page goes
+  quiet), to the target and distance chosen there.
+- **Alternatives:** straight up, along the base's z (a tool reaching into a vise, under a gantry or across a printer's
+  bed may have gone in sideways; along the tool is the way it came); back to the last approach target (the program
+  would have to know it, and a failure can come anywhere); a joint move straight home (it may drag the tool, or the
+  part, through what it's in); refusing when the line is blocked (the arm would stay inside the machine).
+- **Why:** the build line: retract along the tool, then a checked joint move home. How it picks its retract was ours to
+  decide. Tested in the simulator: 40 mm back along the tool (the line sent ended 0.00 mm from its goal), then home;
+  with a shelf over the wrist, 14 of the 60 mm asked for, saying why, then home.
+
+## D115. Calling the owner: a call kept by the server and shown on the page until it's seen
+
+- **Decision:** a `notify` step calls the owner with its message, and the run carries on; a run that faults calls the
+  owner too (unless it's a dry run or a move from the page), as does an interlock that pauses a run. A call has an id,
+  a time, its message, program, step, and why (a step, a fault or an interlock). It's written to the run's log, kept by
+  the server (the last 50) and listed by `GET /api/status` (`calls`) until it's seen; `GET /api/calls` lists them all,
+  and `POST /api/calls/ack` marks one, or all, as seen. The Program section's Calls list shows them with Seen keys, and
+  the message line says each new one. A dry run only logs what it would have called.
+- **Alternatives:** a phone notification now (an account, a service and a secret in the spine; the build line says
+  later); a halt (it pauses the run, which a call needn't).
+- **Why:** one list that the page, Foreman and a notifier later can all read, with nothing leaving this PC. Known
+  limit: calls are kept in memory, so a restart clears them; the run logs keep them.
+
+## D116. Touch-up re-teaches a target in place, says what changed, and keeps the old value
+
+- **Decision:** Touch up, on a target's row, re-teaches it where the arm is: a tool target keeps its frame and tool
+  (which must be the tool in use) and takes the tool point's pose in that frame, with the joints as its seed; a joint
+  target takes the joints. The message says how far it moved, along its frame's x, y and z, how far it turned, and
+  which programs and patterns change with it; the row says so until it's taught again; the 3D view rings where it was,
+  with a line to where it is. Undo puts the previous value back (one level). Every change to a target (taught, taught
+  again, touched up, undone, deleted) is added to `cell/logs/targets.jsonl` with its old and new values. A touch-up is
+  refused while a program moves the arm, and allowed while one is paused.
+- **Alternatives:** teaching it again, as before (nothing showed what changed, and the old value was gone); showing the
+  change and asking before saving (a second press every time, where Undo costs only a mistake's); undoing to any
+  earlier value (the log has them all; one level covers the slip).
+- **Why:** the build line: re-teach in place, show the change, keep the old value in the log; how it shows the change
+  was ours to decide. A paused run is where touch-up is wanted: stopped at a target that's a little off.
+
+## D117. The page: tending's controls go in the Program and Cell sections, within DESIGN.md
+
+- **Decision:** built with the design skill within DESIGN.md's system, as the other sections were (D25). The Program
+  section gains the Calls list, a Safe home row (Go home, with its target and distance), and the new steps in its
+  composer; a retry's and a fallback's steps are edited in place, and an empty one's row, or If it fails, is selected
+  to add steps into it. The Cell section gains Grippers (Open, Close, Grasp, with what their inputs read as a cue),
+  Patterns (Plan, Reset, Edit, with the counter's slot), Interlocks (each with its lamp), a zone's Open while, and a
+  target's Touch up and Undo. The 3D view draws a guarded zone with dashed edges, without its fill while it's open,
+  patterns' slots as small grey dots, and a touched-up target's old place as a ring. A gripper has no lamp: colour on
+  the desk reports state (the Backlight Rule), and an output set isn't a gripper confirmed. The page reads the I/O once
+  a second while the cell has interlocks or grippers.
+- **Alternatives:** a section of its own for tending (the steps belong to programs, and grippers, patterns and
+  interlocks to the cell, where the rest of their kind are).
+- **How it was checked:** screenshots at 1440 and 420 px against the simulator, and, driven by a browser, a retry and
+  a fallback composed (If it fails included), a gripper opened, an interlock's lamp lit as its input was set, a
+  touch-up and its Undo, and a pattern's Plan, with nothing in the console but the expected refusals while the rig
+  restarted. The design detector found nothing new but one value DESIGN.md already uses (#8f8b83, the scale's ink).
+  The design skill's question round was skipped: the brief left these decisions to this work, as D25's did.
+
+## D118. The simulator plays a gripper on its control port, and can stop when the payload is written
+
+- **Decision:** `{"cmd": "gripper", "output": "tool.N", "close": 1, "seconds": s, "closed"?, "opened"?, "part"?,
+  "jammed"?}` puts a gripper on an output: once the output has stayed at its closing value for its time, its closed
+  input reads 1, and its part input too while a part is between its jaws (`{"cmd": "part", "present": ...}`); at the
+  other value, its opened input; a jammed one never gets there; `"remove": true` takes it away. `--payload-stops` makes
+  writing the payload stop the arm, as writing the teach sensitivity does.
+- **Alternatives:** a gripper faked inside the server (the tests would check the server against itself); one in the
+  twin (later, once the real gripper's drive is known).
+- **Why:** the tests drive grippers through the same SDK reads and writes the arm will see, as machines' signals are
+  already set through the control port.
+
+## D119. Old cells, programs and the API keep working
+
+- **Decision:** the cell's new collections (`grippers`, `interlocks`, `patterns`) read as empty when a cell has none,
+  and the cell's version stays 1; a zone without interlocks is a keep-out zone as before. Every step, endpoint and
+  field keeps its meaning: new endpoints and fields are added (in the status, `held`, `counters` and `calls`;
+  `/api/plan` and `/api/moveto` also take a `pattern`), and none is changed or taken away. A failure nothing catches
+  faults the run, as before. The previous server, given a cell from this one, takes a guarded zone for a keep-out
+  zone, and refuses a program with the new steps rather than run it.
+- **Alternatives:** a version 2 cell (the previous server would refuse the whole cell, where only its new parts are
+  new).
+- **Why:** Foreman drives this API, and the cells and programs there are must load unchanged. Tested: an old cell and
+  program load and run unchanged and the API keeps its fields (`tending`'s compatibility scenario), and the other
+  suites pass as before.
