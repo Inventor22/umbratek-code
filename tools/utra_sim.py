@@ -42,7 +42,9 @@ tool offset's convention, and GPIO (16 digital inputs and outputs on the tool an
 readings are the capture's mean values at rest plus a term in acceleration: illustrative, not a model.
 
 The control port (HOST:30099, JSON lines, the simulator's alone) lets tests act on the arm: move it by hand in
-freedrive, set inputs, read outputs, press the E-stop, bump it, or read its whole state. See control().
+freedrive, set inputs, read outputs, press the E-stop, bump it, or read its whole state; and emulate a gripper on an
+output, whose inputs (closed, opened, closed on a part) follow it after its time, with a part between its jaws or not,
+or jammed. See control().
 
 Time comes from a high-resolution clock and timer (clock, sleep; see D50), so frames leave 100 ms apart and report the
 arm where it is at that instant, on Windows as elsewhere. serve() and run() let another process host the simulator
@@ -177,6 +179,18 @@ def next_tick(tick, period):
 
 def wrap(angle):
     return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+def io_line(name):
+    """"tool.N" or "controller.N" as the controller's (line, bit): the tool is line 2, the controller line 3."""
+    line, _, bit = str(name).partition(".")
+    if line not in ("tool", "controller") or not bit.isdigit() or int(bit) > 15:
+        raise ValueError(f"not a digital line: {name!r} (tool.0 to tool.15, controller.0 to controller.15)")
+    return (2 if line == "tool" else 3), int(bit)
+
+
+def vars_text(request):
+    return ", ".join(f"{k} {v}" for k, v in request.items() if k != "cmd")
 
 
 # ---- kinematics: the model's forward kinematics, and an inverse of its own -----------------------------------
@@ -452,6 +466,10 @@ class Arm:
                        "collis_sens": a.collision_sens, "teach_sens": a.teach_sens}
         self.inputs = {2: 0, 3: 0}  # digital inputs on the tool (line 2) and the controller (line 3)
         self.outputs = {2: 0, 3: 0}
+        # Grippers emulated on the control port ("gripper"): (line, bit) of the output that drives each -> how it
+        # moves and the inputs it sets; and whether a part sits between the jaws ("part").
+        self.grippers = {}
+        self.part = False
         self.velocity = [0.0] * AXIS
         self.accel = [0.0] * AXIS
         self.nudge = [0.0] * AXIS
@@ -584,6 +602,7 @@ class Arm:
 
     def tick(self, now, dt):
         with self.lock:
+            self._grippers(now)
             q_before = list(self.q) if self.current is None else self.joints_at(now - dt)
             if self.hand is not None:
                 self.q = self.joints_at(now)
@@ -628,6 +647,22 @@ class Arm:
         velocity = [(a - b) / dt for a, b in zip(self.joints_at(now), q_before)] if dt > 0 else [0.0] * AXIS
         self.accel = [(v - w) / dt for v, w in zip(velocity, self.velocity)] if dt > 0 else [0.0] * AXIS
         self.velocity = velocity
+
+    def _grippers(self, now):
+        """Each emulated gripper follows its output: once the output has stayed at its closing value for the gripper's
+        time, its "closed" input reads 1, and its "part" input too if a part is there (and while it stays); once it has
+        stayed at the other value that long, its "opened" input reads 1. While it moves, neither does, and a jammed
+        gripper never gets there. Inputs are active high."""
+        for (line, bit), g in self.grippers.items():
+            closing = ((self.outputs[line] >> bit) & 1) == g["close"]
+            if closing != g["closing"]:
+                g["closing"], g["since"] = closing, now
+            there = not g["jammed"] and now - g["since"] >= g["seconds"]
+            for key, value in (("closed", there and closing), ("opened", there and not closing),
+                               ("part", there and closing and self.part)):
+                if g[key] is not None:
+                    at, n = g[key]
+                    self.inputs[at] = (self.inputs[at] | (1 << n)) if value else (self.inputs[at] & ~(1 << n))
 
     def accept(self, motion, shown, speed_shown, acc_shown):
         log(f"{motion.label}: goal=[{' '.join(f'{g:.2f}' for g in shown)}] speed={speed_shown:.1f} acc={acc_shown:.1f} "
@@ -808,6 +843,11 @@ class Arm:
             name, n = floats[cmd]
             vals = list(struct.unpack(f">{n}f", data[:4 * n]))
             self.config[name] = vals[0] if n == 1 else vals
+            if cmd == 0x45 and self.a.payload_stops and self.status != 4:  # --payload-stops: as the teach sensitivity
+                self.halt(now)
+                self.status, self.phantom_queued, self.hand = 4, 0, None
+                self.queue.clear()
+                log("payload set: stopped (--payload-stops)")
             return b"\x00\x00\x00\x00" if n == 1 else b""
         if cmd in (0x47, 0x48):
             self.config["collis_sens" if cmd == 0x47 else "teach_sens"] = data[0]
@@ -832,7 +872,10 @@ class Arm:
     def control(self, request):
         """{"cmd": "state"} | {"cmd": "hand", "joints": [deg]*6, "seconds": s} | {"cmd": "input", "line": "tool" or
         "controller", "bit": 0-15, "value": 0 or 1} | {"cmd": "estop"} | {"cmd": "contact", "torque": x} |
-        {"cmd": "fault", "err": code} | {"cmd": "nudge", "joints": [deg]*6}"""
+        {"cmd": "fault", "err": code} | {"cmd": "nudge", "joints": [deg]*6} |
+        {"cmd": "gripper", "output": "tool.N", "close": 1, "seconds": s, "closed": "tool.N"?, "opened": "tool.N"?,
+         "part": "tool.N"?, "jammed": false} (a gripper on that output, its inputs following it; "remove": true takes
+        it away) | {"cmd": "part", "present": true or false} (a part between the jaws, or not)"""
         with self.lock:
             now = self.now()
             what = request.get("cmd")
@@ -842,7 +885,31 @@ class Arm:
                         "enable": self.enable, "status": self.status, "err": self.err, "queued": len(self.queue),
                         "moving": self.current is not None, "config": self.config,
                         "inputs": {"tool": self.inputs[2], "controller": self.inputs[3]},
-                        "outputs": {"tool": self.outputs[2], "controller": self.outputs[3]}}
+                        "outputs": {"tool": self.outputs[2], "controller": self.outputs[3]},
+                        "grippers": {f"{'tool' if line == 2 else 'controller'}.{bit}": {
+                            "closing": g["closing"], "there": not g["jammed"] and now - g["since"] >= g["seconds"],
+                            "jammed": g["jammed"]} for (line, bit), g in self.grippers.items()},
+                        "part": self.part}
+            if what == "gripper":
+                line, bit = io_line(request["output"])
+                if request.get("remove"):
+                    self.grippers.pop((line, bit), None)
+                    return {"ok": True}
+                close, seconds = int(request.get("close", 1)), float(request.get("seconds", 0.3))
+                self.grippers[(line, bit)] = {
+                    "close": close, "seconds": seconds, "jammed": bool(request.get("jammed")),
+                    "closed": io_line(request["closed"]) if request.get("closed") else None,
+                    "opened": io_line(request["opened"]) if request.get("opened") else None,
+                    "part": io_line(request["part"]) if request.get("part") else None,
+                    "closing": ((self.outputs[line] >> bit) & 1) == close, "since": now - seconds}
+                self._grippers(now)
+                log(f"a gripper on {request['output']} ({vars_text(request)})")
+                return {"ok": True}
+            if what == "part":
+                self.part = bool(request.get("present"))
+                self._grippers(now)
+                log(f"a part {'is' if self.part else 'is not'} between the jaws")
+                return {"ok": True}
             if what == "hand":
                 goal = [math.radians(v) for v in request["joints"]]
                 if self.mode != 2 or self.status != 1 or self.enable != FULL_MASK or self.err:
@@ -1068,6 +1135,9 @@ def make_parser():
     faults.add_argument("--estop-after", type=float, default=0.0, help="press the hardware E-stop N s after start")
     faults.add_argument("--stall-every", type=float, default=0.0, help="pause the status report every N s...")
     faults.add_argument("--stall-for", type=float, default=3.1, help="...for this long, like the real controller over Wi-Fi")
+    faults.add_argument("--payload-stops", action="store_true",
+                        help="writing the payload stops the arm, as writing the teach sensitivity does (unverified on "
+                             "the arm for the payload)")
     return p
 
 

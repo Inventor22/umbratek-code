@@ -53,11 +53,13 @@ REDUCED_REACH_MM = 1150.0
 
 
 class PlanError(Exception):
-    """Why a move can't be planned; `hit` is utra_model's description of the collision, when that's why."""
+    """Why a move can't be planned; `hit` is utra_model's description of the collision, when that's why. For a straight
+    line, `clear` is the fraction of it that could be planned before the trouble (0 to 1), when that's known."""
 
-    def __init__(self, message, hit=None):
+    def __init__(self, message, hit=None, clear=None):
         super().__init__(message)
         self.hit = hit
+        self.clear = clear
 
 
 def capped_joint_speed(speed, travel):
@@ -288,23 +290,25 @@ class Planner:
             pose = kin.interpolate(t0, target, k / n)
             result = self.kin.solve(q, pose, DRAG_LIMITS_DEG, tool)
             along = f"{length * k / n:.0f} mm along the line" if length >= 0.5 else f"{turn * k / n:.0f}\u00b0 into the turn"
+            clear = (k - 1) / n  # the samples before this one were fine
             if not result["ok"]:
                 if result["atLimit"] >= 0:
-                    raise PlanError(f"Not moving: J{result['atLimit'] + 1} would pass its limit {along}.")
-                raise PlanError(f"Not moving: the line leaves the arm's reach {along}.")
+                    raise PlanError(f"Not moving: J{result['atLimit'] + 1} would pass its limit {along}.", clear=clear)
+                raise PlanError(f"Not moving: the line leaves the arm's reach {along}.", clear=clear)
             nxt = result["joints"]
             jump = max(abs(a - b) for a, b in zip(nxt, q))
             if jump > FLIP_DEG:
                 raise PlanError(f"Not moving: the arm would flip its configuration {along} (a joint jumps "
-                                f"{jump:.0f}\u00b0).")
+                                f"{jump:.0f}\u00b0).", clear=clear)
             for j in range(6):
                 rate = abs(nxt[j] - q[j]) / seconds_per_sample
                 if rate > JOINT_RATED_DEG_S[j]:
                     raise PlanError(f"Not moving: the line passes too close to a singularity {along}: J{j + 1} would "
-                                    f"need {rate:.0f}\u00b0/s at this speed (its top speed is {JOINT_RATED_DEG_S[j]:g}).")
+                                    f"need {rate:.0f}\u00b0/s at this speed (its top speed is {JOINT_RATED_DEG_S[j]:g}).",
+                                    clear=clear)
             hit = self.model.check_path(q, nxt)
             if hit is not None:
-                raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit)
+                raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit, clear=clear)
             path.append(nxt)
             q = nxt
         if segments is None:  # they depend on the line and its number of samples, not on the joints solved

@@ -74,6 +74,9 @@ SUITES = {
     "twin": ("the twin (brain/twin): its model from the repo's sources, obstacles, cameras, its coupling to the "
              "simulator, both captures replayed; and every HTTP server here binding without a reverse DNS lookup",
              "brain", ["twin_tests.py"], None, 900),
+    "tending": ("grippers and grasp checks, patterns and their counters, interlocks, Retry and Fallback, safe home, "
+                "calling the owner and touch-up, against the simulator and the stub brain", "test",
+                ["tending_tests.py"], None, 900),
 }
 
 

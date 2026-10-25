@@ -3,7 +3,9 @@
 A program is a tree of steps, saved as JSON in cell/programs/<name>.json:
     move     {"kind": "joint" | "line" | "planned", "target": name, "offset": {...}?, "speed": number?}  (offsets:
              cell.apply_offset). A planned move's path comes from the brain, solved afresh each run around what's in
-             the cell, and ends at the target's joints (as taught, so in the taught configuration).
+             the cell, and ends at the target's joints (as taught, so in the taught configuration). Instead of a
+             target, a move may go to a pattern's slot: {"pattern": name, "slot": n?}, the slot its counter stands at
+             unless it names one; a pattern whose every slot is used fails the step.
     learned  {"skill": name, "near": target, "within": mm, "seconds": s, "params": {...}?, "speed": deg/s?,
               "check": {"input": ..., "value": 0 | 1}?}  The brain's skill acts in short bursts, at most 10 a second,
              the tool point staying within `within` mm of the target `near`, until it says it's done (then `check`, if
@@ -11,8 +13,23 @@ A program is a tree of steps, saved as JSON in cell/programs/<name>.json:
     wait     {"seconds": s} or {"input": "tool.N" | "controller.N", "value": 0 | 1, "timeout": s}
     set      {"output": "tool.N" | "controller.N", "value": 0 | 1}
     pulse    {"output": ..., "seconds": s}
+    gripper  {"gripper": name, "action": "open" | "close" | "grasp", "part": {"mass": kg, "cog": [mm]}?}  Sets the
+             gripper's outputs and waits for its input to confirm (or its set time, without one). A grasp then checks
+             its "closed on a part" input, if it has one, failing without a part, and switches the payload to the tool
+             and the part together (the part's centre of gravity in mm from the tool point, in its frame); opening
+             switches it back.
+    count    {"pattern": name, "to": n?}  Counts the pattern on to its next slot, or sets its counter to slot n (1 to
+             start again). Counters persist (cell/counters.json); a dry run counts on a copy.
     if       {"input": ..., "value": 0 | 1, "then": [steps], "else": [steps]}
     repeat   {"count": n, "steps": [steps]}
+    retry    {"tries": n, "steps": [steps]}  Runs the steps; if one fails, runs them again from the first, up to n
+             tries in all.
+    fallback {"steps": [steps], "else": [steps]}  Runs the steps; if one fails, runs the else steps instead. (Their
+             paths are numbered on from the steps', so step 4.3 may be the first of the else steps.)
+    home     {"target": name, "retract": mm, "speed": deg/s?}  Safe home: back along the tool by up to `retract` mm
+             (as far as it can go clear of everything, if not all the way), then a joint move to the target.
+    notify   {"message": ...}  Calls the owner: a log entry, and a call the panel shows until it's seen
+             (Panel.call_owner; a phone notification later). The run carries on.
     call     {"program": name}
     comment  {"text": ...}
     halt     {"message": ...}  (pauses the run until the operator resumes)
@@ -22,6 +39,15 @@ where a step has none, times the override; lines, and whatever the brain propose
 at the tool (ISO 10218-1's reduced speed) unless the program says "fullSpeed": true. With the server's reduced speed
 on (jog_server.py's manual-motion policy) every move is, fullSpeed or not, the flange too (planner.Planner's
 `reduced`); with its hold-to-move on, a run pauses when the hold lapses, and a move to a target stops.
+
+A step that can't do its job fails: it can't be planned or reached, the brain has no path, a wait or a gripper's input
+times out, a grasp finds no part, a pattern is used up, an interlock keeps a zone closed. That happens with the arm at
+rest. A Retry or Fallback around it catches a failure and carries on (if the arm is still ready); anywhere else a
+failure stops the arm and faults the run, as it always has. A fault is never caught: the controller reporting an error
+or losing status, the arm leaving its path or not arriving, the brain's proposal refused. A faulted run calls the owner.
+
+Moves into a zone that interlocks guard go only while the interlocks hold (read just before the move is planned), and
+the run watches them as the arm moves: if one stops holding, the arm stops and the run pauses (Panel.plan_guarded).
 
 What the brain proposes, the safety shell (safety.py) checks whole before anything moves, and refuses with its reasons
 if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,
@@ -53,11 +79,16 @@ import planner as plannermod
 import safety
 from executor import Interrupted, MoveFailed
 
-STEP_TYPES = ("move", "wait", "set", "pulse", "if", "repeat", "call", "comment", "halt", "learned")
+STEP_TYPES = ("move", "wait", "set", "pulse", "if", "repeat", "call", "comment", "halt", "learned", "gripper", "count",
+              "retry", "fallback", "home", "notify")
 MOVE_KINDS = ("joint", "line", "planned")
+GRIPPER_ACTIONS = ("open", "close", "grasp")
 IO = re.compile(r"^(tool|controller)\.(\d{1,2})$")
 MAX_DEPTH = 6
 MAX_STEPS = 2000
+MAX_TRIES = 100
+HOME_RETRACT_MM, MAX_RETRACT_MM = 50.0, 500.0
+INTERLOCK_POLL_S = 0.1  # how often a move into a guarded zone reads the interlocks that let it in
 REDUCED_SPEED_MM_S = plannermod.REDUCED_SPEED_MM_S
 DEFAULT_SPEEDS = {"tcp": 50.0, "ori": 30.0, "joint": 20.0}
 LEARNED_WITHIN_MM, MAX_WITHIN_MM = 100.0, 500.0
@@ -77,6 +108,15 @@ class Stopped(Exception):
 
 
 class Faulted(Exception):
+    def __init__(self, reason, path=None, hit=None):
+        super().__init__(reason)
+        self.reason, self.path, self.hit = reason, path, hit
+
+
+class Failed(Exception):
+    """A step couldn't do its job, with the arm at rest: a Retry or Fallback around it may carry on; otherwise the run
+    faults."""
+
     def __init__(self, reason, path=None, hit=None):
         super().__init__(reason)
         self.reason, self.path, self.hit = reason, path, hit
@@ -103,8 +143,29 @@ def number(value, what, low, high):
     return float(value)
 
 
+def whole(value, what, low, high):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) or not low <= value <= high:
+        raise ProgramError(f"Unsupported {what}: {value!r} (a whole number from {low} to {high}).")
+    return int(value)
+
+
+def check_part(part):
+    """A grasped part's payload: {"mass": kg, "cog": [mm from the tool point, in its frame]}."""
+    if not isinstance(part, dict):
+        raise ProgramError(f"a part is its mass (kg) and centre of gravity (mm from the tool point), not {part!r}")
+    cog = part.get("cog", [0.0, 0.0, 0.0])
+    if not isinstance(cog, (list, tuple)) or len(cog) != 3:
+        raise ProgramError(f"Unsupported part's centre of gravity: {cog!r} (3 numbers, mm from the tool point).")
+    return {"mass": number(part.get("mass", 0.0), "part's mass (kg)", 0, cellmod.MAX_MASS_KG),
+            "cog": [number(v, "part's centre of gravity (mm)", -1000, 1000) for v in cog]}
+
+
 def where(path):
     return "step " + ".".join(str(i + 1) for i in path)
+
+
+def dotted(path):
+    return ".".join(str(i + 1) for i in path)
 
 
 # ---- checking programs ---------------------------------------------------------------------------------------
@@ -122,10 +183,10 @@ def check_program(program, cell, load=None, depth=0, seen=None):
     ids = set()
     count = [0]
 
-    def steps(items, path):
+    def steps(items, path, offset=0):
         if not isinstance(items, list):
             raise ProgramError(f"{where(path) if path else 'The program'}: steps must be a list.")
-        return [step(s, path + [i]) for i, s in enumerate(items)]
+        return [step(s, path + [offset + i]) for i, s in enumerate(items)]
 
     def step(s, path):
         count[0] += 1
@@ -144,10 +205,18 @@ def check_program(program, cell, load=None, depth=0, seen=None):
                 o["kind"] = s.get("kind")
                 if o["kind"] not in MOVE_KINDS:
                     raise ProgramError(f"a move is 'joint', 'line' or 'planned', not {o['kind']!r}")
-                target = cell.target(s.get("target"))
-                o["target"] = s["target"]
-                if o["kind"] == "line" and "joints" in target:
-                    raise ProgramError(f"{s['target']!r} is a joint target; a straight line needs a tool target")
+                if s.get("pattern") is not None:
+                    if s.get("target") is not None:
+                        raise ProgramError("a move goes to a target or to a pattern's slot, not both")
+                    cell.pattern(s["pattern"])
+                    o["pattern"] = s["pattern"]
+                    if s.get("slot") is not None:
+                        o["slot"] = whole(s["slot"], "slot", 1, cellmod.MAX_PATTERN_SLOTS)
+                else:
+                    target = cell.target(s.get("target"))
+                    o["target"] = s["target"]
+                    if o["kind"] == "line" and "joints" in target:
+                        raise ProgramError(f"{s['target']!r} is a joint target; a straight line needs a tool target")
                 if s.get("offset"):
                     cellmod.apply_offset(kin_identity(), kin_identity(), s["offset"])
                     o["offset"] = s["offset"]
@@ -174,6 +243,35 @@ def check_program(program, cell, load=None, depth=0, seen=None):
             elif kind == "repeat":
                 o["count"] = int(number(s.get("count"), "repeat count", 1, 100000))
                 o["steps"] = steps(s.get("steps", []), path)
+            elif kind == "retry":
+                o["tries"] = whole(s.get("tries", 3), "number of tries", 1, MAX_TRIES)
+                o["steps"] = steps(s.get("steps", []), path)
+            elif kind == "fallback":
+                o["steps"] = steps(s.get("steps", []), path)
+                o["else"] = steps(s.get("else", []), path, offset=len(o["steps"]))
+            elif kind == "gripper":
+                cell.gripper(s.get("gripper"))
+                o["gripper"] = s["gripper"]
+                o["action"] = s.get("action")
+                if o["action"] not in GRIPPER_ACTIONS:
+                    raise ProgramError(f"a gripper step opens, closes or grasps, not {o['action']!r}")
+                if s.get("part") is not None:
+                    if o["action"] != "grasp":
+                        raise ProgramError("only a grasp takes a part")
+                    o["part"] = check_part(s["part"])
+            elif kind == "count":
+                cell.pattern(s.get("pattern"))
+                o["pattern"] = s["pattern"]
+                if s.get("to") is not None:
+                    o["to"] = whole(s["to"], "slot to count to", 1, cellmod.MAX_PATTERN_SLOTS + 1)
+            elif kind == "home":
+                cell.target(s.get("target"))
+                o["target"] = s["target"]
+                o["retract"] = number(s.get("retract", HOME_RETRACT_MM), "retract (mm)", 0, MAX_RETRACT_MM)
+                if s.get("speed") is not None:
+                    o["speed"] = number(s["speed"], "speed", 1, 120)
+            elif kind == "notify":
+                o["message"] = str(s.get("message") or "The run needs you.")[:500]
             elif kind == "call":
                 callee = cellmod.check_name(s.get("program"), "program")
                 if callee in seen:
@@ -222,23 +320,32 @@ def kin_identity():
     return [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 
 
-def programs_using(programs, target):
-    """The saved programs with a move to `target`, or a learned step near it, as 'program <name>'."""
-    def uses(steps):
-        for s in steps if isinstance(steps, list) else []:
-            if not isinstance(s, dict):
-                continue
-            if (s.get("type") == "move" and s.get("target") == target) or \
-                    (s.get("type") == "learned" and s.get("near") == target):
-                return True
-            if any(uses(s.get(key)) for key in ("steps", "then", "else")):
-                return True
-        return False
+def walk(steps):
+    """Every step in a list of steps and the lists inside them (repeats', retries' and fallbacks' steps, ifs' and
+    fallbacks' branches)."""
+    for s in steps if isinstance(steps, list) else []:
+        if isinstance(s, dict):
+            yield s
+            for key in ("steps", "then", "else"):
+                yield from walk(s.get(key))
+
+
+def programs_using(programs, name, what="target"):
+    """The saved programs that use the target `name` (a move to it, a learned step near it, safe home to it), or with
+    `what` "pattern" the pattern (a move to one of its slots, or counting it), or "gripper" the gripper, as
+    'program <name>'."""
+    def uses(s):
+        kind = s.get("type")
+        if what == "pattern":
+            return kind in ("move", "count") and s.get("pattern") == name
+        if what == "gripper":
+            return kind == "gripper" and s.get("gripper") == name
+        return (kind in ("move", "home") and s.get("target") == name) or (kind == "learned" and s.get("near") == name)
     out = []
-    for name in programs.names():
+    for program in programs.names():
         try:
-            if uses(programs.load(name).get("steps")):
-                out.append(f"program {name}")
+            if any(uses(s) for s in walk(programs.load(program).get("steps"))):
+                out.append(f"program {program}")
         except (ProgramError, ValueError, OSError):
             continue
     return out
@@ -494,11 +601,14 @@ class Runner:
     def _run(self, from_path):
         self.skip_to = from_path
         self.virtual = None  # a dry run's planned joints
+        self.counts = None  # a dry run's copy of the patterns' counters
         self.anchor = None  # (step id, line poses, tool) of a straight line under way
+        self.homing = None  # (step id, where its retract goes, whether it's done) of a safe home under way
         self.total = 0.0
         try:
             if self.mode == "dry":
                 self.virtual = self.panel.current_joints()
+                self.counts = self.panel.counters.snapshot()
             self._steps(self.program, self.program["steps"], [], depth=0)
             # Each run's last event is written with the lock held, as its state changes: another run may start as
             # soon as this one is done, stopped or faulted, and its events go to its own log.
@@ -514,19 +624,27 @@ class Runner:
             with self.lock:
                 self.state = "stopped"
                 self.log("run.stopped", reason=self.reason)
+        except Failed as e:  # a failure no Retry or Fallback caught: the run faults, as any failure always has
+            if self.virtual is None:
+                self.panel.stop(f"{where(e.path)} failed")
+            self._fault(e.reason, e.hit, e.path)
         except Faulted as e:
-            with self.lock:
-                self.state, self.reason, self.hit = "faulted", e.reason, drawable_hit(e.hit)
-                self.log("run.faulted", reason=e.reason)
+            self._fault(e.reason, e.hit, e.path)
         except Exception as e:  # a bug: fault the run rather than die silently
             self.panel.stop("the program runner failed")
-            with self.lock:
-                self.state, self.reason = "faulted", f"internal error: {e!r}"
-                self.log("run.faulted", reason=self.reason)
+            self._fault(f"internal error: {e!r}")
 
-    def _steps(self, program, steps, path, depth):
+    def _fault(self, reason, hit=None, path=None):
+        with self.lock:
+            self.state, self.reason, self.hit = "faulted", reason, drawable_hit(hit)
+            self.log("run.faulted", reason=reason)
+        if not self.manual and self.mode != "dry":  # nobody may be watching an unattended run: call the owner
+            self.panel.call_owner(f"{self.program['name']} faulted: {reason}", program=self.program["name"],
+                                  path=dotted(path) if path else None, why="fault")
+
+    def _steps(self, program, steps, path, depth, offset=0):
         for i, s in enumerate(steps):
-            self._step(program, s, path + [i], depth)
+            self._step(program, s, path + [offset + i], depth)
 
     def _skipping(self, path):
         if self.skip_to is None:
@@ -544,21 +662,60 @@ class Runner:
         kind = s["type"]
         if kind == "repeat":
             for n in range(s["count"]):
-                self.log("repeat", iteration=n + 1, of=s["count"], path=".".join(str(i + 1) for i in path))
+                self.log("repeat", iteration=n + 1, of=s["count"], path=dotted(path))
                 self._steps(program, s["steps"], path, depth)
+            return
+        if kind == "retry":
+            for attempt in range(1, s["tries"] + 1):
+                try:
+                    self._steps(program, s["steps"], path, depth)
+                    return
+                except Failed as e:
+                    if attempt == s["tries"]:
+                        self.log("retry.spent", tries=s["tries"], reason=e.reason, path=dotted(path))
+                        raise
+                    self._carry_on(e)
+                    self.log("retry", attempt=attempt + 1, of=s["tries"], reason=e.reason, path=dotted(path))
+            return
+        if kind == "fallback":
+            # "Run from" a step of the else branch goes straight there.
+            into_else = self.skip_to is not None and len(self.skip_to) > len(path) and \
+                self.skip_to[:len(path)] == path and self.skip_to[len(path)] >= len(s["steps"])
+            if not into_else:
+                try:
+                    self._steps(program, s["steps"], path, depth)
+                    return
+                except Failed as e:
+                    self._carry_on(e)
+                    self.log("fallback", reason=e.reason, path=dotted(path))
+            self._steps(program, s["else"], path, depth, offset=len(s["steps"]))
             return
         if kind == "if":
             value = self._read_input(s["input"], path)
             branch = "then" if value == s["value"] else "else"
-            self.log("if", input=s["input"], read=value, branch=branch, path=".".join(str(i + 1) for i in path))
+            self.log("if", input=s["input"], read=value, branch=branch, path=dotted(path))
             self._steps(program, s[branch], path, depth)
             return
         if kind == "call":
             callee = check_program(self.programs.load(s["program"]), self.panel.cell, self.programs.load)
-            self.log("call", program=s["program"], path=".".join(str(i + 1) for i in path))
+            self.log("call", program=s["program"], path=dotted(path))
             self._steps(callee, callee["steps"], path, depth + 1)
             return
         self._leaf(program, s, path)
+
+    def _carry_on(self, failure):
+        """A Retry or Fallback carries on after a failure only if the arm is ready, as it is when a step fails (before
+        anything is sent, or once a move has arrived); otherwise the run faults."""
+        with self.lock:
+            if self.request == "stop":
+                raise Stopped()
+        self.anchor = self.homing = None  # what failed isn't resumed
+        if self.virtual is not None:
+            return
+        why = self.panel.why_not_ready()
+        if why:
+            self.panel.stop(f"{where(failure.path)} failed")
+            raise Faulted(f"{failure.reason}; the run couldn't carry on from it, as {why}", failure.path, failure.hit)
 
     def _leaf(self, program, s, path):
         while True:
@@ -600,9 +757,8 @@ class Runner:
             except (ProgramError, cellmod.CellError, plannermod.PlanError, brain_link.BrainError) as e:
                 if self.request == "stop":
                     raise Stopped()
-                if self.virtual is None:
-                    self.panel.stop(f"{where(path)} failed")
-                raise Faulted(f"{where(path)}: {e}", path, getattr(e, "hit", None))
+                self.log("step.failed", id=s["id"], reason=str(e))
+                raise Failed(f"{where(path)}: {e}", path, getattr(e, "hit", None))
 
     def _pause_here(self, why, resume_same=False, halt=False):
         """Wait, paused, for resume, step or stop. Raises Stopped on stop."""
@@ -641,6 +797,43 @@ class Runner:
             self.request, self.reason = "stop", lapsed
         return lapsed
 
+    def _watching(self, plan):
+        """The executor's check for `plan`: _abort's, and for a move into a guarded zone (plan.guards), its interlocks,
+        read every INTERLOCK_POLL_S. If one stops holding, the arm stops and the run pauses (a move to a target stops),
+        and the owner is called; Resume re-plans the move, reading them again."""
+        guards = getattr(plan, "guards", None)
+        if not guards:
+            return self._abort
+        last = [time.monotonic()]  # the plan was made with them read just now
+
+        def check():
+            why = self._abort()
+            if why:
+                return why
+            now = time.monotonic()
+            if now - last[0] < INTERLOCK_POLL_S:
+                return None
+            last[0] = now
+            dropped = self.panel.guard_dropped(guards)
+            if not dropped:
+                return None
+            why = f"{dropped[1]}, during a move into the {dropped[0]} zone"
+            if self.manual:
+                self.request, self.reason = "stop", why
+            else:
+                self.panel.call_owner(f"{self.program['name']} paused: {why}", program=self.program["name"],
+                                      path=dotted(self.path or []), why="interlock")
+            return why
+        return check
+
+    def _execute(self, plan):
+        self.panel.executor.execute(plan, self._watching(plan), lambda event, **d: self.log(event, **d))
+
+    def _guards(self, plan):
+        """In a dry run, say which guarded zones a planned move enters, their interlocks assumed to hold."""
+        for zone, names in sorted((getattr(plan, "guards", None) or {}).items()):
+            self.log("dry.assumed", zone=zone, interlocks=names, note=f"assumed {', '.join(names)} will let it in")
+
     def _check_live(self):
         """Between and during non-move steps: a controller error or lost status ends the run."""
         frame, age = self.panel.frame, time.monotonic() - self.panel.frame_at
@@ -673,6 +866,7 @@ class Runner:
             self._learned(program, s, path)
             return
         if kind == "move":
+            s = self._slotted(s)
             speed, capped = self._speed(program, s)
             if capped:
                 why = "the program isn't marked for full speed" if not program.get("fullSpeed") else \
@@ -684,16 +878,40 @@ class Runner:
             start = self.virtual if dry else self.panel.current_joints()
             if not dry and self.anchor is not None and self.anchor[0] == s["id"]:
                 start = self._regain(start, speed)
-            plan = self.panel.plan_move(s, start, speed, program["speed"]["ori"] * self.override / 100.0)
+            plan = self.panel.plan_move(s, start, speed, program["speed"]["ori"] * self.override / 100.0, dry=dry)
             self.log("move.planned", text=plan.text, durationS=round(plan.duration, 2))
             if dry:
+                self._guards(plan)
                 self.virtual = plan.goal
                 self.total += plan.duration
                 return
             if plan.kind == "line" and plan.poses is not None:
                 self.anchor = (s["id"], plan.poses, plan.tool)  # where this line runs, to rejoin it after a pause
-            self.panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+            self._execute(plan)
             self.anchor = None
+            return
+        if kind == "gripper":
+            if dry:
+                g = self.panel.cell.gripper(s["gripper"])
+                self.log("dry.would-grip", gripper=s["gripper"], action=s["action"],
+                         note="assumed it confirms" + (" and holds a part" if s["action"] == "grasp" else ""))
+                self.total += g["seconds"]
+                return
+            self.panel.grip(s["gripper"], s["action"], s.get("part"), sleep=self._sleep_checking,
+                            log=lambda event, **d: self.log(event, **d))
+            return
+        if kind == "count":
+            self._count(s)
+            return
+        if kind == "home":
+            self._home(program, s)
+            return
+        if kind == "notify":
+            if dry:
+                self.log("dry.would-notify", message=s["message"])
+                return
+            call = self.panel.call_owner(s["message"], program=program["name"], path=dotted(path))
+            self.log("owner.called", message=s["message"], call=call["id"])
             return
         if kind == "wait" and "seconds" in s:
             if dry:
@@ -738,6 +956,79 @@ class Runner:
                 self.panel.write_output(s["output"], 0)
                 self.log("io.set", output=s["output"], value=0)
 
+    # -- patterns and safe home ------------------------------------------------------------------------------------
+    def _counter(self, name):
+        """Where a pattern's counter stands (a dry run's copy, in a dry run)."""
+        if self.counts is not None:
+            return self.counts.get(name, 1)
+        return self.panel.counters.slot(name)
+
+    def _slotted(self, s):
+        """A move to a pattern's next slot names the slot its counter stands at; a pattern with no slot left fails."""
+        if s.get("pattern") is None or s.get("slot") is not None:
+            return s
+        name = s["pattern"]
+        total = self.panel.cell.pattern_geometry(name)["count"]
+        slot = self._counter(name)
+        if slot > total:
+            raise ProgramError(f"{name} is used up: all {total} of its slots are done. Reset its counter (Cell, Patterns), "
+                               "or count it back to slot 1.")
+        return dict(s, slot=slot)
+
+    def _count(self, s):
+        name = s["pattern"]
+        total = self.panel.cell.pattern_geometry(name)["count"]
+        was = self._counter(name)
+        if "to" in s:
+            if s["to"] > total + 1:
+                raise ProgramError(f"{name} has {total} slots; its counter can't go to {s['to']}.")
+            slot = s["to"]
+        else:
+            slot = min(was, total) + 1  # one past the last: used up
+        if self.counts is not None:
+            self.counts[name] = slot
+        else:
+            self.panel.counters.set(name, slot)
+        self.log("pattern.count", pattern=name, slot=slot, was=was, of=total, **({"usedUp": True} if slot > total else {}))
+
+    def _home(self, program, s):
+        """Safe home: back along the tool, as far as it can go clear of everything up to `retract` mm, then a joint
+        move to the target, each planned and checked as any move is. A pause during either re-plans the rest of it: the
+        rest of the retract, or the joint move."""
+        panel, dry = self.panel, self.virtual is not None
+        start = self.virtual if dry else panel.current_joints()
+        if s["retract"] > 0 and not (self.homing and self.homing[0] == s["id"] and self.homing[2]):
+            if not (self.homing and self.homing[0] == s["id"]):
+                goal = kin.mul(panel.tool_point(start), kin.offset_matrix([0.0, 0.0, -s["retract"]]))
+                self.homing = (s["id"], goal, False)
+            speed, capped = self._speed(program, {"kind": "line"})
+            if capped:
+                self.log("speed.capped", speed=REDUCED_SPEED_MM_S, reason="reduced speed: the retract is a straight line")
+            plan, got, why = panel.plan_retract(start, self.homing[1], speed, program["speed"]["ori"] * self.override / 100.0,
+                                                dry=dry)
+            self.log("home.retract", wantedMm=s["retract"], gotMm=round(got, 1), text=plan.text if plan else "",
+                     **({"short": why} if why else {}))
+            if plan is not None and plan.segments:
+                if dry:
+                    self._guards(plan)
+                    self.virtual = plan.goal
+                    self.total += plan.duration
+                else:
+                    self._execute(plan)
+                start = self.virtual if dry else panel.current_joints()
+            self.homing = (s["id"], self.homing[1], True)
+        speed = s.get("speed", program["speed"]["joint"]) * self.override / 100.0
+        plan = panel.plan_move({"type": "move", "kind": "joint", "target": s["target"], "id": s["id"]}, start, speed,
+                               dry=dry)
+        self.log("move.planned", text=plan.text, durationS=round(plan.duration, 2))
+        if dry:
+            self._guards(plan)
+            self.virtual = plan.goal
+            self.total += plan.duration
+        else:
+            self._execute(plan)
+        self.homing = None
+
     # -- steps the brain proposes ------------------------------------------------------------------------------------
     def _tool_cap(self, program):
         """The tool point's speed limit for what the brain proposes (mm/s): reduced speed unless marked full speed and
@@ -765,7 +1056,8 @@ class Runner:
     def _planned(self, program, s, speed):
         """A planned move: the brain plans a path from where the arm is to the target's joints, around what's in the
         cell; the shell checks all of it, then the executor runs it. A dry run asks the brain too, from where the run
-        would be, and checks the path just the same."""
+        would be, and checks the path just the same. Guarded zones whose interlocks hold are left out of the world the
+        brain is told and the shell checks against; the run watches those the path enters."""
         panel = self.panel
         state = panel.observe(virtual=self.virtual)
         start = state["joints"]
@@ -773,25 +1065,37 @@ class Runner:
         if max(abs(a - b) for a, b in zip(start, goal)) <= safety.GOAL_TOLERANCE_DEG:
             self.log("move.planned", text=f"Already at {label}", durationS=0.0)
             return
-        world = panel.world()
-        fields = {"state": brain_state(state),
-                  "goal": {"joints": [round(v, 4) for v in goal], "target": s["target"],
-                           "tool": kin.matrix_to_pose(panel.tool_point(goal), 4)},
-                  "world": world, "limits": brain_limits(), "timeoutS": panel.brain.plan_timeout if panel.brain else 0}
+        passable = panel.open_zones(dry=self.virtual is not None)
+        world = panel.world(passable)
+        aim = {"joints": [round(v, 4) for v in goal], "target": s.get("target") or label,
+               "tool": kin.matrix_to_pose(panel.tool_point(goal), 4)}
+        if s.get("pattern") is not None:
+            aim.update(pattern=s["pattern"], slot=s["slot"])
+        fields = {"state": brain_state(state), "goal": aim, "world": world, "limits": brain_limits(),
+                  "timeoutS": panel.brain.plan_timeout if panel.brain else 0}
         _, reply = self._ask_brain("plan", fields)
         if not reply["ok"]:
             raise ProgramError(f"the brain found no path to {label}: {reply['reason']}")
-        plan = safety.check_path(panel.planner(), reply["path"], start, speed, panel.cell.tool_matrix(),
+        plan = safety.check_path(panel.planner(passable), reply["path"], start, speed, panel.cell.tool_matrix(),
                                  self._tool_cap(program), label, goal=goal)
+        plan.guards = panel.zones_entered(plan.path, passable)
         self.log("brain.plan", waypoints=len(reply["path"]), note=reply["note"], text=plan.text,
                  durationS=round(plan.duration, 2))
         if self.virtual is not None:
+            self._guards(plan)
             self.virtual = plan.goal
             self.total += plan.duration
             return
         q, age = panel.latest_joints()
         safety.check_still("plan", start, q, age, world["cellRevision"], panel.cell.revision)
-        panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+        self._still_open(plan)
+        self._execute(plan)
+
+    def _still_open(self, plan):
+        """Just before a path from the brain runs: the guarded zones it enters must still be open."""
+        dropped = self.panel.guard_dropped(getattr(plan, "guards", None))
+        if dropped:
+            raise ProgramError(f"the {dropped[0]} zone closed while the brain worked out a way into it: {dropped[1]}")
 
     def _learned(self, program, s, path):
         """A learned step: the brain's skill acts in short bursts, each asked for with the arm's latest state (at most
@@ -826,7 +1130,8 @@ class Runner:
                         break
                     self._sleep_checking(wait)
                 state = panel.observe(after=after, inputs=True)
-                world = panel.world()
+                passable = panel.open_zones()
+                world = panel.world(passable)
                 fields = {"skill": skill, "params": s.get("params", {}), "episode": episode, "tick": tick,
                           "state": brain_state(state), "anchor": {"xyz": [round(v, 3) for v in anchor]},
                           "withinMm": s["within"], "world": world, "limits": brain_limits(burst=True),
@@ -854,14 +1159,16 @@ class Runner:
                     self._sleep_checking(action["seconds"])
                 else:
                     what = f"burst {tick + 1}"
-                    plan = safety.check_path(panel.planner(), action["path"], state["joints"],
+                    plan = safety.check_path(panel.planner(passable), action["path"], state["joints"],
                                              min(speed, action.get("speed", speed)), tool, self._tool_cap(program),
                                              f"{skill}'s next pose", what=what, near=(anchor, s["near"]),
                                              within=s["within"], burst=True)
+                    plan.guards = panel.zones_entered(plan.path, passable)
                     q, age = panel.latest_joints()
                     safety.check_still(what, state["joints"], q, age, world["cellRevision"], panel.cell.revision)
+                    self._still_open(plan)
                     self.log("skill.burst", tick=tick, waypoints=len(action["path"]) - 1, text=plan.text)
-                    panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+                    self._execute(plan)
                 after = time.monotonic()
                 tick += 1
         except BaseException as e:
@@ -890,9 +1197,10 @@ class Runner:
         off_mm, off_deg = kin.pose_distance(here, back)
         if off_mm < 0.02 and off_deg < 0.02:
             return start
-        plan = self.panel.planner().line(start, back, tool, min(speed, 20.0), 10.0, label="the interrupted line")
+        plan = self.panel.plan_guarded(lambda p: p.line(start, back, tool, min(speed, 20.0), 10.0,
+                                                        label="the interrupted line"))
         self.log("move.regain", offMm=round(off_mm, 3), offDeg=round(off_deg, 3), text=plan.text)
-        self.panel.executor.execute(plan, self._abort, lambda event, **d: self.log(event, **d))
+        self._execute(plan)
         return self.panel.current_joints()
 
     def _sleep_checking(self, seconds):
@@ -917,9 +1225,13 @@ def describe(s):
     kind = s["type"]
     if kind == "move":
         extra = " with an offset" if s.get("offset") else ""
+        if s.get("pattern") is not None:
+            to = f"{s['pattern']} slot {s['slot']}" if s.get("slot") is not None else f"{s['pattern']}'s next slot"
+        else:
+            to = s["target"]
         if s["kind"] == "planned":
-            return f"Planned move to {s['target']}{extra}"
-        return f"{'Straight line' if s['kind'] == 'line' else 'Joint move'} to {s['target']}{extra}"
+            return f"Planned move to {to}{extra}"
+        return f"{'Straight line' if s['kind'] == 'line' else 'Joint move'} to {to}{extra}"
     if kind == "learned":
         return f"Learned skill {s['skill']} near {s['near']}"
     if kind == "wait":
@@ -928,6 +1240,25 @@ def describe(s):
         return f"Set {s['output']} to {s['value']}"
     if kind == "pulse":
         return f"Pulse {s['output']} for {s['seconds']:g} s"
+    if kind == "gripper":
+        if s["action"] == "grasp":
+            mass = (s.get("part") or {}).get("mass")
+            return f"Grasp with {s['gripper']}" + (f", a {mass:g} kg part" if mass else "")
+        return f"{'Open' if s['action'] == 'open' else 'Close'} {s['gripper']}"
+    if kind == "count":
+        if s.get("to") is None:
+            return f"Count {s['pattern']} on to its next slot"
+        return f"Count {s['pattern']} back to slot 1" if s["to"] == 1 else f"Set {s['pattern']}'s counter to slot {s['to']}"
+    if kind == "retry":
+        return f"Retry: up to {s['tries']} tries"
+    if kind == "fallback":
+        return "Fallback: if a step fails, the steps under If it fails run instead"
+    if kind == "home":
+        if s["retract"]:
+            return f"Safe home to {s['target']}: back up to {s['retract']:g} mm along the tool, then a joint move"
+        return f"Safe home to {s['target']}: a joint move"
+    if kind == "notify":
+        return f"Call the owner: {s['message']}"
     if kind == "halt":
         return f"Halt: {s['message']}"
     if kind == "comment":
