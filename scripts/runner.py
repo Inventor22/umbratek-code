@@ -41,13 +41,16 @@ on (jog_server.py's manual-motion policy) every move is, fullSpeed or not, the f
 `reduced`); with its hold-to-move on, a run pauses when the hold lapses, and a move to a target stops.
 
 A step that can't do its job fails: it can't be planned or reached, the brain has no path, a wait or a gripper's input
-times out, a grasp finds no part, a pattern is used up, an interlock keeps a zone closed. That happens with the arm at
-rest. A Retry or Fallback around it catches a failure and carries on (if the arm is still ready); anywhere else a
-failure stops the arm and faults the run, as it always has. A fault is never caught: the controller reporting an error
-or losing status, the arm leaving its path or not arriving, the brain's proposal refused. A faulted run calls the owner.
+times out, a grasp finds no part, a pattern is used up, an interlock keeps a zone closed (or the arm is in a zone one
+keeps closed). That happens with the arm at rest. A Retry or Fallback around it catches a failure and carries on (if
+the arm is still ready); anywhere else a failure stops the arm and faults the run, as it always has. A fault is never
+caught: the controller reporting an error or losing status, the arm leaving its path or not arriving, the brain's
+proposal refused. A faulted run calls the owner.
 
-Moves into a zone that interlocks guard go only while the interlocks hold (read just before the move is planned), and
-the run watches them as the arm moves: if one stops holding, the arm stops and the run pauses (Panel.plan_guarded).
+Moves into a zone that interlocks guard, or from inside one, go only while the interlocks hold (read just before the
+move is planned), and the run watches them as the arm moves: if one stops holding, the arm stops and the run pauses,
+and Resume is refused while it still doesn't hold. With the arm in a guarded zone whose interlocks don't hold, nothing
+here moves it there; a jog or Move from the page may back it out (Panel.plan_guarded).
 
 What the brain proposes, the safety shell (safety.py) checks whole before anything moves, and refuses with its reasons
 if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,
@@ -494,6 +497,7 @@ class Runner:
         self.estimate = None
         self.halt_message = ""
         self.hit = None  # where a faulted run's step would have collided, for the 3D view
+        self.dropped = None  # (zone, why) when an interlock stopped a move of this run (_watching)
         self.run_tag, self.episodes = "", 0  # for learned skills' episode ids
 
     # -- the status and log ----------------------------------------------------------------------------------------
@@ -546,6 +550,8 @@ class Runner:
                 raise ProgramError(f"A run is under way ({self.state}); stop it first.")
             if self.state == "faulted":
                 raise ProgramError(f"The last run faulted ({self.reason}). Reset it first.")
+            if mode != "dry" and self.panel.grip_lock.locked():
+                raise ProgramError("A gripper is opening or closing from the page. Wait for it, then start again.")
             self.panel.check_can_run(dry=(mode == "dry"))
             self.state, self.mode, self.reason, self.halt_message, self.hit = "running", mode, "", "", None
             self.program, self.manual, self.path, self.step_text = checked, manual, None, ""
@@ -620,6 +626,7 @@ class Runner:
         self.counts = None  # a dry run's copy of the patterns' counters
         self.anchor = None  # (step id, line poses, tool) of a straight line under way
         self.homing = None  # (step id, where its retract goes, whether it's done) of a safe home under way
+        self.dropped = None  # (zone, why) when an interlock stopped holding during a move: the pause is the interlock's
         self.total = 0.0
         try:
             if self.mode == "dry":
@@ -734,6 +741,7 @@ class Runner:
             raise Faulted(f"{failure.reason}; the run couldn't carry on from it, as {why}", failure.path, failure.hit)
 
     def _leaf(self, program, s, path):
+        held = False  # this step was paused by an interlock that stopped holding (_watching)
         while True:
             with self.lock:
                 self.path, self.step_text = path, describe(s)
@@ -754,7 +762,18 @@ class Runner:
                 if self.request == "stop":
                     raise Stopped()
                 self.log("step.interrupted", id=s["id"], reason=e.reason)
+                held, self.dropped = self.dropped is not None, None
                 self._pause_here(e.reason, resume_same=True)
+            except plannermod.ZoneClosed as e:
+                if self.request == "stop":
+                    raise Stopped()
+                if not held:
+                    self.log("step.failed", id=s["id"], reason=str(e))
+                    raise Failed(f"{where(path)}: {e}", path, e.hit)
+                # Resumed while the interlock that paused it still doesn't hold: it stays paused, nothing sent.
+                why = str(e)[len("Not moving: "):] if str(e).startswith("Not moving: ") else str(e)
+                self.log("resume.refused", id=s["id"], reason=why)
+                self._pause_here(f"Resume refused: {why}", resume_same=True)
             except HaltHere as e:
                 self._pause_here(e.message, halt=True)
                 self.log("step.done", id=s["id"], seconds=round(time.monotonic() - started, 2))
@@ -814,13 +833,15 @@ class Runner:
         return lapsed
 
     def _watching(self, plan):
-        """The executor's check for `plan`: _abort's, and for a move into a guarded zone (plan.guards), its interlocks,
-        read every INTERLOCK_POLL_S. If one stops holding, the arm stops and the run pauses (a move to a target stops),
-        and the owner is called; Resume re-plans the move, reading them again."""
+        """The executor's check for `plan`: _abort's, and for a move that depends on guarded zones (plan.guards), their
+        interlocks, read every INTERLOCK_POLL_S (Panel.watch_guards). If one stops holding, the arm stops and the run
+        pauses (a move to a target stops), and the owner is called; Resume plans the rest again, reading them again,
+        and stays paused while one doesn't hold (_leaf)."""
         guards = getattr(plan, "guards", None)
         if not guards:
             return self._abort
         last = [time.monotonic()]  # the plan was made with them read just now
+        watch = {"at": last[0]}
 
         def check():
             why = self._abort()
@@ -830,13 +851,14 @@ class Runner:
             if now - last[0] < INTERLOCK_POLL_S:
                 return None
             last[0] = now
-            dropped = self.panel.guard_dropped(guards)
+            dropped = self.panel.watch_guards(guards, watch)
             if not dropped:
                 return None
             why = f"{dropped[1]}, during a move into the {dropped[0]} zone"
             if self.manual:
                 self.request, self.reason = "stop", why
             else:
+                self.dropped = dropped
                 self.panel.call_owner(f"{self.program['name']} paused: {why}", program=self.program["name"],
                                       path=dotted(self.path or []), why="interlock")
             return why
@@ -1073,7 +1095,8 @@ class Runner:
         """A planned move: the brain plans a path from where the arm is to the target's joints, around what's in the
         cell; the shell checks all of it, then the executor runs it. A dry run asks the brain too, from where the run
         would be, and checks the path just the same. Guarded zones whose interlocks hold are left out of the world the
-        brain is told and the shell checks against; the run watches those the path enters."""
+        brain is told and the shell checks against; the run watches those the path enters, or starts in. If the arm is
+        in one whose interlocks don't hold, the brain isn't asked (Panel.zones_for_brain)."""
         panel = self.panel
         state = panel.observe(virtual=self.virtual)
         start = state["joints"]
@@ -1081,7 +1104,7 @@ class Runner:
         if max(abs(a - b) for a, b in zip(start, goal)) <= safety.GOAL_TOLERANCE_DEG:
             self.log("move.planned", text=f"Already at {label}", durationS=0.0)
             return
-        passable = panel.open_zones(dry=self.virtual is not None)
+        passable = panel.zones_for_brain(start, dry=self.virtual is not None)
         world = panel.world(passable)
         aim = {"joints": [round(v, 4) for v in goal], "target": s.get("target") or label,
                "tool": kin.matrix_to_pose(panel.tool_point(goal), 4)}
@@ -1108,10 +1131,11 @@ class Runner:
         self._execute(plan)
 
     def _still_open(self, plan):
-        """Just before a path from the brain runs: the guarded zones it enters must still be open."""
+        """Just before a path from the brain runs: the guarded zones it depends on must still be open."""
         dropped = self.panel.guard_dropped(getattr(plan, "guards", None))
         if dropped:
-            raise ProgramError(f"the {dropped[0]} zone closed while the brain worked out a way into it: {dropped[1]}")
+            raise plannermod.ZoneClosed(f"the {dropped[0]} zone closed while the brain worked out a way into it: "
+                                        f"{dropped[1]}", dropped[0])
 
     def _learned(self, program, s, path):
         """A learned step: the brain's skill acts in short bursts, each asked for with the arm's latest state (at most
@@ -1146,7 +1170,7 @@ class Runner:
                         break
                     self._sleep_checking(wait)
                 state = panel.observe(after=after, inputs=True)
-                passable = panel.open_zones()
+                passable = panel.zones_for_brain(state["joints"])  # refused if the arm is in a closed zone
                 world = panel.world(passable)
                 fields = {"skill": skill, "params": s.get("params", {}), "episode": episode, "tick": tick,
                           "state": brain_state(state), "anchor": {"xyz": [round(v, 3) for v in anchor]},
@@ -1192,6 +1216,8 @@ class Runner:
                 outcome = "stopped" if self.request == "stop" else "paused"
             elif isinstance(e, (safety.Refused, bp.ProtocolError)):
                 outcome = "refused"
+            elif isinstance(e, plannermod.ZoneClosed):
+                outcome = "failed"
             failure = str(e)[:bp.MAX_TEXT]
             raise
         finally:
@@ -1214,7 +1240,7 @@ class Runner:
         if off_mm < 0.02 and off_deg < 0.02:
             return start
         plan = self.panel.plan_guarded(lambda p: p.line(start, back, tool, min(speed, 20.0), 10.0,
-                                                        label="the interrupted line"))
+                                                        label="the interrupted line"), start)
         self.log("move.regain", offMm=round(off_mm, 3), offDeg=round(off_deg, 3), text=plan.text)
         self._execute(plan)
         return self.panel.current_joints()

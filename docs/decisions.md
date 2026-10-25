@@ -1161,7 +1161,11 @@ grasp and switch the payload, grids of slots with a counter, interlocks that gua
 Fallback, safe home and calling the owner) and touch-up. They're general program and cell features; no job's program
 is written here. The requirements: everything stays checked by the spine as before (dry runs, collision checks against
 the zones and the tool, supervision and STOP), safe home's moves and whatever recovery and interlocks do included; the
-HTTP API keeps its endpoints and fields; old cells and programs load unchanged. D121 to D124 are unused.
+HTTP API keeps its endpoints and fields; old cells and programs load unchanged.
+
+A review of the work found a move from inside a guarded zone unchecked, and gaps in the payload's handling, the page's
+watchdog and tool jogs. D120 to D124 and the revisions marked in D105, D106, D110, D111, D114 and D118 are its fixes,
+decided the same day.
 
 ## D105. A gripper is bound to outputs, and optionally to inputs; without one to confirm, it takes a set time
 
@@ -1179,6 +1183,11 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
   settled (an Arduino behind a tool output is one option). Bound to an output and a set time it works whatever drives
   it, and grippers with sensors confirm. Unverified until a gripper is on the arm: the Chess Gripper's time, and its
   drive.
+- **Revised after review:** the rows' Open, Close and Grasp are refused while a jog or Move from the page is under way,
+  and while one works (up to its timeout) no run starts, nor a jog, Move or freedrive; one works at a time. Before,
+  only a run under way refused them, so a grasp during a jog wrote the payload mid-move, and a run could start while
+  the gripper was still closing. Tested: a grasp during a Move is refused with the payload untouched, and a run and a
+  jog are refused while a gripper takes 2 s to close.
 
 ## D106. A grasp checks for a part where there's an input, and switches the payload to the tool and the part
 
@@ -1197,8 +1206,19 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
 - **Why:** the controller's dynamics and collision detection need the payload (D14), and a part changes it.
   Unverified: whether writing the payload stops the real arm (the simulator's `--payload-stops` plays the case where
   it does, and both cases are tested), and how much the payload's accuracy matters to the arm. Known limits: what the
-  grippers hold is kept in memory, so after the server restarts they hold nothing and the payload is the tool's until
-  the next grasp; a grasp from the page doesn't know the part's mass.
+  grippers hold is kept in memory, so after the server restarts they hold nothing, while the controller keeps the
+  last payload written (the server writes none as it starts): a part held then is still counted until the next grasp,
+  release, or Use of a tool. A grasp from the page doesn't know the part's mass.
+- **Revised after review:** Enable makes the arm ready again after the write only if the status frame after it shows
+  no controller error, no STOP has come since the write, and the run has no stop pending. An error then is a fault
+  (the run faults, and the error is left for a person, where Enable would have reset it: a collision tripping during a
+  grasp would have been swallowed); after a STOP, or with a stop pending, the arm stays stopped. A pause pending is
+  no reason to leave it stopped: the run then pauses between steps, which leaves the arm ready, and a Resume would
+  otherwise find it stopped and fault. A payload due when freedrive ends without sending it (STOP ends freedrive too)
+  goes at the next Enable, before the motors come on, and Enable is refused if the controller refuses it; the arm
+  can't move before then. Tested: the simulator's `--payload-error` raises a controller error as the payload is
+  written, and the run faults with it unreset; the STOP, stop and pause cases in-process; a grasp in freedrive ended
+  by STOP reaches the controller at the next Enable.
 
 ## D107. A pattern is taught by three targets, and its slots fill the parallelogram between them
 
@@ -1269,6 +1289,10 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
   read, and one that does reads its interlocks at the last moment before it's sent. Since the collision check decides,
   everything checked against zones is covered, dry runs and the page's check included. A move out of a zone needs no
   interlock: the check already lets the arm move away from what it's within the margin of.
+- **Revised after review:** "blocks it" missed a move from inside a guarded zone, which the check never saw going
+  further in (D120); and "a move out of a zone needs no interlock" now holds only for a jog or Move from the page.
+  A move that starts in a guarded zone needs its interlocks whatever it does there, and nothing the server runs moves
+  the arm in one whose interlocks don't hold (D121).
 
 ## D111. A move into a guarded zone is watched: if an interlock stops holding, the arm stops and the run pauses
 
@@ -1281,6 +1305,10 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
 - **Why:** measured in the simulator, with the door's input dropped during a slow move into the zone: the run had
   stopped the arm and paused 0.14 s later (the tending suite's bound is 1 s). Known limit: as D109 says, it isn't a
   safety function.
+- **Revised after review:** a move from inside a guarded zone is watched too (D121), and "Resume ... is refused" is now
+  what happens: a run paused this way that's resumed while the interlock still doesn't hold plans the rest again, is
+  refused, and stays paused, saying so, with nothing sent (before, a resumed move from inside went on in, unwatched).
+  The interlocks are read without holding up the other reasons to stop (D122).
 
 ## D112. A step that fails is caught by Retry and Fallback; a fault never is
 
@@ -1325,6 +1353,10 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
 - **Why:** the build line: retract along the tool, then a checked joint move home. How it picks its retract was ours to
   decide. Tested in the simulator: 40 mm back along the tool (the line sent ended 0.00 mm from its goal), then home;
   with a shelf over the wrist, 14 of the 60 mm asked for, saying why, then home.
+- **Revised after review:** with the arm in a guarded zone, safe home's moves need its interlocks and are watched, as
+  any move from inside one is; while they don't hold, safe home doesn't move the arm (D121), as its joint move could
+  drag the tool through the machine. Tested: from inside the machine, its joint move stops within 0.12 s of the door
+  shutting, and with the door shut it's refused, nothing sent.
 
 ## D115. Calling the owner: a call kept by the server and shown on the page until it's seen
 
@@ -1384,6 +1416,8 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
   twin (later, once the real gripper's drive is known).
 - **Why:** the tests drive grippers through the same SDK reads and writes the arm will see, as machines' signals are
   already set through the control port.
+- **Revised after review:** `--payload-error CODE` also raises that controller error as the payload is written, as a
+  collision tripping during a grasp would, for D106's revised Enable.
 
 ## D119. Old cells, programs and the API keep working
 
@@ -1398,3 +1432,97 @@ HTTP API keeps its endpoints and fields; old cells and programs load unchanged. 
 - **Why:** Foreman drives this API, and the cells and programs there are must load unchanged. Tested: an old cell and
   program load and run unchanged and the API keeps its fields (`tending`'s compatibility scenario), and the other
   suites pass as before.
+
+## D120. The gap to the cart, the floor and the zones is signed: inside one, it's minus the depth
+
+- **Decision:** a capsule's gap to a box or a cylinder (the cart, the floor, the cell's zones) is the signed distance
+  between them: how far apart they are outside, and, when the capsule's core reaches inside, minus the depth of its
+  deepest point (its distance to the nearest point of the surface), less the capsule's radius as before. The check's
+  rule for parts already within the margin, that they may move apart or 1 mm closer at most, so now means, for a part
+  already inside, no more than 1 mm further in. The lower bound the check skips pairs with uses the same signed
+  distance (it's 1-Lipschitz, so still a bound). `scripts/utra_model.py` has it (`Obstacle.segment_gap`), the page's
+  `scripts/web/collide.js` line for line, and so the brain's shell and the stub brain, which check through the same
+  model. A hit that takes a part further into what it's in says so ("the tool would go further into the machine zone").
+- **Alternatives:** the unsigned gap, as before (inside, it was minus the capsule's radius however deep, so a move
+  further in was never seen: from inside a zone, the arm could be driven on through it); measuring how much of the
+  capsule is inside (costlier, and no better for the case below).
+- **Why:** the review found that a move further into a zone the arm was already in went unchecked, and, the zone being
+  guarded, unwatched. Checked: the signed gap against an independent NumPy signed distance on 400 random segments per
+  shape, 263 of them reaching inside, never above the densely sampled minimum by more than 1e-9 m
+  (`tests/collide_tests.py`); `collide.js` against `utra_model.py` on 240 random paths, 39 of them starting with part
+  of the arm inside a zone and 33 of those refused for going further in, to 1e-15 m (`tests/js_tests.py`); paths from
+  inside a zone against dense sampling, none let through further in (`tests/path_tests.py`). `check_path` is no
+  slower: 40 paths took 2.9 s against 3.7 s before, as the distance outside is now worked out from the shape's own
+  coordinates. Known limit: depth is measured to the nearest face, and a box can't tell a machine's door from its
+  walls. A tool hanging into a zone from above is deepest by its distance to the top face, so it can move further into
+  the machine sideways without going deeper by this measure. D121 covers that for guarded zones.
+
+## D121. A move that starts in a guarded zone needs its interlocks; while they don't hold, only the page may back out
+
+- **Decision:** a guarded zone the arm is in at a move's start (any part of it overlapping the zone: `Panel.zones_in`)
+  counts as entered by the move, whatever the move does there. Its interlocks are read; if they all hold, the zone is
+  open for the move and the move is watched (D111), even one leaving it; a dry run assumes they'll hold. If they
+  don't:
+  - nothing the server runs moves the arm there: a program's steps, moves to targets and slots, safe home, and the
+    brain's paths and bursts (the brain isn't asked) are refused (`planner.ZoneClosed`, a failure as D112 has it);
+  - a run that an interlock paused, resumed while it still doesn't hold, plans the rest again, is refused, and stays
+    paused, saying so, with nothing sent;
+  - a jog or Move from the page may only back the arm out: it's checked with the zone closed, so it can't go further
+    in (D120), and it must end outside the zone. The page's own check (`arm_view.js`) previews a plan the same way.
+- **Alternatives:** letting any move back out that never goes further in, a program's too (the review's suggestion; but
+  as D120 says, a box can't tell the door from the walls, so a tool hanging in from above could slide through the
+  machine and out of its far side, or safe home's joint move drag it through, without going deeper); treating the
+  zone as entered only by a move that goes deeper (the blind spot itself); a zone's door face, taught, so that "out"
+  is known (more to teach, and unneeded while a person backs the arm out).
+- **Why:** the door shutting on the arm is the machine saying it's not safe in there. The arm then stays put for a
+  person, who can open the door, back the arm out from the page, or guide it out in freedrive. Tested against the
+  simulator, with a tool hanging 32 mm into the machine (its depth pinned by the zone's top face) for each case the
+  review listed: Resume with the door still shut (refused, nothing sent), a later step further in (fails, nothing
+  sent), a Move and a tool jog further in (refused) and a Move backing out (goes), a learned skill working in the
+  machine (stopped 0.09 s after the door shut, no more bursts), and safe home's joint move from inside (stopped
+  0.12 s after the door shut; refused with it shut). Each of these checks fails on the code before this decision.
+
+## D122. Watching a move's interlocks never holds up the other reasons to stop
+
+- **Decision:** the page's watchdog acts on the hold-to-move key let go, a quiet page, stale status and a controller
+  error first, and reads the interlocks last. It, and a run's supervision, waits at most 0.05 s for the SDK
+  (`WATCH_LOCK_WAIT_S`), which a request may hold for seconds while the status stream stalls; if the interlocks can't
+  be read within 0.5 s of the last time they were (`GUARD_CONFIRM_S`), the arm stops, as when one doesn't hold.
+  (`Panel.watch_guards`.)
+- **Alternatives:** reading them first and waiting as long as it takes (as before: letting go of hold-to-move, a quiet
+  page or a stale status could wait seconds behind a request); a thread of its own reading them (more to coordinate,
+  for the same bound); stopping whenever the SDK is busy (a jog's planning would stop moves into zones).
+- **Why:** the review found the release of hold-to-move waiting behind the SDK's lock. Measured in-process against the
+  simulator, with a test thread holding the SDK as a stalled request would: letting go stopped a Move into a guarded
+  zone 0.015 s later; with the key held, the Move stopped 0.44 s after the SDK was taken, its interlocks unread.
+  Before, neither stopped until the SDK was free.
+
+## D123. A tool jog that can't be checked isn't sent
+
+- **Decision:** a tool jog is planned from the joints its start is solved at, from where the arm is. If that can't be
+  solved within the planning limits (a joint jogged past them, J6 beyond 180° say), the jog is refused while the arm
+  is still, saying which joint is where, and held ("Holding", nothing sent) while the arm is still moving. Before, it
+  was sent unchecked.
+- **Alternatives:** refusing only near a guarded zone (an unchecked step can hit the cart, a keep-out zone or the
+  arm itself as well); widening the planning limits (they keep plans within the faders' range).
+- **Why:** the review found that after J6 was jogged past 180°, every tool jog went unchecked, into a closed machine
+  included. Tested: with J6 at 191°, a tool jog into the machine is refused and nothing sent.
+
+## D124. A move checked in parts has one allowance for parts already close; once they're clear, the margin holds again
+
+- **Decision:** a part already within the margin of something where a move begins may come at most 1 mm closer (or
+  further in) over the whole move. A straight line is checked sample by sample (every 2 mm or 1°), and a path from the
+  brain segment by segment: each part is now checked with the allowance worked out once, at the move's first pose
+  (`ArmModel.start_limits`), passed to every part (`check_path`'s `limits`), in the planner's lines, the shell's
+  paths, `zones_entered` and the stub brain alike. And once a pair is seen back beyond the margin during a move, the
+  margin holds for it again, so a move can't back out of a tight spot and come back closer than the margin.
+- **Alternatives:** each part working out its own allowance, as before (a line from 6 mm off anything could close in
+  1 mm a sample: a 50 mm tool jog at 15° to a closed zone's face ended 6.9 mm inside it, without the zone being seen,
+  so without its interlocks being read, and a brain's path the same, 1 mm a segment); one allowance for the whole move
+  without the margin coming back (a line could leave a tight spot and come back down to its start's gap, which its
+  samples used to catch).
+- **Why:** found by a second review of the fixes for D120 and D121, as the rule that a move from the page backing out of
+  a closed zone must end outside it leaves the arm within the margin of the zone, where this creep began. Tested
+  in-process: the 50 mm line and a brain's path closing in 0.9 mm a segment from 6 mm off the machine zone are both
+  refused once 1 mm closer (both were let through before), a path backing out to 18 mm and coming back to 9 mm is held
+  to the margin, and `collide.js`, which has the same rule for a whole move, still agrees with `utra_model.py`.

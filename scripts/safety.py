@@ -10,7 +10,8 @@ every number finite, the waypoints counted and each six joints):
 - joint limits: every waypoint within the planning limits (planner.DRAG_LIMITS_DEG), so every point between is too;
 - collisions: each segment, the straight joint-space move the controller makes between two waypoints, through the
   continuous check every move gets (utra_model.ArmModel.check_path: the arm itself, its cart, the floor, the tool and
-  the cell's keep-out zones, with the 10 mm margin), which steps along it so finely that no gap can close unseen;
+  the cell's keep-out zones, with the 10 mm margin, a part already inside one going no further in), which steps along
+  it so finely that no gap can close unseen;
 - speed caps: each segment at the step's speed (or the brain's, if lower), each joint within its rated speed, and the
   tool point within a cap (planner.Planner.joint; the runner passes 250 mm/s unless the program is marked for full
   speed);
@@ -104,9 +105,10 @@ def check_path(planner, path, start, speed, tool, tool_speed, label, what="plan"
             kept.append(q)
     hit = None
     plans = []
+    limits = planner.model.start_limits(kept[0])  # one allowance for parts already close, for the whole path
     for k, (a, b) in enumerate(zip(kept, kept[1:]), 1):
         try:
-            plans.append(planner.joint(a, b, speed, label, tool=tool, tool_speed=tool_speed))
+            plans.append(planner.joint(a, b, speed, label, tool=tool, tool_speed=tool_speed, limits=limits))
         except plannermod.PlanError as e:
             reasons.append(f"segment {k}: {_plain(e).rstrip('.')}")
             hit = hit or e.hit

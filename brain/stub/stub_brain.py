@@ -102,18 +102,14 @@ class StubBrain:
         tool = kin.pose_to_matrix(world["tool"]["tcp"])
         start, goal = request["state"]["joints"], request["goal"]["joints"]
         limits = request.get("limits", {}).get("joints") or plannermod.DRAG_LIMITS_DEG
-        checked = {}
-
-        def clear(a, b):
-            key = (tuple(a), tuple(b))
-            if key not in checked:
-                checked[key] = model.check_path(a, b) is None
-            return checked[key]
 
         def free(path):
+            """Whether a path is clear, judged as the spine's shell judges it: parts already close where it starts may
+            come no closer over the whole path (start_limits), not each segment."""
             if time.monotonic() > deadline:
                 raise NoPath("ran out of time looking for a clear path")
-            return all(clear(a, b) for a, b in zip(path, path[1:]))
+            allowed = model.start_limits(path[0])
+            return all(model.check_path(a, b, limits=allowed) is None for a, b in zip(path, path[1:]))
 
         if free([start, goal]):
             return [start, goal], "straight there: the way is clear"

@@ -43,16 +43,28 @@ def main():
     xcheck_input = log_path("xcheck_cases.json")
     with open(xcheck_input, "w") as f:
         json.dump({"config": config, "cases": xcheck_cases(model)}, f)
-    # The same with a tool on the flange and two keep-out zones, as the cell adds them.
+    # The same with a tool on the flange and keep-out zones, as the cell adds them: two small, and a cage so big that many
+    # random poses start with part of the arm inside it, where the gap is signed (the depth inside, negated).
     zones = [utra_model.Obstacle("the press zone", "box", [0.45, 0.1, 0.1], [[1, 0, 0], [0, 0.8, -0.6], [0, 0.6, 0.8]],
                                  [0.2, 0.3, 0.25]),
              utra_model.Obstacle("the rack zone", "box", [-0.2, -0.45, 0.2], [[0.6, 0.8, 0], [-0.8, 0.6, 0], [0, 0, 1]],
-                                 [0.15, 0.4, 0.5])]
+                                 [0.15, 0.4, 0.5]),
+             utra_model.Obstacle("the cage zone", "box", [0.35, 0.0, 0.55], [[0.8, 0.6, 0], [-0.6, 0.8, 0], [0, 0, 1]],
+                                 [0.7, 0.6, 0.5])]
     celled = model.with_cell([(6, [0, 0, 0], [0, 0, 0.14], 0.035, "the tool"), (6, [0, 0.03, 0.14], [0, -0.03, 0.14],
                                                                                 0.02, "the tool")], zones)
+    cases = xcheck_cases(celled, seed=8)
+    cage = len(celled.obstacles) - 1
+    inside = sum(1 for c in cases if celled.obstacle_gaps(c["start"], {cage})[cage][0] < 0)
+    deeper = sum(1 for c in cases if c["hit"] and c["hit"]["obstacle"] == cage and c["hit"]["gap"] < 0)
+    print(f"  {inside} of {len(cases)} cell paths start with part of the arm inside the cage zone; {deeper} are refused "
+          "for going deeper into it")
+    if inside < 20 or deeper < 3:
+        print("  FAIL too few paths start inside a zone to test the signed gap")
+        return 1
     xcheck_cell = log_path("xcheck_cell_cases.json")
     with open(xcheck_cell, "w") as f:
-        json.dump({"config": celled.collision_config(), "cases": xcheck_cases(celled, seed=8)}, f)
+        json.dump({"config": celled.collision_config(), "cases": cases}, f)
     failures = 0
     for script, arg in (("ik_tests.mjs", ik_input), ("xcheck.mjs", xcheck_input), ("xcheck.mjs", xcheck_cell)):
         print(f"== node {script}")

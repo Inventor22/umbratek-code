@@ -47,9 +47,10 @@ SEED = [-10, 10, 100, 0, 70, 0]
 DOWN = [180, 0, 0]
 HOME = [0, 0, 90, 0, 90, 0]
 # Tool points in the table's frame, pointing down: a working point A and one beside it, B; a tray of 3 rows x 4 columns
-# (columns 40 mm apart, rows 35 mm apart) taught at three corners; a machine's opening and the point inside it.
+# (columns 40 mm apart, rows 35 mm apart) taught at three corners; a machine's opening, a point 30 mm past it and the
+# point inside it.
 POINTS = {"A": [0, 0, 120], "B": [100, 0, 120], "T1": [0, 0, 90], "T4": [120, 0, 90], "T9": [0, 70, 90],
-          "Mout": [0, 120, 120], "M": [0, 200, 120]}
+          "Mout": [0, 120, 120], "Min": [0, 180, 120], "M": [0, 200, 120]}
 MACHINE = ({"xyz": [0, 200, 100], "rpy": [0, 0, 0]}, [100, 100, 100])  # the machine's work area, a guarded zone
 PNEU = {"name": "pneu", "close": [{"output": "tool.0", "value": 1}], "open": [{"output": "tool.0", "value": 0}],
         "seconds": 0.3, "timeout": 1.0, "closed": {"input": "tool.1"}, "opened": {"input": "tool.2"},
@@ -79,6 +80,11 @@ def joints_for(xyz, back=0.0, seed=SEED):
 
 def tool_mm(q):
     return kin.position(KIN.tool_pose(q, TOOL))
+
+
+def table_mm(q):
+    """The tool point at joints q, in the table's frame (mm)."""
+    return kin.position(kin.mul(kin.invert(FRAME), KIN.tool_pose(q, TOOL)))
 
 
 def refused(fn, *errors):
@@ -166,8 +172,14 @@ class Rig:
         return self.wait(lambda s: s.get("run", {}).get("state") in states, timeout)
 
     def enable(self):
+        """Enable, once the arm has settled from a STOP (Enable is refused while it's still moving)."""
         self.wait(lambda s: s.get("live"))
-        r = self.post("/api/enable")
+        deadline = time.monotonic() + 15
+        while True:
+            r = self.post("/api/enable")
+            if r.get("ok") or "still moving" not in r.get("message", "") or time.monotonic() > deadline:
+                break
+            time.sleep(0.2)
         self.wait(lambda s: s.get("enabled") and s.get("state") in (0, 2))
         return r
 
@@ -435,6 +447,40 @@ def unit_cell():
 
 # ---- against the simulator ----------------------------------------------------------------------------------------------
 
+def unit_parts():
+    print("== a move checked in parts (a line's samples, a path's segments) has one allowance for parts already within "
+          "the margin, the whole move's: it can't creep 1 mm closer at each part")
+    import safety
+    folder = tempfile.mkdtemp(prefix="umbratek-tending-")
+    try:
+        cell = cellmod.Cell(folder)
+        cell.set_tool("pointer", TOOL_POSE, TOOL_MASS, TOOL_COG, [CAPSULE])
+        cell.activate_tool("pointer")
+        cell.set_frame("table", "base", FRAME_POSE)
+        cell.set_zone("machine", "table", MACHINE[0], MACHINE[1])
+        model = cell.collision_model(MODEL)
+        planner = plannermod.Planner(model)
+
+        def gap_mm(xyz):
+            return min(g for g, _, other in model.clearances(joints_for(xyz)) if other == "the machine zone") * 1000.0
+
+        near = [0, 132, 120]  # the tool 6 mm short of the machine's face
+        target = [list(row) for row in table_pose(near)]
+        target[0][3] -= 0.050  # 50 mm along the base's -x: 13 mm closer, half a millimetre each 2 mm sample
+        error = refused(lambda: planner.line(joints_for(near), target, TOOL, 50.0), plannermod.PlanError)
+        check(f"a straight line from {gap_mm(near):.1f} mm short of a zone, closing in obliquely, is refused once it's "
+              f"1 mm closer, not let in by its samples ({error})", error and "the machine zone" in error, error)
+        closing = [joints_for([0, 132 + 0.9 * k, 120]) for k in range(21)]  # 0.9 mm closer a segment, 12 mm in
+        error = refused(lambda: safety.check_path(planner, closing, closing[0], 20.0, TOOL, 250.0, "M"), safety.Refused)
+        check(f"so is a brain's path closing in 0.9 mm a segment ({error})", error and "the machine zone" in error, error)
+        back = [joints_for([0, y, 120]) for y in (132, 126, 120, 126, 129)]  # out to 18 mm, back to 9 mm
+        error = refused(lambda: safety.check_path(planner, back, back[0], 20.0, TOOL, 250.0, "M"), safety.Refused)
+        check(f"and a path that backs out beyond the margin and comes back is held to the margin again ({error})",
+              error and "segment 4" in error and "the machine zone" in error, error)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def scenario_grippers():
     print("== grippers: open, close and grasp, confirmed by inputs or a set time; the grasp checked for a part; the "
           "payload switched to the tool and the part, and back")
@@ -563,6 +609,93 @@ def scenario_payload_stops():
         rig.close()
 
 
+def unit_payload():
+    print("== after writing the payload stops the arm: Enable makes it ready again only if nothing else stopped it")
+    import types
+
+    import jog_server
+    from executor import MoveFailed
+
+    class Panel:
+        """What Panel.apply_payload uses: a ready arm whose payload write stops it, with the frame after the write
+        showing `err`; STOP pressed as it's written (`stop_meanwhile`); the run's pending request."""
+
+        def __init__(self, err=0, stop_meanwhile=False, request=None, busy=True):
+            self.mask = 0b111111
+            self.frame = {"mode": 0, "status": 0, "err": 0, "enable": self.mask}
+            self.payload_sent, self.payload_due = (0.2, [0.0, 0.0, 50.0]), False
+            self.stop_count, self.enabled = 0, 0
+            self.runner = types.SimpleNamespace(request=request, busy=busy)
+            self.err, self.stop_meanwhile = err, stop_meanwhile
+
+        def payload(self):
+            return 0.7, [0.0, 0.0, 100.0]
+
+        def send_payload(self):
+            self.payload_sent = self.payload()
+            if self.stop_meanwhile:
+                self.stop_count += 1
+
+        def _await_frame(self, since, test, timeout_s):
+            return {"mode": 0, "status": 4, "err": self.err, "enable": self.mask}
+
+        def enable(self):
+            self.enabled += 1
+
+    def apply(panel):
+        try:
+            return jog_server.Panel.apply_payload(panel), None
+        except MoveFailed as e:
+            return None, e.reason
+
+    plain = Panel()
+    note, _ = apply(plain)
+    check("a write that stops a ready arm, and nothing else: Enable's checks make it ready again",
+          plain.enabled == 1 and "ready again" in note, note)
+    fault = Panel(err=31)
+    note, error = apply(fault)
+    check(f"with a controller error after the write, Enable doesn't run (it would reset the error): the step faults "
+          f"({error})", fault.enabled == 0 and error and "as the payload was written" in error, (note, error))
+    stopped = Panel(stop_meanwhile=True)
+    note, error = apply(stopped)
+    check("after a STOP as it was written, the arm stays stopped", stopped.enabled == 0 and error is None
+          and "stays stopped" in note, (note, error))
+    pending = Panel(request="stop")
+    note, error = apply(pending)
+    check("and with the run's stop pending, it stays stopped", pending.enabled == 0 and error is None, note)
+    pausing = Panel(request="pause")
+    note, error = apply(pausing)
+    check("but with a pause pending it's made ready again, as the run then pauses between steps, where the arm is "
+          "left ready (a Resume would find it stopped otherwise)", pausing.enabled == 1 and "ready again" in note, note)
+    stale = Panel(request="stop", busy=False)
+    note, error = apply(stale)
+    check("and a stop left over from a run that's over doesn't count: Enable makes the arm ready again",
+          stale.enabled == 1 and "ready again" in note, note)
+
+
+def scenario_payload_fault():
+    print("== a controller error as the payload is written (the simulator's --payload-error, as a collision tripping "
+          "during a grasp would) faults the run, and isn't reset")
+    rig = Rig("payerr", sim_args=["--payload-stops", "--payload-error", "31"])
+    try:
+        rig.enable()
+        rev = setup(rig)
+        rig.enable()  # making the pointer the tool in use wrote its payload, raising the error: Enable resets it
+        rig.ctl(cmd="gripper", output="tool.0", close=1, seconds=0.3, closed="tool.1", opened="tool.2", part="tool.3")
+        rig.ctl(cmd="part", present=True)
+        rig.post("/api/cell/gripper", dict(PNEU, revision=rev))
+        save(rig, {"name": "take", "steps": [{"type": "gripper", "gripper": "pneu", "action": "grasp", "part": PART},
+                                              {"type": "wait", "seconds": 0.5}]})
+        r, s = rig.run("take")
+        st = rig.ctl(cmd="state")
+        check(f"the run faults at the grasp ({s['run']['reason']}), the controller's error left for a person to see to",
+              s["run"]["state"] == "faulted" and s["run"]["path"] == [0]
+              and "as the payload was written" in s["run"]["reason"] and st["err"] == 31 and st["status"] == 4,
+              (s["run"], st["err"], st["status"]))
+    finally:
+        rig.close()
+
+
 def scenario_patterns():
     print("== a 3 x 4 tray taught at three corners: a program visits every slot by its counter, which persists")
     rig = Rig("tray")
@@ -665,9 +798,10 @@ def scenario_interlocks():
             {"type": "move", "kind": "line", "target": "Mout"}]})
         r, s = rig.run("tend", "dry")
         assumed = [e for e in named(rig.events(), "dry.assumed") if e.get("zone") == "machine"]
-        check("a dry run assumes the interlock will hold for the move into the zone, as it assumes inputs arrive, and "
-              "says so (the move out of it needs none)", s["run"]["state"] == "done" and len(assumed) == 1
-              and assumed[0]["interlocks"] == ["door_open"] and assumed[0]["path"] == "2", (s["run"], assumed))
+        check("a dry run assumes the interlock will hold for the moves into the zone and out of it (a run moves the arm "
+              "in a guarded zone only while its interlocks hold), as it assumes inputs arrive, and says so",
+              s["run"]["state"] == "done" and [a["path"] for a in assumed] == ["2", "3"]
+              and all(a["interlocks"] == ["door_open"] for a in assumed), (s["run"], assumed))
         rig.post("/api/run/reset")
         r, s = rig.run("tend")
         check("a run with the door shut fails at the move into the zone, and calls the owner",
@@ -734,6 +868,155 @@ def scenario_interlocks():
         rig.close()
 
 
+def moves_sent(rig):
+    """How many moves the simulator has been sent: joint, straight and joint-path ones."""
+    log = rig.log()
+    return log.count("MOVET_LINE") + log.count("MOVEJ_P2P")
+
+
+def scenario_inside():
+    print("== in a machine's zone already: a move from inside it depends on its interlock as a move into it does; while "
+          "the interlock doesn't hold nothing the server runs moves the arm there, and the page may only back it out")
+    rig = Rig("inside", brain=True)
+    door = {"open": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=1),
+            "shut": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=0)}
+    try:
+        rig.enable()
+        setup(rig, points=("Mout", "Min", "M"), joints={"home": HOME})
+        rev = rig.post("/api/cell/interlock", {"name": "door_open", "input": "controller.2", "value": 1,
+                                               "revision": rig.rev()})["cell"]["revision"]
+        rig.post("/api/cell/zone", {"name": "machine", "frame": "table", "pose": MACHINE[0], "size": MACHINE[1],
+                                    "interlocks": ["door_open"], "revision": rev})
+        door["open"]()
+        goto(rig, "Mout")
+
+        # Resume while the interlock that paused the run still doesn't hold.
+        save(rig, {"name": "deep", "speed": {"tcp": 100}, "steps": [
+            {"type": "move", "kind": "line", "target": "M", "speed": 15},
+            {"type": "move", "kind": "line", "target": "Mout"}]})
+        rig.post("/api/run/start", {"name": "deep"})
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and table_mm(rig.sim_joints())[1] < 180.0:
+            time.sleep(0.02)
+        door["shut"]()
+        s = rig.run_state("paused", "faulted", "done", "stopped", timeout=10)
+        rig.wait(lambda s: s.get("state") == 4, 5)  # the operator sees the arm stopped, then presses Resume
+        stopped_at = table_mm(rig.sim_joints())
+        sent = moves_sent(rig)
+        rig.post("/api/run/resume")
+        time.sleep(1.5)
+        s = rig.status()
+        check(f"the door shut with the tool {stopped_at[1] - 150:.0f} mm into the machine pauses the run; Resume with it "
+              f"still shut is refused, and the run stays paused with nothing sent ({s['run']['reason']})",
+              s["run"]["state"] == "paused" and s["run"]["reason"].startswith("Resume refused:")
+              and "into the machine zone, which is closed, as door_open doesn't hold" in s["run"]["reason"]
+              and moves_sent(rig) == sent and math.dist(table_mm(rig.sim_joints()), stopped_at) < 1.0,
+              (s["run"], moves_sent(rig) - sent, stopped_at))
+        door["open"]()
+        rig.post("/api/run/resume")
+        s = rig.run_state("done", "faulted", "stopped", timeout=30)
+        check("with the door open again, Resume carries on in and out", s["run"]["state"] == "done", s["run"])
+
+        # A later step, deeper in, once the door has shut with the arm inside.
+        save(rig, {"name": "halfway", "speed": {"tcp": 100}, "steps": [
+            {"type": "move", "kind": "line", "target": "Min"}, {"type": "halt", "message": "inside"},
+            {"type": "move", "kind": "line", "target": "M"}, {"type": "move", "kind": "line", "target": "Mout"}]})
+        r, s = rig.run("halfway")
+        door["shut"]()
+        sent, before = moves_sent(rig), rig.sim_joints()
+        rig.post("/api/run/resume")
+        s = rig.run_state("done", "faulted", "stopped", timeout=20)
+        check(f"a step further into the machine after its door shut on the arm fails, nothing sent ({s['run']['reason']})",
+              s["run"]["state"] == "faulted" and s["run"]["path"] == [2]
+              and "into the machine zone, which is closed, as door_open doesn't hold" in s["run"]["reason"]
+              and moves_sent(rig) == sent and max(abs(a - b) for a, b in zip(rig.sim_joints(), before)) < 0.05,
+              (s["run"], moves_sent(rig) - sent))
+        rig.recover()
+
+        # From the page: a Move or a jog further in is refused; a Move backing out goes.
+        door["open"]()
+        goto(rig, "Mout")
+        goto(rig, "Min", kind="line")
+        door["shut"]()
+        sent = moves_sent(rig)
+        r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["M"])], "speed": 30})
+        check(f"the page's Move further into the machine is refused while its door is shut ({r.get('message')})",
+              not r["ok"] and "may only back out of it" in r["message"] and moves_sent(rig) == sent, r)
+        r = rig.post("/api/jog", {"kind": "tool", "index": 1, "dir": 1, "step": 10.0, "rotStep": 1.0, "speed": 50.0})
+        check(f"and so is a tool jog further in ({r.get('message')})",
+              not r["ok"] and "may only back out of it" in r["message"] and moves_sent(rig) == sent, r)
+        r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["Mout"])], "speed": 30})
+        rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 20)
+        check("a Move backing out of it goes", r["ok"] and r["moved"]
+              and math.dist(table_mm(rig.sim_joints()), POINTS["Mout"]) < 1.0, r)
+
+        # A learned skill working inside, when the door shuts.
+        door["open"]()
+        goto(rig, "M", kind="line")
+        save(rig, {"name": "feel", "speed": {"joint": 20}, "steps": [
+            {"type": "learned", "skill": "seek", "near": "M", "within": 60, "seconds": 30,
+             "params": {"input": "tool.9", "stepMm": 4, "radiusMm": 15}}]})
+        rig.post("/api/run/start", {"name": "feel"})
+        rig.wait(lambda s: len(named(rig.run_log(), "skill.burst")) >= 3, 20, poll=0.1)
+        door["shut"]()
+        shut = time.monotonic()
+        s = rig.run_state("paused", "faulted", "done", "stopped", timeout=5)
+        took = time.monotonic() - shut
+        bursts = len(named(rig.run_log(), "skill.burst"))
+        time.sleep(1.5)
+        check(f"a learned skill working in the machine stops within {took:.2f} s of its door shutting, and asks for no "
+              f"more bursts ({s['run']['state']}: {s['run']['reason']})",
+              s["run"]["state"] in ("paused", "faulted") and took < 1.5 and "door_open doesn't hold" in s["run"]["reason"]
+              and len(named(rig.run_log(), "skill.burst")) == bursts and not rig.ctl(cmd="state")["moving"],
+              (s["run"], took))
+        rig.post("/api/run/stop")
+        rig.run_state("stopped", "faulted", "done", timeout=10)
+        rig.recover()
+
+        # Safe home from inside: watched while the door is open, refused while it's shut.
+        door["open"]()
+        goto(rig, "M", kind="line")
+        save(rig, {"name": "out", "steps": [{"type": "home", "target": "home", "retract": 0, "speed": 5}]})
+        rig.post("/api/run/start", {"name": "out"})
+        rig.wait(lambda s: (s["run"].get("lastEvent") or {}).get("event") == "move.sent", 10)
+        door["shut"]()
+        shut = time.monotonic()
+        s = rig.run_state("paused", "faulted", "done", "stopped", timeout=10)
+        took = time.monotonic() - shut
+        time.sleep(0.6)
+        check(f"safe home's joint move out of the machine is watched: the door shutting stops it within {took:.2f} s "
+              f"({s['run']['reason']})", s["run"]["state"] == "paused" and took < 1.0
+              and "door_open doesn't hold" in s["run"]["reason"] and not rig.ctl(cmd="state")["moving"], (s["run"], took))
+        rig.post("/api/run/stop")
+        rig.run_state("stopped", "faulted", "done", timeout=10)
+        rig.recover()
+        sent = moves_sent(rig)
+        r, s = rig.run("out")
+        check(f"and with the door shut, safe home doesn't drag the tool out through the machine: nothing is sent "
+              f"({s['run']['reason']})", s["run"]["state"] == "faulted" and moves_sent(rig) == sent
+              and "into the machine zone, which is closed" in s["run"]["reason"], (s["run"], moves_sent(rig) - sent))
+        rig.recover()
+
+        # A tool jog from where tool steps can't be solved (J6 past 180 degrees) isn't sent unchecked.
+        door["open"]()
+        goto(rig, "Mout")
+        door["shut"]()
+        for _ in range(20):
+            if rig.status()["joints"][5] > 181.0:
+                break
+            rig.post("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 15.0, "speed": 60.0})
+            rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 10)
+        j6 = rig.status()["joints"][5]
+        sent = moves_sent(rig)
+        r = rig.post("/api/jog", {"kind": "tool", "index": 1, "dir": 1, "step": 50.0, "rotStep": 1.0, "speed": 50.0})
+        check(f"with J6 at {j6:.1f} deg, past the 180 tool steps are planned within, a tool jog (here into the machine, "
+              f"its door shut) is refused, not sent unchecked ({r.get('message')})",
+              j6 > 180.0 and not r["ok"] and "J6 is at" in r["message"] and moves_sent(rig) == sent
+              and math.dist(table_mm(rig.sim_joints()), POINTS["Mout"]) < 1.0, (j6, r))
+    finally:
+        rig.close()
+
+
 def shelf_over(q, rise):
     """A thin zone over the wrist at q, placed so that backing the tool straight up brings the arm within the margin
     of it after about `rise` mm: (pose in base, size)."""
@@ -754,7 +1037,7 @@ def scenario_recovery():
     rig = Rig("recover")
     try:
         rig.enable()
-        rev = setup(rig, joints={"home": HOME})
+        setup(rig, joints={"home": HOME})
         rig.ctl(cmd="gripper", output="tool.0", close=1, seconds=0.3, closed="tool.1", opened="tool.2", part="tool.3")
         rig.post("/api/cell/gripper", dict(PNEU, revision=rig.rev()))
         save(rig, {"name": "patient", "steps": [
@@ -947,8 +1230,166 @@ def scenario_compat():
         rig.close()
 
 
-SCENARIOS = (unit_cell, scenario_grippers, scenario_payload_stops, scenario_patterns, scenario_interlocks,
-             scenario_recovery, scenario_touchup, scenario_compat)
+def scenario_watch_lock():
+    print("== the page's watchdog, in-process: letting go of hold-to-move stops a move into a guarded zone at once, "
+          "however long a request holds the SDK; and a move whose interlocks can't be read for 0.5 s stops")
+    import jog_server
+    sim, _ = start_sim((), "tending_watchlock.log")
+    folder = log_path("tendcell_watchlock")
+    shutil.rmtree(folder, ignore_errors=True)
+    ctl, buf = socket.create_connection((HOST, 30099), timeout=5), [b""]
+
+    def control(**request):
+        ctl.sendall(json.dumps(request).encode() + b"\n")
+        while b"\n" not in buf[0]:
+            buf[0] += ctl.recv(65536)
+        line, buf[0] = buf[0].split(b"\n", 1)
+        return json.loads(line)
+
+    def stopped_within(seconds, since):
+        """How long after `since` the simulator reports the arm stopped (state 4), or None within `seconds`."""
+        while time.monotonic() - since < seconds:
+            if control(cmd="state")["status"] == 4:
+                return time.monotonic() - since
+            time.sleep(0.01)
+        return None
+
+    panel, quit_, holding = None, threading.Event(), threading.Event()
+    try:
+        panel = jog_server.Panel(HOST, MODEL, folder, None, False, True)  # hold-to-move on
+        deadline = time.monotonic() + 10
+        while panel.frame is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        def page():  # the page: renewing the hold while its key is down, and polling
+            while not quit_.is_set():
+                if holding.is_set():
+                    panel.hold(400)
+                panel.heard()
+                time.sleep(0.1)
+        threading.Thread(target=page, daemon=True).start()
+        holding.set()
+        time.sleep(0.2)
+        panel.enable()
+        panel.cell.set_tool("pointer", TOOL_POSE, TOOL_MASS, TOOL_COG, [CAPSULE])
+        panel.cell.activate_tool("pointer")
+        panel.cell.set_frame("table", "base", FRAME_POSE)
+        panel.cell.set_interlock("door_open", "controller.2", 1)
+        panel.cell.set_zone("machine", "table", MACHINE[0], MACHINE[1], interlocks=["door_open"])
+        control(cmd="input", line="controller", bit=2, value=1)
+
+        def into_zone():
+            """From Mout, a slow page Move into the machine, under way."""
+            if control(cmd="state")["status"] == 4:
+                panel.enable()
+            panel.move({"targets": [round(v, 3) for v in joints_for(POINTS["Mout"])], "speed": 30.0})
+            deadline = time.monotonic() + 30
+            while (control(cmd="state")["moving"] or panel._busy(panel.frame)) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            panel.move({"targets": [round(v, 3) for v in joints_for(POINTS["M"])], "speed": 2.0})
+            time.sleep(0.6)
+            return dict(panel.page_guards), control(cmd="state")["moving"]
+
+        guards, moving = into_zone()
+        panel.lock.acquire()  # a request holding the SDK, as one waiting out a stall in the status stream does
+        try:
+            let_go = time.monotonic()
+            holding.clear()
+            panel.hold(0)
+            took = stopped_within(2.5, let_go)
+        finally:
+            panel.lock.release()
+        check(f"letting go of hold-to-move during a page Move into a guarded zone (watched: {guards}) stops it "
+              f"within {took if took is None else round(took, 3)} s while a request holds the SDK ({panel.note})",
+              guards == {"machine": ["door_open"]} and moving and took is not None and took < 0.5
+              and "let go" in panel.note, (guards, moving, took, panel.note))
+
+        holding.set()
+        time.sleep(0.2)
+        guards, moving = into_zone()
+        panel.lock.acquire()
+        try:
+            grabbed = time.monotonic()
+            took = stopped_within(2.0, grabbed)
+        finally:
+            panel.lock.release()
+        check(f"and with the key held, a move whose interlocks can't be read (a request holds the SDK) stops "
+              f"{took if took is None else round(took, 3)} s later ({panel.note})",
+              moving and took is not None and 0.3 <= took < 1.0
+              and "couldn't be read for 0.5 s" in panel.note, (moving, took, panel.note))
+    finally:
+        quit_.set()
+        if panel is not None:
+            panel.closing = True
+            try:
+                panel.arm.socket_fp.close()
+            except Exception:
+                pass
+        ctl.close()
+        stop(sim)
+
+
+def scenario_page_grip():
+    print("== the page's gripper keys: never while the arm moves, and no run, jog or Move while one works; a payload "
+          "due when freedrive ends with STOP goes at the next Enable")
+    rig = Rig("pagegrip")
+    try:
+        rig.enable()
+        rev = setup(rig)
+        rig.ctl(cmd="gripper", output="tool.0", close=1, seconds=0.3, closed="tool.1", opened="tool.2", part="tool.3")
+        rig.ctl(cmd="part", present=True)
+        slow = {"name": "slow", "close": [{"output": "tool.6", "value": 1}], "open": [{"output": "tool.6", "value": 0}],
+                "seconds": 2.0}
+        for g in (PNEU, slow):
+            rev = rig.post("/api/cell/gripper", dict(g, revision=rev))["cell"]["revision"]
+        goto(rig, "A")
+
+        r = rig.post("/api/freedrive", {"on": True})
+        rig.wait(lambda s: s.get("freedrive"), 10)
+        g = rig.post("/api/gripper", {"name": "pneu", "action": "grasp", "part": PART})
+        in_freedrive = rig.payload()[0]
+        rig.post("/api/stop")
+        rig.wait(lambda s: not s.get("freedrive") and s.get("mode") == 0, 10)
+        after_stop = rig.payload()[0]
+        rig.enable()
+        mass, _ = rig.payload()
+        check(f"a grasp in freedrive leaves the payload to send ({g.get('message')}); with freedrive ended by STOP, the "
+              f"next Enable sends it: {after_stop:.2f} kg after STOP, {mass:.2f} kg after Enable",
+              r["ok"] and g["ok"] and "when freedrive ends" in g["message"] and abs(in_freedrive - TOOL_MASS) < 1e-6
+              and abs(mass - 0.7) < 1e-5, (r, g, in_freedrive, after_stop, mass))
+        rig.post("/api/gripper", {"name": "pneu", "action": "open"})
+
+        r = rig.post("/api/move", {"targets": [round(v, 3) for v in HOME], "speed": 5})
+        time.sleep(0.4)
+        before = rig.payload()
+        g = rig.post("/api/gripper", {"name": "pneu", "action": "grasp", "part": PART})
+        check(f"a gripper key is refused while a Move from the page is under way, the payload untouched "
+              f"({g.get('message')})", r["ok"] and r["moved"] and not g["ok"] and "moving" in g["message"]
+              and rig.payload() == before and rig.status()["held"] == {}, (r, g))
+        rig.post("/api/stop")
+        rig.enable()
+
+        save(rig, {"name": "brief", "steps": [{"type": "wait", "seconds": 0.1}]})
+        reply = {}
+        worker = threading.Thread(target=lambda: reply.update(rig.post("/api/gripper", {"name": "slow",
+                                                                                         "action": "close"})))
+        worker.start()
+        time.sleep(0.5)
+        run = rig.post("/api/run/start", {"name": "brief"})
+        jog = rig.post("/api/jog", {"kind": "joint", "index": 5, "dir": 1, "step": 1.0, "speed": 10.0})
+        worker.join()
+        check(f"while a gripper closes from the page (in 2 s), no run starts ({run.get('message')}) and no jog "
+              f"({jog.get('message')})", not run["ok"] and "gripper" in run["message"] and not jog["ok"]
+              and "gripper" in jog["message"] and reply.get("ok"), (run, jog, reply))
+        r, s = rig.run("brief")
+        check("and once it's closed, the run starts", r["ok"] and s["run"]["state"] == "done", (r, s["run"]))
+    finally:
+        rig.close()
+
+
+SCENARIOS = (unit_cell, unit_payload, unit_parts, scenario_grippers, scenario_payload_stops, scenario_payload_fault,
+             scenario_patterns, scenario_interlocks, scenario_inside, scenario_recovery, scenario_touchup,
+             scenario_compat, scenario_watch_lock, scenario_page_grip)
 
 
 def main(names):

@@ -848,6 +848,8 @@ class Arm:
                 self.status, self.phantom_queued, self.hand = 4, 0, None
                 self.queue.clear()
                 log("payload set: stopped (--payload-stops)")
+            if cmd == 0x45 and self.a.payload_error:  # --payload-error: a fault arriving as it's written
+                self.fault(self.a.payload_error, "payload set (--payload-error)", now, transient=True)
             return b"\x00\x00\x00\x00" if n == 1 else b""
         if cmd in (0x47, 0x48):
             self.config["collis_sens" if cmd == 0x47 else "teach_sens"] = data[0]
@@ -1138,6 +1140,9 @@ def make_parser():
     faults.add_argument("--payload-stops", action="store_true",
                         help="writing the payload stops the arm, as writing the teach sensitivity does (unverified on "
                              "the arm for the payload)")
+    faults.add_argument("--payload-error", type=int, default=0,
+                        help="writing the payload also raises this controller error, as a collision tripping during a "
+                             "grasp would")
     return p
 
 
