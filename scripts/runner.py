@@ -50,7 +50,8 @@ proposal refused. A faulted run calls the owner.
 Moves into a zone that interlocks guard, or from inside one, go only while the interlocks hold (read just before the
 move is planned), and the run watches them as the arm moves: if one stops holding, the arm stops and the run pauses,
 and Resume is refused while it still doesn't hold. With the arm in a guarded zone whose interlocks don't hold, nothing
-here moves it there; a jog or Move from the page may back it out (Panel.plan_guarded).
+moves it there, the page's jogs and Move included (Panel.plan_guarded): it's guided out by hand, in freedrive, or waits
+for them to hold.
 
 What the brain proposes, the safety shell (safety.py) checks whole before anything moves, and refuses with its reasons
 if any part fails; a refusal faults the run. The brain only proposes: it can't start, pause, resume or stop anything,

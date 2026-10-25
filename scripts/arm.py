@@ -668,12 +668,13 @@ def confirm(args):
         raise ArmError("Cancelled; no motion commands were sent.")
 
 
-def prepare_for_motion(arm, axis):
-    """Umbratek's documented sequence (reset errors, position mode, enable, ready), then verify it took."""
-    steps = [("reset errors", arm.reset_err),
-             ("select position-control mode", lambda: arm.set_motion_mode(0)),
-             ("enable all joints", lambda: arm.set_motion_enable(8, 1)),
-             ("set the arm to ready", lambda: arm.set_motion_status(0))]
+def prepare_for_motion(arm, axis, reset=True):
+    """Umbratek's documented sequence (reset errors, position mode, enable, ready), then verify it took. With `reset`
+    False (an Enable the server runs on its own), errors aren't reset: one present stops it here."""
+    steps = [("reset errors", arm.reset_err)] if reset else []
+    steps += [("select position-control mode", lambda: arm.set_motion_mode(0)),
+              ("enable all joints", lambda: arm.set_motion_enable(8, 1)),
+              ("set the arm to ready", lambda: arm.set_motion_status(0))]
     for label, step in steps:
         ret = step()
         if ret not in OK_CODES:
@@ -685,7 +686,8 @@ def prepare_for_motion(arm, axis):
         ret_s, state = arm.get_motion_status()
         if ret_e in OK_CODES and codes[0]:
             raise ArmError(f"The controller still reports error {error_text(codes[0])} after a reset; not moving. "
-                           "Check the E-stop and cables, then run `status`.")
+                           "Check the E-stop and cables, then run `status`." if reset else
+                           f"The controller reports error {error_text(codes[0])}; not moving.")
         if (ret_e in OK_CODES and ret_m in OK_CODES and ret_s in OK_CODES
                 and enabled & full_mask(axis) == full_mask(axis) and state in READY_STATES):
             return

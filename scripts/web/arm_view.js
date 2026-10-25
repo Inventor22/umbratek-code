@@ -354,7 +354,7 @@ export async function createArmView(host, options) {
   // the flange's path for drawing, and how far the flange travels for each degree the lead joint turns, at its
   // most (mm/deg): the move turns every joint in step, so that times the lead joint's speed is the flange's.
   function checkPath(from, to) {
-    const hit = checker.checkPath(from, to) || stayingIn(from, to);
+    const hit = inClosed(from) || checker.checkPath(from, to);
     const span = Math.max(...from.map((q, i) => Math.abs(to[i] - q)));
     const steps = Math.max(1, Math.ceil(span / PATH_STEP_DEG));
     const points = [];
@@ -369,17 +369,15 @@ export async function createArmView(host, options) {
     return {clear: !hit, hit, points, flangePerDeg};
   }
 
-  // As the server has it for a move from the page: in a guarded zone that's closed (its pairs are in the check; an
-  // open one's aren't), the arm may only back out, so a move that starts in one must end outside it. The check
-  // above already keeps it from going deeper.
-  function stayingIn(from, to) {
+  // As the server has it: with the arm in a guarded zone that's closed (its pairs are in the check; an open one's
+  // aren't), nothing moves it there, so every plan from there is blocked (the zone opens, or the arm is guided out
+  // by hand in freedrive).
+  function inClosed(from) {
     const closed = new Set(collision.obstacles.flatMap((o, i) => (o.guard ? [i] : [])));
     if (!closed.size) return null;
-    const inside = new Set([...checker.gapsTo(from, closed)].filter(([, g]) => g.gap < 0).map(([i]) => i));
-    if (!inside.size) return null;
-    for (const [i, g] of checker.gapsTo(to, inside)) {
+    for (const [i, g] of checker.gapsTo(from, closed)) {
       if (g.gap < 0) {
-        return {part: g.part, other: collision.obstacles[i].label, obstacle: i, gap: g.gap, at: 1, pose: to,
+        return {part: g.part, other: collision.obstacles[i].label, obstacle: i, gap: g.gap, at: 0, pose: from,
           points: g.points, staying: true};
       }
     }

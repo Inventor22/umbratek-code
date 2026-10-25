@@ -1164,8 +1164,10 @@ the zones and the tool, supervision and STOP), safe home's moves and whatever re
 HTTP API keeps its endpoints and fields; old cells and programs load unchanged.
 
 A review of the work found a move from inside a guarded zone unchecked, and gaps in the payload's handling, the page's
-watchdog and tool jogs. D120 to D124 and the revisions marked in D105, D106, D110, D111, D114 and D118 are its fixes,
-decided the same day.
+watchdog and tool jogs. D120 to D124 and the revisions marked in D105, D106, D110, D111, D114 and D118 are its fixes
+(D124 from a second look at them), decided the same day. A review of those fixes then revised D105, D106, D110 and
+D121 again: an Enable the server runs on its own could still undo a STOP, and the page could slide the arm through a
+closed zone while backing it out.
 
 ## D105. A gripper is bound to outputs, and optionally to inputs; without one to confirm, it takes a set time
 
@@ -1187,7 +1189,8 @@ decided the same day.
   and while one works (up to its timeout) no run starts, nor a jog, Move or freedrive; one works at a time. Before,
   only a run under way refused them, so a grasp during a jog wrote the payload mid-move, and a run could start while
   the gripper was still closing. Tested: a grasp during a Move is refused with the payload untouched, and a run and a
-  jog are refused while a gripper takes 2 s to close.
+  jog are refused while a gripper takes 2 s to close. And, since the fixes were reviewed, a STOP pressed during a grip
+  from the page (or from Foreman, through `/api/gripper`) is never undone by the Enable that may follow it (D106).
 
 ## D106. A grasp checks for a part where there's an input, and switches the payload to the tool and the part
 
@@ -1219,6 +1222,23 @@ decided the same day.
   can't move before then. Tested: the simulator's `--payload-error` raises a controller error as the payload is
   written, and the run faults with it unreset; the STOP, stop and pause cases in-process; a grasp in freedrive ended
   by STOP reaches the controller at the next Enable.
+- **Revised again, after the fixes were reviewed:** that Enable could still undo a STOP. The gate read the stop count
+  only as the payload was written, after a STOP in the grip's last moments had already counted, and judged the arm
+  ready on a status frame up to 0.1 s older than that STOP; Enable itself never looked again, so a STOP while it
+  switched the motors on was undone by its "ready"; and Enable reset any controller error that came after the one frame
+  the gate read. Now:
+  - the grip takes the stop count as it begins (`Panel.grip`), and every `stop()` counts as it begins and as it ends;
+  - the arm must be seen ready on a status frame that came after the grip began and at least 0.3 s after any STOP ended
+    (`STOP_SEEN_S`), with no STOP since the grip began and none under way (`apply_payload`);
+  - the Enable runs as the server's own (`enable(auto=...)`): it gives way to any STOP since the grip began, checked
+    again just before the motors are switched on, and after: a STOP that came while they were switched on is made
+    again, before a jog or move can start; and it refuses a controller error rather than resets it, leaving
+    `prepare_for_motion`'s own reset out (`reset=False`), so the grip fails with the error, which stays for a person.
+  This holds for grips from the page and Foreman as for a run's. Tested: in-process, with STOP emulated as the gripper
+  closes, as the payload is written, and 50 ms before the grip with no status frame since (the arm stays stopped
+  each time); against the simulator, with a real STOP pressed as that Enable checks the joints, and as it switches the
+  motors on, and a controller error appearing as it begins (the arm stays stopped, the error kept). Those checks fail
+  on the code before this revision.
 
 ## D107. A pattern is taught by three targets, and its slots fill the parallelogram between them
 
@@ -1290,9 +1310,9 @@ decided the same day.
   everything checked against zones is covered, dry runs and the page's check included. A move out of a zone needs no
   interlock: the check already lets the arm move away from what it's within the margin of.
 - **Revised after review:** "blocks it" missed a move from inside a guarded zone, which the check never saw going
-  further in (D120); and "a move out of a zone needs no interlock" now holds only for a jog or Move from the page.
-  A move that starts in a guarded zone needs its interlocks whatever it does there, and nothing the server runs moves
-  the arm in one whose interlocks don't hold (D121).
+  further in (D120); and "a move out of a zone needs no interlock" no longer holds for a guarded zone. A move that
+  starts in a guarded zone needs its interlocks whatever it does there, and nothing moves the arm in one whose
+  interlocks don't hold, the page's jogs and Move included (D121).
 
 ## D111. A move into a guarded zone is watched: if an interlock stops holding, the arm stops and the run pauses
 
@@ -1457,30 +1477,39 @@ decided the same day.
   walls. A tool hanging into a zone from above is deepest by its distance to the top face, so it can move further into
   the machine sideways without going deeper by this measure. D121 covers that for guarded zones.
 
-## D121. A move that starts in a guarded zone needs its interlocks; while they don't hold, only the page may back out
+## D121. A move that starts in a guarded zone needs its interlocks; while they don't hold, nothing moves the arm there
 
 - **Decision:** a guarded zone the arm is in at a move's start (any part of it overlapping the zone: `Panel.zones_in`)
   counts as entered by the move, whatever the move does there. Its interlocks are read; if they all hold, the zone is
   open for the move and the move is watched (D111), even one leaving it; a dry run assumes they'll hold. If they
-  don't:
-  - nothing the server runs moves the arm there: a program's steps, moves to targets and slots, safe home, and the
-    brain's paths and bursts (the brain isn't asked) are refused (`planner.ZoneClosed`, a failure as D112 has it);
-  - a run that an interlock paused, resumed while it still doesn't hold, plans the rest again, is refused, and stays
-    paused, saying so, with nothing sent;
-  - a jog or Move from the page may only back the arm out: it's checked with the zone closed, so it can't go further
-    in (D120), and it must end outside the zone. The page's own check (`arm_view.js`) previews a plan the same way.
-- **Alternatives:** letting any move back out that never goes further in, a program's too (the review's suggestion; but
-  as D120 says, a box can't tell the door from the walls, so a tool hanging in from above could slide through the
-  machine and out of its far side, or safe home's joint move drag it through, without going deeper); treating the
-  zone as entered only by a move that goes deeper (the blind spot itself); a zone's door face, taught, so that "out"
-  is known (more to teach, and unneeded while a person backs the arm out).
-- **Why:** the door shutting on the arm is the machine saying it's not safe in there. The arm then stays put for a
-  person, who can open the door, back the arm out from the page, or guide it out in freedrive. Tested against the
-  simulator, with a tool hanging 32 mm into the machine (its depth pinned by the zone's top face) for each case the
-  review listed: Resume with the door still shut (refused, nothing sent), a later step further in (fails, nothing
-  sent), a Move and a tool jog further in (refused) and a Move backing out (goes), a learned skill working in the
-  machine (stopped 0.09 s after the door shut, no more bursts), and safe home's joint move from inside (stopped
-  0.12 s after the door shut; refused with it shut). Each of these checks fails on the code before this decision.
+  don't, nothing moves the arm there, whatever asks: a program's steps, moves to targets and slots, safe home, the
+  brain's paths and bursts (the brain isn't asked), and the page's jogs and Move are refused (`planner.ZoneClosed`, a
+  failure as D112 has it), saying so. A run that an interlock paused, resumed while it still doesn't hold, plans the
+  rest again, is refused, and stays paused, saying so, with nothing sent. The arm stays put until the interlocks hold
+  again (the door opened), or a person guides it out by hand, in freedrive, which the server doesn't steer. The page's
+  own check (`arm_view.js`) previews any plan from inside a closed zone as blocked.
+- **Revised again, after the fixes were reviewed:** at first a jog or Move from the page could back the arm out,
+  checked with the zone closed, so never further in (D120), and ending outside it. But "further in" is the depth to
+  the nearest face, so a move at a constant depth passed: a tool hanging into the zone from above could slide sideways
+  through it and out of a side, or a curved Move leave the zone and come back in as deep as it began (a part's
+  allowance only follows it out once it's 10 mm clear, D124). The review suggested requiring a steady retreat instead,
+  back along the tool's axis, or with no point inside moving towards the box's middle on any axis. Neither tells which
+  way is out: in the tests' machine the tool went in sideways, through its -y face, pointing down, so retreating along
+  the tool would take it up through the zone's top and refuse the way it came; and from the middle of a box, every
+  direction is away from the middle, out through the far face included. And with the door's interlock not holding,
+  the door may be shut on the arm, where backing out the way it came drags it through the door. So the page is
+  refused too.
+- **Alternatives:** letting any move back out that never goes further in (the first version, above); a retreat rule
+  (above); a zone's door face, taught, so that "out" is known (more to teach, and a door that's shut is still in the
+  way); retracing the path the arm went in by (the server knows it only for a run's last move).
+- **Why:** the door shutting on the arm is the machine saying it's not safe in there, and only a person can see which
+  way is out. Tested against the simulator, with a tool hanging 32 mm into the machine (its depth pinned by the zone's
+  top face) for each case the reviews listed: Resume with the door still shut (refused, nothing sent), a later step
+  further in (fails, nothing sent), a Move and a tool jog further in, a Move straight back out the way it came, and a
+  tool jog sliding the tool out of the machine's side at its depth (all refused, nothing sent), a learned skill working
+  in the machine (stopped 0.09 s after the door shut, no more bursts), and safe home's joint move from inside (stopped
+  0.12 s after the door shut; refused with it shut); then freedrive, the arm guided out by hand, and the page jogging
+  it again with the door still shut. The checks of the review's cases fail on the code before each revision.
 
 ## D122. Watching a move's interlocks never holds up the other reasons to stop
 
@@ -1522,7 +1551,8 @@ decided the same day.
   without the margin coming back (a line could leave a tight spot and come back down to its start's gap, which its
   samples used to catch).
 - **Why:** found by a second review of the fixes for D120 and D121, as the rule that a move from the page backing out of
-  a closed zone must end outside it leaves the arm within the margin of the zone, where this creep began. Tested
-  in-process: the 50 mm line and a brain's path closing in 0.9 mm a segment from 6 mm off the machine zone are both
-  refused once 1 mm closer (both were let through before), a path backing out to 18 mm and coming back to 9 mm is held
-  to the margin, and `collide.js`, which has the same rule for a whole move, still agrees with `utra_model.py`.
+  a closed zone must end outside it (since withdrawn: D121) left the arm within the margin of the zone, where this
+  creep began; but it holds for any move begun close to anything. Tested in-process: the 50 mm line and a brain's path
+  closing in 0.9 mm a segment from 6 mm off the machine zone are both refused once 1 mm closer (both were let through
+  before), a path backing out to 18 mm and coming back to 9 mm is held to the margin, and `collide.js`, which has the
+  same rule for a whole move, still agrees with `utra_model.py`.

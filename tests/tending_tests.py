@@ -47,10 +47,10 @@ SEED = [-10, 10, 100, 0, 70, 0]
 DOWN = [180, 0, 0]
 HOME = [0, 0, 90, 0, 90, 0]
 # Tool points in the table's frame, pointing down: a working point A and one beside it, B; a tray of 3 rows x 4 columns
-# (columns 40 mm apart, rows 35 mm apart) taught at three corners; a machine's opening, a point 30 mm past it and the
-# point inside it.
+# (columns 40 mm apart, rows 35 mm apart) taught at three corners; a machine's opening, a point 30 mm past it, the
+# point inside it, and one 20 mm from its +x side.
 POINTS = {"A": [0, 0, 120], "B": [100, 0, 120], "T1": [0, 0, 90], "T4": [120, 0, 90], "T9": [0, 70, 90],
-          "Mout": [0, 120, 120], "Min": [0, 180, 120], "M": [0, 200, 120]}
+          "Mout": [0, 120, 120], "Min": [0, 180, 120], "M": [0, 200, 120], "Mside": [30, 180, 120]}
 MACHINE = ({"xyz": [0, 200, 100], "rpy": [0, 0, 0]}, [100, 100, 100])  # the machine's work area, a guarded zone
 PNEU = {"name": "pneu", "close": [{"output": "tool.0", "value": 1}], "open": [{"output": "tool.0", "value": 0}],
         "seconds": 0.3, "timeout": 1.0, "closed": {"input": "tool.1"}, "opened": {"input": "tool.2"},
@@ -610,67 +610,176 @@ def scenario_payload_stops():
 
 
 def unit_payload():
-    print("== after writing the payload stops the arm: Enable makes it ready again only if nothing else stopped it")
+    print("== after writing the payload stops the arm: Enable makes it ready again only if no STOP came since the grip "
+          "began, and nothing else stopped it")
     import types
 
     import jog_server
     from executor import MoveFailed
 
-    class Panel:
-        """What Panel.apply_payload uses: a ready arm whose payload write stops it, with the frame after the write
-        showing `err`; STOP pressed as it's written (`stop_meanwhile`); the run's pending request."""
+    class Panel(jog_server.Panel):
+        """Panel.grip and Panel.apply_payload as they are, on a ready arm whose status frames keep coming and whose
+        payload write stops it, the frame after the write showing `err`; STOP pressed as the gripper closes
+        (`stop_in_grip`), as the payload is written (`stop_meanwhile`), or 50 ms before the grip, with no status frame
+        since (`stop_before`); and the run's pending request. A STOP here is what Panel.stop counts, without the
+        controller; the Enable that follows is only counted."""
 
-        def __init__(self, err=0, stop_meanwhile=False, request=None, busy=True):
+        def __init__(self, err=0, stop_in_grip=False, stop_meanwhile=False, stop_before=False, request=None,
+                     busy=True):
             self.mask = 0b111111
             self.frame = {"mode": 0, "status": 0, "err": 0, "enable": self.mask}
-            self.payload_sent, self.payload_due = (0.2, [0.0, 0.0, 50.0]), False
-            self.stop_count, self.enabled = 0, 0
+            self.streaming, self.closing = True, False
+            self.payload_sent, self.payload_due = (TOOL_MASS, TOOL_COG), False
+            self.stop_count, self.stops_ended, self.stop_at = 0, 0, -math.inf
+            self.stop_lock = threading.Lock()
+            self.held, self.enabled = {}, 0
+            gripper = {"close": [{"output": "tool.0", "value": 1}], "open": [{"output": "tool.0", "value": 0}],
+                       "seconds": 0.0, "timeout": 1.0}
+            self.cell = types.SimpleNamespace(gripper=lambda name: gripper)
             self.runner = types.SimpleNamespace(request=request, busy=busy)
-            self.err, self.stop_meanwhile = err, stop_meanwhile
+            self.err, self.stop_in_grip, self.stop_meanwhile = err, stop_in_grip, stop_meanwhile
+            if stop_before:
+                self.streaming, self.last_frame_at = False, time.monotonic() - 0.08
+                self.press_stop(time.monotonic() - 0.05)
+
+        @property
+        def latest(self):  # (sequence number, frame, when it came): a frame just now, or none since last_frame_at
+            return 1, self.frame, time.monotonic() if self.streaming else self.last_frame_at
+
+        def press_stop(self, at=None):
+            self.stop_count += 1
+            self.stops_ended += 1
+            self.stop_at = time.monotonic() if at is None else at
+
+        def write_output(self, name, value):
+            if self.stop_in_grip:
+                self.press_stop()
 
         def payload(self):
-            return 0.7, [0.0, 0.0, 100.0]
+            return (0.7, [0.0, 0.0, 100.0]) if self.held else (TOOL_MASS, TOOL_COG)
 
         def send_payload(self):
             self.payload_sent = self.payload()
             if self.stop_meanwhile:
-                self.stop_count += 1
+                self.press_stop()
 
         def _await_frame(self, since, test, timeout_s):
             return {"mode": 0, "status": 4, "err": self.err, "enable": self.mask}
 
-        def enable(self):
+        def enable(self, auto=None):
             self.enabled += 1
 
-    def apply(panel):
+    def grasp(panel):
         try:
-            return jog_server.Panel.apply_payload(panel), None
+            return panel.grip("pneu", "grasp", PART, sleep=lambda s: None), None
         except MoveFailed as e:
             return None, e.reason
 
     plain = Panel()
-    note, _ = apply(plain)
+    note, _ = grasp(plain)
     check("a write that stops a ready arm, and nothing else: Enable's checks make it ready again",
           plain.enabled == 1 and "ready again" in note, note)
     fault = Panel(err=31)
-    note, error = apply(fault)
+    note, error = grasp(fault)
     check(f"with a controller error after the write, Enable doesn't run (it would reset the error): the step faults "
           f"({error})", fault.enabled == 0 and error and "as the payload was written" in error, (note, error))
-    stopped = Panel(stop_meanwhile=True)
-    note, error = apply(stopped)
-    check("after a STOP as it was written, the arm stays stopped", stopped.enabled == 0 and error is None
-          and "stays stopped" in note, (note, error))
+    for what, panel in (("as the gripper closes", Panel(stop_in_grip=True)),
+                        ("as the payload is written", Panel(stop_meanwhile=True)),
+                        ("50 ms before the grip began, with no status frame since", Panel(stop_before=True))):
+        note, error = grasp(panel)
+        check(f"after a STOP {what}, the arm stays stopped ({note})", panel.enabled == 0 and error is None,
+              (note, error))
     pending = Panel(request="stop")
-    note, error = apply(pending)
+    note, error = grasp(pending)
     check("and with the run's stop pending, it stays stopped", pending.enabled == 0 and error is None, note)
     pausing = Panel(request="pause")
-    note, error = apply(pausing)
+    note, error = grasp(pausing)
     check("but with a pause pending it's made ready again, as the run then pauses between steps, where the arm is "
           "left ready (a Resume would find it stopped otherwise)", pausing.enabled == 1 and "ready again" in note, note)
     stale = Panel(request="stop", busy=False)
-    note, error = apply(stale)
+    note, error = grasp(stale)
     check("and a stop left over from a run that's over doesn't count: Enable makes the arm ready again",
           stale.enabled == 1 and "ready again" in note, note)
+
+
+def scenario_auto_enable():
+    print("== the Enable the server runs on its own, after writing the payload stopped the arm (the simulator's "
+          "--payload-stops), in-process: it gives way to a STOP while it runs, and doesn't reset an error")
+    import jog_server
+    from executor import MoveFailed
+    sim, _ = start_sim(["--payload-stops"], "tending_autoenable.log")
+    folder = log_path("tendcell_autoenable")
+    shutil.rmtree(folder, ignore_errors=True)
+    ctl, buf = socket.create_connection((HOST, 30099), timeout=5), [b""]
+
+    def control(**request):
+        ctl.sendall(json.dumps(request).encode() + b"\n")
+        while b"\n" not in buf[0]:
+            buf[0] += ctl.recv(65536)
+        line, buf[0] = buf[0].split(b"\n", 1)
+        return json.loads(line)
+
+    panel, actions = None, iter(["grasp", "open"] * 4)
+    try:
+        panel = jog_server.Panel(HOST, MODEL, folder, None, False, False)
+        deadline = time.monotonic() + 10
+        while panel.frame is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        panel.cell.set_tool("pointer", TOOL_POSE, TOOL_MASS, TOOL_COG, [CAPSULE])
+        panel.cell.activate_tool("pointer")
+        panel.cell.set_gripper("g", [{"output": "tool.0", "value": 1}], [{"output": "tool.0", "value": 0}], 0.1)
+
+        def grip_with(hook_name=None, hook=None):
+            """From a ready arm, a grasp or a release (they alternate, so each writes a new payload, which stops the
+            arm), with `hook` run once as Enable's sequence reaches arm.<hook_name>. Returns (the message, or the
+            failure; the controller's state half a second later)."""
+            if control(cmd="state")["status"] not in (0, 2):
+                time.sleep(0.4)
+                panel.enable()  # by hand: any error reset
+            original = getattr(jog_server.arm, hook_name) if hook_name else None
+            if hook_name:
+                fired = []
+
+                def wrapper(*args, **kwargs):
+                    if not fired:
+                        fired.append(True)
+                        hook()
+                    return original(*args, **kwargs)
+                setattr(jog_server.arm, hook_name, wrapper)
+            try:
+                result = panel.grip("g", next(actions), PART)
+            except (MoveFailed, jog_server.arm.ArmError) as e:
+                result = f"failed: {getattr(e, 'reason', e)}"
+            finally:
+                if hook_name:
+                    setattr(jog_server.arm, hook_name, original)
+            time.sleep(0.5)
+            return result, control(cmd="state")
+
+        panel.enable()
+        panel.send_payload()  # the tool's own: writing it stops the arm, which grip_with makes ready again
+        result, st = grip_with()
+        check(f"a grasp whose payload write stops the arm: Enable makes it ready again ({result.strip()})",
+              "ready again" in result and st["status"] in (0, 2) and not st["err"], (result, st["status"], st["err"]))
+        result, st = grip_with("preflight", lambda: panel.stop("STOP was pressed"))
+        check(f"STOP pressed while that Enable checks the joints: the arm stays stopped ({result.strip()})",
+              st["status"] == 4 and "stays stopped" in result, (result, st["status"]))
+        result, st = grip_with("prepare_for_motion", lambda: panel.stop("STOP was pressed"))
+        check(f"STOP pressed as it switches the motors on, which would undo it: it's made again, and the arm stays "
+              f"stopped ({result.strip()})", st["status"] == 4 and "stays stopped" in result, (result, st["status"]))
+        result, st = grip_with("ensure_idle", lambda: control(cmd="fault", err=31))
+        check(f"a controller error appearing after the frame that showed the arm stopped: it isn't reset, and the grip "
+              f"fails with it ({result})", st["err"] == 31 and st["status"] == 4 and result.startswith("failed:")
+              and "error 31" in result, (result, st["status"], st["err"]))
+    finally:
+        if panel is not None:
+            panel.closing = True
+            try:
+                panel.arm.socket_fp.close()
+            except Exception:
+                pass
+        ctl.close()
+        stop(sim)
 
 
 def scenario_payload_fault():
@@ -876,13 +985,13 @@ def moves_sent(rig):
 
 def scenario_inside():
     print("== in a machine's zone already: a move from inside it depends on its interlock as a move into it does; while "
-          "the interlock doesn't hold nothing the server runs moves the arm there, and the page may only back it out")
+          "the interlock doesn't hold, nothing moves the arm there, the page included: it's guided out in freedrive")
     rig = Rig("inside", brain=True)
     door = {"open": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=1),
             "shut": lambda: rig.ctl(cmd="input", line="controller", bit=2, value=0)}
     try:
         rig.enable()
-        setup(rig, points=("Mout", "Min", "M"), joints={"home": HOME})
+        setup(rig, points=("Mout", "Min", "M", "Mside"), joints={"home": HOME})
         rev = rig.post("/api/cell/interlock", {"name": "door_open", "input": "controller.2", "value": 1,
                                                "revision": rig.rev()})["cell"]["revision"]
         rig.post("/api/cell/zone", {"name": "machine", "frame": "table", "pose": MACHINE[0], "size": MACHINE[1],
@@ -933,21 +1042,51 @@ def scenario_inside():
               (s["run"], moves_sent(rig) - sent))
         rig.recover()
 
-        # From the page: a Move or a jog further in is refused; a Move backing out goes.
+        # From the page too, with the door shut, nothing moves the arm in the machine, even out of it: a box can't say
+        # which way is out (the tool went in sideways here, through the -y face, pointing down), and the door may be
+        # shut on the arm. Sliding out of the side at the depth it's at, as a jog could, is refused like the rest.
         door["open"]()
         goto(rig, "Mout")
+        goto(rig, "Mside", kind="line")
+        door["shut"]()
+        sent = moves_sent(rig)
+        r = rig.post("/api/jog", {"kind": "tool", "index": 0, "dir": 1, "step": 50.0, "rotStep": 1.0, "speed": 50.0})
+        check(f"with the door shut, a tool jog sliding the tool sideways out of the machine's +x side (from 20 mm inside "
+              f"it to 16 mm clear) is refused ({r.get('message')})",
+              not r["ok"] and "Nothing moves the arm in it until door_open holds" in r["message"]
+              and moves_sent(rig) == sent, r)
+        rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 10)  # (had it gone)
+        door["open"]()
         goto(rig, "Min", kind="line")
         door["shut"]()
         sent = moves_sent(rig)
         r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["M"])], "speed": 30})
         check(f"the page's Move further into the machine is refused while its door is shut ({r.get('message')})",
-              not r["ok"] and "may only back out of it" in r["message"] and moves_sent(rig) == sent, r)
+              not r["ok"] and "Nothing moves the arm in it" in r["message"] and moves_sent(rig) == sent, r)
         r = rig.post("/api/jog", {"kind": "tool", "index": 1, "dir": 1, "step": 10.0, "rotStep": 1.0, "speed": 50.0})
         check(f"and so is a tool jog further in ({r.get('message')})",
-              not r["ok"] and "may only back out of it" in r["message"] and moves_sent(rig) == sent, r)
+              not r["ok"] and "Nothing moves the arm in it" in r["message"] and moves_sent(rig) == sent, r)
+        r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["Mout"])], "speed": 30})
+        check(f"and so is a Move straight back out the way it came in ({r.get('message')})",
+              not r["ok"] and "Nothing moves the arm in it" in r["message"] and moves_sent(rig) == sent, r)
+        r = rig.post("/api/freedrive", {"on": True})
+        rig.wait(lambda s: s.get("freedrive"), 10)
+        hand = rig.ctl(cmd="hand", joints=[round(v, 3) for v in joints_for(POINTS["Mout"])], seconds=1.0)
+        time.sleep(1.5)
+        off = rig.post("/api/freedrive", {"on": False})
+        s = rig.wait(lambda s: not s.get("freedrive") and s.get("enabled") and s.get("state") in (0, 2), 15)
+        out = table_mm(rig.sim_joints())
+        jog = rig.post("/api/jog", {"kind": "tool", "index": 2, "dir": 1, "step": 5.0, "rotStep": 1.0, "speed": 20.0})
+        rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 10)
+        check(f"guided out by hand in freedrive (to {math.dist(out, POINTS['Mout']):.1f} mm from Mout, the joints "
+              f"settling onto their brakes as it ends), the arm is out: the page jogs it again, the door still shut "
+              f"({jog.get('message')})", r["ok"] and hand["ok"] and off["ok"] and s.get("enabled")
+              and math.dist(out, POINTS["Mout"]) < 10.0 and jog.get("ok") and jog.get("moved"), (r, hand, off, out, jog))
+        door["open"]()
+        goto(rig, "Min", kind="line")
         r = rig.post("/api/move", {"targets": [round(v, 3) for v in joints_for(POINTS["Mout"])], "speed": 30})
         rig.wait(lambda s: s.get("state") in (0, 2) and not s.get("goal"), 20)
-        check("a Move backing out of it goes", r["ok"] and r["moved"]
+        check("with the door open, the Move back out goes", r["ok"] and r["moved"]
               and math.dist(table_mm(rig.sim_joints()), POINTS["Mout"]) < 1.0, r)
 
         # A learned skill working inside, when the door shuts.
@@ -1388,8 +1527,8 @@ def scenario_page_grip():
 
 
 SCENARIOS = (unit_cell, unit_payload, unit_parts, scenario_grippers, scenario_payload_stops, scenario_payload_fault,
-             scenario_patterns, scenario_interlocks, scenario_inside, scenario_recovery, scenario_touchup,
-             scenario_compat, scenario_watch_lock, scenario_page_grip)
+             scenario_auto_enable, scenario_patterns, scenario_interlocks, scenario_inside, scenario_recovery,
+             scenario_touchup, scenario_compat, scenario_watch_lock, scenario_page_grip)
 
 
 def main(names):
