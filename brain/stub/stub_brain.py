@@ -86,11 +86,16 @@ class StubBrain:
 
     # ---- planned moves ---------------------------------------------------------------------------------------------
     def cell_model(self, world, zones=True):
-        """The arm on its cart, with the tool's shape and (unless it's ignoring them) the zones the spine sent."""
+        """The arm on its cart, with the tool's shape and (unless it's ignoring them) the zones the spine sent, a guarded
+        one marked so: the shell lets no part into it from outside, even by the allowance for parts already close."""
         capsules = [(6, [v / 1000.0 for v in c["a"]], [v / 1000.0 for v in c["b"]], c["r"] / 1000.0, "the tool")
                     for c in world["tool"]["capsules"]]
-        obstacles = [utra_model.Obstacle(f"the {z['name']} zone", "box", [v / 1000.0 for v in z["centre"]], z["axes"],
-                                         [v / 1000.0 for v in z["size"]]) for z in world["zones"]] if zones else []
+        obstacles = []
+        for z in world["zones"] if zones else []:
+            o = utra_model.Obstacle(f"the {z['name']} zone", "box", [v / 1000.0 for v in z["centre"]], z["axes"],
+                                    [v / 1000.0 for v in z["size"]])
+            o.guarded = bool(z.get("guarded"))
+            obstacles.append(o)
         return self.model.with_cell(capsules, obstacles)
 
     def plan(self, request):
@@ -102,18 +107,14 @@ class StubBrain:
         tool = kin.pose_to_matrix(world["tool"]["tcp"])
         start, goal = request["state"]["joints"], request["goal"]["joints"]
         limits = request.get("limits", {}).get("joints") or plannermod.DRAG_LIMITS_DEG
-        checked = {}
-
-        def clear(a, b):
-            key = (tuple(a), tuple(b))
-            if key not in checked:
-                checked[key] = model.check_path(a, b) is None
-            return checked[key]
 
         def free(path):
+            """Whether a path is clear, judged as the spine's shell judges it: parts already close where it starts may
+            come no closer over the whole path (start_limits), not each segment."""
             if time.monotonic() > deadline:
                 raise NoPath("ran out of time looking for a clear path")
-            return all(clear(a, b) for a, b in zip(path, path[1:]))
+            allowed = model.start_limits(path[0])
+            return all(model.check_path(a, b, limits=allowed) is None for a, b in zip(path, path[1:]))
 
         if free([start, goal]):
             return [start, goal], "straight there: the way is clear"

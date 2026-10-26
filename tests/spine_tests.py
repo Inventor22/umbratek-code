@@ -414,9 +414,15 @@ def unit_protocol():
                              ("a state without joints", dict(req, state=dict(req["state"], joints=None)), "joints"),
                              ("a zone with two axes", dict(req, world=dict(world(), zones=[dict(world()["zones"][0],
                                                                                               axes=[[1, 0, 0]] * 2)])),
-                              "not a zone")]:
+                              "not a zone"),
+                             ("a zone's guarded mark not true or false",
+                              dict(req, world=dict(world(), zones=[dict(world()["zones"][0], guarded="yes")])),
+                              'guarded is "yes", not true or false')]:
         e = refusal(lambda: bp.check_request(bad))
         check(f"a brain's check refuses a request with {name}", e is not None and words in str(e), e)
+    marked = dict(world(), zones=[dict(world()["zones"][0], guarded=True)])
+    check("a guarded zone's mark passes the check, kept", bp.world(marked)["zones"][0].get("guarded") is True
+          and "guarded" not in bp.world(world())["zones"][0], bp.world(marked)["zones"])
 
 
 def unit_link():

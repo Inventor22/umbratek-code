@@ -7,11 +7,11 @@
 Every click moves the arm by exactly one step from the last commanded goal, so quick clicks add up
 instead of being lost. Holding a key repeats steps, but the goal may run at most MAX_LEAD_STEPS steps
 ahead of the measured position, so a lost mouse-up can't run the arm away. Dragging joints in the 3D view
-(or their faders) builds a plan; Move sends all the planned joints together as one joint move. Joint
-moves, planned or stepped, are refused if on the way the arm would come within utra_model.MARGIN_M of
-itself, the cart it stands on or the floor (tool steps aren't checked: the controller works out their
-joint angles). The server listens on this PC only, stops the arm if the page goes quiet mid-move, and
-refuses to move when the arm's state is unknown. The physical E-stop is still the real safety.
+(or their faders) builds a plan; Move sends all the planned joints together as one joint move. Moves, planned or
+stepped, are refused if on the way the arm would come within utra_model.MARGIN_M of itself, the cart it stands on, the
+floor, the tool or the cell's keep-out zones, or go further into one it's already in (a tool step that can't be checked,
+from a joint beyond the planning limits, isn't sent). The server listens on this PC only, stops the arm if the page
+goes quiet mid-move, and refuses to move when the arm's state is unknown. The physical E-stop is still the real safety.
 
 The manual-motion policy (--reduced-speed, --hold-to-move, POST /api/manual): with reduced speed on, every move is sent
 slowly enough that neither the tool point in use nor the flange can pass 250 mm/s; with hold-to-move on, nothing moves
@@ -147,6 +147,24 @@ TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]+")  # URL-safe base64, unpadded, as sec
 # plannermod.REDUCED_SPEED_MM_S; hold-to-move, an enabling device, lets nothing move without a current hold, which a
 # client renews about every 100 ms while its key is down (POST /api/hold).
 HOLD_DEFAULT_MS, HOLD_MIN_MS, HOLD_MAX_MS = 400, 100, 1000
+# Grippers: how often a gripper's confirming inputs are read while it opens or closes, and how long a grasp's "closed
+# on a part" input may take to read true once it has closed.
+GRIP_POLL_S = 0.05
+PART_SETTLE_S = 0.3
+CALLS_KEPT = 50  # calls to the owner kept for the panel
+# Watching a move into a guarded zone: the interlocks are read without waiting longer than this for the SDK (a request
+# may hold it for seconds while the status stalls), and the arm stops if they can't be read for this long.
+WATCH_LOCK_WAIT_S = 0.05
+GUARD_CONFIRM_S = 0.5
+# An Enable the server runs on its own, after writing the payload stopped the arm, needs the arm seen ready on a status
+# frame that came after the grip began and this long after any STOP ended (so it shows the STOP's effect); it waits up to
+# FRAME_WAIT_S past that for one.
+STOP_SEEN_S = 0.3
+FRAME_WAIT_S = 0.3
+
+
+class StoppedMeanwhile(arm.ArmError):
+    """An Enable the server ran on its own gave way to a STOP that came since its cause began (Panel.enable)."""
 
 
 def wrap(angle):
@@ -178,7 +196,7 @@ def pick_index(value, size, name):
 
 def blocked(hit):
     """Why a joint move was refused, from utra_model.ArmModel.check_path's hit."""
-    return f"Not moving: {hit['part']} would come within {utra_model.MARGIN_M * 1000:.0f} mm of {hit['other']}."
+    return f"Not moving: {plannermod.blocked(hit, utra_model.MARGIN_M * 1000)}."
 
 
 def panel_token(environ=os.environ):
@@ -242,14 +260,28 @@ class Panel:
         self.brain = brain  # brain_link.BrainLink, or None with --brain off
         # The machine-tending featureset: the cell (tools, frames, targets, zones), programs and their runner.
         self.cell = cellmod.Cell(cell_dir)
+        self.counters = cellmod.Counters(cell_dir)
         self.programs = runnermod.Programs(cell_dir)
         self.executor = Executor(self)
         self.runner = runnermod.Runner(self, self.programs, os.path.join(cell_dir, "logs"))
-        self._cell_model = (None, None)
+        self._cell_models = {}
         self.pending_points = {}  # frame name -> {"parent", "tool", "origin", "x", "xy"} touched so far
         self.pending_poses = {}  # tool name -> flange poses (4x4) touching one point
         self.freedrive_since = None
         self.teach_level = None  # the teach sensitivity this server last set for freedrive
+        # Grippers: what each holds ({gripper: {"mass", "cog"}}), and the payload last sent to the controller, or due to
+        # be sent once freedrive ends.
+        self.held = {}
+        self.payload_sent, self.payload_due = None, False
+        self.grip_lock = threading.Lock()  # held while a gripper opens or closes from the page: no move or run starts
+        # Every stop() call, begun and ended, and when the last began or ended (monotonic): an Enable the server runs on
+        # its own gives way to any STOP since its cause began (apply_payload, enable).
+        self.stop_count, self.stops_ended, self.stop_at = 0, 0, -math.inf
+        self.stop_lock = threading.Lock()
+        self.page_guards = {}  # guarded zones a jog or planned move from the page enters: {zone: [interlocks]}
+        self.page_watch = {"at": 0.0}  # when the page's guarded zones' interlocks were last read, holding
+        # Calls to the owner: a program's notify steps and its faults, shown until they're seen.
+        self.calls, self.call_seq, self.calls_lock = [], 0, threading.Lock()
         # The manual-motion policy, and the hold: until when (monotonic) it's held, and whether it was let go.
         self.reduced_speed, self.hold_to_move = bool(reduced_speed), bool(hold_to_move)
         self.hold_until, self.hold_released = 0.0, False
@@ -386,27 +418,54 @@ class Panel:
         out["mode"] = frame["mode"]
         out["cellRevision"] = self.cell.revision
         out["tool"] = self.cell.data["active"]["tool"]
+        out["held"] = {name: dict(part) for name, part in self.held.items()}
+        out["counters"] = self.counters.snapshot()
+        with self.calls_lock:
+            out["calls"] = [dict(c) for c in self.calls if not c["seen"]][-10:]
         return out
 
     # ---- commands --------------------------------------------------------------
 
-    def enable(self):
+    def enable(self, auto=None):
+        """Enable's checked sequence: errors reset, the joints checked (no jump), the motors on, ready in position mode.
+        `auto`, for an Enable the server runs on its own (after writing the payload stopped the arm: apply_payload), is
+        the stop count when its cause began. Then it gives way to any STOP since (StoppedMeanwhile), even one while it
+        switches the motors on, which it then makes again; and a controller error it refuses (MoveFailed) rather than
+        resets, as one may be what stopped the arm."""
+        def stopped():
+            return auto is not None and (self.stop_count != auto or self.stops_ended != auto)
+
         with self.lock:
             frame = self._fresh_frame()
             if self.stop_alarm:
                 raise arm.ArmError("A stop wasn't confirmed. Press the hardware E-stop, release it, then hold Enable.")
+            if stopped():
+                raise StoppedMeanwhile("STOP was pressed meanwhile; the arm stays stopped.")
             if frame["status"] in (1, 3) or frame["queued"]:
                 raise arm.ArmError("The arm is still moving or has moves queued. Wait for it, or press STOP first.")
             arm.ensure_idle(self.arm, self.ip)
             ret, codes = self.arm.get_error_code()
-            if ret in arm.OK_CODES and codes[0]:
+            error = codes[0] if ret in arm.OK_CODES else 0
+            if auto is not None:
+                error = error or frame["err"]
+                if error:
+                    raise MoveFailed(f"the controller reports error {arm.error_text(error)}, which isn't reset on its "
+                                     "own")
+            if error:
                 if self.arm.reset_err() not in arm.OK_CODES:
                     raise arm.ArmError("The controller refused the error reset.")
                 time.sleep(1.5)  # let the controller re-check its E-stop and joints
+            if self.payload_due:  # a grasp or release in freedrive that ended without sending it (STOP, say)
+                mass, cog = self.payload()
+                if self.arm.set_tcp_load(float(mass), [float(v) for v in cog]) not in arm.OK_CODES:
+                    raise arm.ArmError("The controller refused the payload the grippers hold, so the motors stay off.")
+                self.payload_sent, self.payload_due = (mass, cog), False
             start = arm.preflight(self.arm, self.ip, self.axis, measured=self._live_joints)
+            if stopped():
+                raise StoppedMeanwhile("STOP was pressed meanwhile; the arm stays stopped.")
 
             def switch_on():
-                arm.prepare_for_motion(self.arm, self.axis)
+                arm.prepare_for_motion(self.arm, self.axis, reset=auto is None)
                 arm.verified_targets(self.arm, self.ip, self.axis, start, measured=self._live_joints)
                 if self.frame["mode"] != 0:  # the frame _live_joints waited for, from after the switch-on
                     raise arm.ArmError(f"After Enable the controller reports motion mode {self.frame['mode']}, not "
@@ -415,13 +474,25 @@ class Panel:
             arm.guarded(self.ip, self.arm, switch_on, STOP_LOCK_WAIT_S)
             self.goal_kind = self.goal = None
             self.sent_at = 0.0
+            if stopped():  # a STOP while the motors were switched on, which switching them on may have undone: it
+                # stands, made again before the lock lets a move in (stop() takes self.lock only in freedrive)
+                self.stop("STOP was pressed while Enable made the arm ready")
+                raise StoppedMeanwhile("STOP was pressed while Enable made the arm ready; it stays stopped.")
         return self._say("Motors on. Click a key to move one step; hold it to repeat.")
 
     def stop(self, cause=None):
         """Stop the arm. For automatic stops, `cause` finishes "Stopped because ..."."""
+        with self.stop_lock:
+            self.stop_count += 1
+            self.stop_at = time.monotonic()
         # Over the panel's own connection (the controller serves only one), without waiting for self.lock: the
         # SDK's own lock keeps the stop from interleaving with a request another thread has in flight.
-        confirmed = arm.stop_arm(self.ip, self.arm, STOP_LOCK_WAIT_S)
+        try:
+            confirmed = arm.stop_arm(self.ip, self.arm, STOP_LOCK_WAIT_S)
+        finally:
+            with self.stop_lock:
+                self.stops_ended += 1
+                self.stop_at = time.monotonic()
         self.goal_kind = self.goal = None
         self.sent_at = 0.0
         self.stop_alarm = not confirmed
@@ -517,27 +588,107 @@ class Panel:
 
     # ---- the cell, planning and the runner's needs -------------------------------------------------------------
 
-    def cell_model(self):
-        """The arm model with the active tool's shape and the cell's keep-out zones, rebuilt when the cell changes."""
+    def cell_model(self, passable=()):
+        """The arm model with the active tool's shape and the cell's zones (but the guarded zones in `passable`, open
+        while their interlocks hold), rebuilt when the cell changes."""
         key = (self.cell.revision, self.cell.data["active"]["tool"])
-        if self._cell_model[0] != key:
-            self._cell_model = (key, self.cell.collision_model(self.model))
-        return self._cell_model[1]
+        models = self._cell_models
+        if models.get("key") != key:
+            models = self._cell_models = {"key": key}
+        passable = frozenset(passable)
+        if passable not in models:
+            models[passable] = self.cell.collision_model(self.model, passable=passable)
+        return models[passable]
 
-    def planner(self):
+    def planner(self, passable=()):
         if self.model is None:
             raise arm.ArmError("The arm model didn't load, so planned moves are off.")
-        return plannermod.Planner(self.cell_model(), self.joint_acc_max, self.tool_acc_max,
+        return plannermod.Planner(self.cell_model(passable), self.joint_acc_max, self.tool_acc_max,
                                   reduced=self.cell.tool_matrix() if self.reduced_speed else None)
 
-    def send_payload(self):
-        """Tell the controller the active tool's payload (mass kg, centre of gravity mm from the flange), as the SDK
-        asks whenever the payload changes; the controller's own tool offset stays zero (decision D14)."""
+    def payload(self):
+        """What the controller should carry: the tool in use and every part its grippers hold, as (mass kg, centre of
+        gravity mm from the flange). A part's centre of gravity is given from the tool point, in its frame."""
         tool = self.cell.tool()
+        mass = float(tool["mass"])
+        moment = [mass * float(c) for c in tool["cog"]]
+        tcp = self.cell.tool_matrix()
+        for part in self.held.values():
+            m = float(part.get("mass", 0.0))
+            if m > 0:
+                at = kin.apply(tcp, part.get("cog", [0.0, 0.0, 0.0]))
+                mass += m
+                moment = [a + m * b for a, b in zip(moment, at)]
+        cog = [v / mass for v in moment] if mass > 0 else [0.0, 0.0, 0.0]
+        return round(mass, 4), [round(v, 3) for v in cog]
+
+    def send_payload(self):
+        """Tell the controller the payload (mass kg, centre of gravity mm from the flange): the active tool's, and any
+        part its grippers hold. The SDK asks for it whenever the payload changes; the controller's own tool offset stays
+        zero (decision D14)."""
+        mass, cog = self.payload()
         with self.lock:
-            ret = self.arm.set_tcp_load(float(tool["mass"]), [float(v) for v in tool["cog"]])
+            ret = self.arm.set_tcp_load(float(mass), [float(v) for v in cog])
         if ret not in arm.OK_CODES:
             raise arm.ArmError(f"The controller refused the payload (code {ret}).")
+        self.payload_sent, self.payload_due = (mass, cog), False
+
+    def apply_payload(self, begun=None, stops=None):
+        """After a grasp or a release: send the payload if it changed. In freedrive it waits until freedrive ends (the
+        hand holds the arm meanwhile, and writing a setting may stop the arm), or the next Enable. If writing it stops
+        a ready arm, as writing the teach sensitivity does (unverified for the payload on the arm), Enable's checked
+        sequence makes the arm ready again, run as the server's own (enable's `auto`): only if no STOP has come since
+        the grip began (`begun`, monotonic, when the stop count was `stops`: grip), none is under way, and the arm was
+        seen ready since, after any STOP before it had taken effect. A controller error after the write is a fault
+        (MoveFailed), never reset here, and with the run's stop pending the arm stays stopped. (A pause pending is no
+        reason to leave it stopped: the run pauses between steps, where it leaves the arm ready.) Returns a note for the
+        message."""
+        if begun is None:
+            begun, stops = time.monotonic(), self.stop_count
+        mass, cog = self.payload()
+        if self.payload_sent == (mass, cog):
+            return ""
+        frame = self.frame
+        if frame is not None and frame["mode"] == 2:
+            self.payload_due = True
+            return f" The payload ({mass:g} kg) goes to the controller when freedrive ends."
+        with self.stop_lock:
+            quiet, since = self.stop_count == self.stops_ended == stops, max(begun, self.stop_at + STOP_SEEN_S)
+        ready = quiet and self._ready_since(since)
+        written = time.monotonic()
+        self.send_payload()
+        note = f" Payload {mass:g} kg sent."
+        if ready:
+            after = self._await_frame(written + 0.1, lambda f: True, 1.0)  # a status frame from after the write
+            if after is not None and after["status"] == 4:
+                if after["err"]:
+                    raise MoveFailed(f"the controller reported error {arm.error_text(after['err'])} as the payload "
+                                     "was written")
+                held = " The arm stopped as it was written, and stays stopped: a stop came meanwhile."
+                if self.stop_count != stops or (self.runner.busy and self.runner.request == "stop"):
+                    return note + held
+                try:
+                    self.enable(auto=stops)
+                except StoppedMeanwhile:
+                    return note + held
+                except arm.ArmError as e:
+                    raise MoveFailed(f"writing the payload stopped the arm, and Enable couldn't make it ready again: "
+                                     f"{str(e).rstrip('.')}")
+                note += " Writing it stopped the arm, so Enable's checks made it ready again."
+        return note
+
+    def _ready_since(self, since):
+        """Whether the arm was ready (motors on, no error, still or moving) on the latest status frame, once one has
+        come after `since` (monotonic); False if none comes within FRAME_WAIT_S past it (or past now, if later)."""
+        deadline = max(since, time.monotonic()) + FRAME_WAIT_S
+        while True:
+            _, frame, at = self.latest
+            if frame is not None and at > since:
+                return frame["status"] in (0, 2) and not frame["err"] and frame["mode"] != 2 and \
+                    frame["enable"] & self.mask == self.mask
+            if time.monotonic() > deadline or self.closing:
+                return False
+            time.sleep(0.02)
 
     def current_joints(self):
         """The measured joints (deg), from fresh status."""
@@ -566,38 +717,398 @@ class Panel:
                                        "teach it again.")
         return target, step["target"] + (" (offset)" if step.get("offset") else "")
 
-    def plan_move(self, step, start, speed, ori_speed=60.0):
-        """A Plan for a program's move step (a joint or straight move to a target, with an optional offset)."""
+    def _goal(self, step):
+        """Where a move step goes, after the checks every move there makes: {"joints"} for a joint target, else
+        {"pose" (base <- tool point, 4x4), "seed"}; with its "label". A step to a pattern names its slot."""
+        if step.get("pattern") is not None:
+            name, slot = step["pattern"], step.get("slot")
+            if slot is None:
+                raise plannermod.PlanError(f"Name a slot of {name} to plan a move to it.")
+            s = self.cell.slot(name, slot)
+            active = self.cell.data["active"]["tool"]
+            if s["tool"] != active:
+                raise plannermod.PlanError(f"{name} was taught with the tool {s['tool']!r}, but the active tool is "
+                                           f"{active!r}.")
+            return {"pose": self.cell.slot_matrix(name, slot, step.get("offset")), "seed": s["seed"],
+                    "label": f"{name} slot {slot}" + (" (offset)" if step.get("offset") else "")}
+        target, label = self._target_for(step)
+        if "joints" in target:
+            return {"joints": [float(v) for v in target["joints"]], "label": label}
+        return {"pose": self.cell.target_matrix(step["target"], step.get("offset")), "seed": target.get("seed"),
+                "label": label}
+
+    def plan_move(self, step, start, speed, ori_speed=60.0, dry=False):
+        """A Plan for a program's move step (a joint or straight move to a target or a pattern's slot, with an optional
+        offset), with guarded zones open while their interlocks hold (plan_guarded)."""
         if step["kind"] == "planned":
             raise plannermod.PlanError("A planned move's path comes from the brain: run it as a program step.")
-        target, label = self._target_for(step)
-        p = self.planner()
-        if "joints" in target:
+        goal = self._goal(step)
+        if "joints" in goal:
             if step["kind"] != "joint":
                 raise plannermod.PlanError(f"{step['target']!r} is a joint target; a straight line needs a tool target.")
-            return p.joint(start, target["joints"], speed, step["target"])
-        pose = self.cell.target_matrix(step["target"], step.get("offset"))
+            return self.plan_guarded(lambda p: p.joint(start, goal["joints"], speed, goal["label"]), start, dry)
         tool = self.cell.tool_matrix()
         if step["kind"] == "joint":
-            return p.joint_to_pose(start, pose, tool, speed, seed=target.get("seed"), label=label)
-        return p.line(start, pose, tool, speed, ori_speed, label=label)
+            return self.plan_guarded(lambda p: p.joint_to_pose(start, goal["pose"], tool, speed, seed=goal["seed"],
+                                                               label=goal["label"]), start, dry)
+        return self.plan_guarded(lambda p: p.line(start, goal["pose"], tool, speed, ori_speed, label=goal["label"]),
+                                 start, dry)
+
+    def plan_retract(self, start, goal, speed, ori_speed=30.0, dry=False):
+        """Safe home's retract: the straight move from `start` back along the tool to `goal` (4x4), or, if it can't all
+        be planned, as far towards it as can (the line's clear part). Returns (plan or None, mm it goes, why it stops
+        short or None). If the arm is in a guarded zone whose interlocks don't hold, it doesn't go at all (ZoneClosed:
+        plan_guarded)."""
+        tool = self.cell.tool_matrix()
+        here = self.tool_point(start)
+        wanted = math.dist(kin.position(here), kin.position(goal))
+        label = f"{wanted:.0f} mm back along the tool"
+        try:
+            return self.plan_guarded(lambda p: p.line(start, goal, tool, speed, ori_speed, label=label), start,
+                                     dry), wanted, None
+        except plannermod.PlanError as e:
+            if isinstance(e, plannermod.ZoneClosed) and e.inside:
+                raise
+            clear = e.clear or 0.0
+            why = str(e)[len("Not moving: "):] if str(e).startswith("Not moving: ") else str(e)
+            if clear * wanted < 1.0:
+                return None, 0.0, why
+            part = kin.interpolate(here, goal, clear)
+            plan = self.plan_guarded(lambda p: p.line(start, part, tool, speed, ori_speed,
+                                                      label=f"{clear * wanted:.0f} mm back along the tool"), start, dry)
+            return plan, clear * wanted, why
+
+    # ---- interlocks and the zones they guard ---------------------------------------------------------------------
+
+    def _input_word(self, line, locked=False):
+        """A line's digital inputs as a 16-bit word. `locked`: the caller holds self.lock already."""
+        def read():
+            return (self.arm.get_tgpio_in if line == "tool" else self.arm.get_cgpio_in)()
+        if locked:
+            st, values = read()
+        else:
+            with self.lock:
+                st, values = read()
+        if not isinstance(values, list) or len(values) < 2:
+            raise MoveFailed(f"couldn't read the {line}'s inputs (code {st})")
+        return int(values[1]) & 0xFFFF
+
+    def interlock_states(self, names=None, locked=False, words=None):
+        """{interlock: {"input", "value", "reads", "holds"}}, read now (or from given input `words`)."""
+        interlocks = self.cell.data["interlocks"]
+        names = list(interlocks) if names is None else list(names)
+        words = dict(words or {})
+        out = {}
+        for name in names:
+            il = interlocks[name]
+            line, bit = cellmod.check_io(il["input"], "input")
+            if line not in words:
+                words[line] = self._input_word(line, locked)
+            reads = (words[line] >> bit) & 1
+            out[name] = {"input": il["input"], "value": il["value"], "reads": reads, "holds": reads == il["value"]}
+        return out
+
+    @staticmethod
+    def interlock_text(failing, states):
+        """'door_open doesn't hold (controller.2 reads 0, not 1)' for the interlocks in `failing`."""
+        readings = ", ".join(f"{states[n]['input']} reads {states[n]['reads']}, not {states[n]['value']}" for n in failing)
+        names = " and ".join(failing)
+        return f"{names} {'doesn' if len(failing) == 1 else 'don'}'t hold ({readings})"
+
+    def zones_in(self, joints, zones=None):
+        """The guarded zones (or those named in `zones`) the arm, with the tool in use, is in at `joints` (deg):
+        {zone: (gap m, negative: minus how far into it the part deepest in reaches; that part)}."""
+        names = set(self.cell.guarded_zones()) if zones is None else set(zones)
+        if not names or self.model is None:
+            return {}
+        model = self.cell_model()
+        index = {i: o.zone for i, o in enumerate(model.obstacles) if getattr(o, "zone", None) in names}
+        return {index[i]: g for i, g in model.obstacle_gaps(joints, set(index)).items() if g[0] < 0.0}
+
+    def _closed(self, names, locked=False):
+        """The interlocks among `names` that don't hold now, and every state read: (failing, states)."""
+        states = self.interlock_states(names, locked)
+        return [n for n in names if not states[n]["holds"]], states
+
+    def _in_closed(self, zone, at, failing, states):
+        """The refusal (ZoneClosed) of a move that starts with the arm in the guarded `zone` while its interlocks
+        `failing` don't hold: `at` is (gap, part) from zones_in."""
+        gap, part = at
+        return plannermod.ZoneClosed(f"Not moving: {part} is {-gap * 1000:.0f} mm into the {zone} zone, which is "
+                                     f"closed, as {self.interlock_text(failing, states)}. Nothing moves the arm in it "
+                                     f"until {' and '.join(failing)} {'holds' if len(failing) == 1 else 'hold'}; or "
+                                     "guide the arm out by hand, in freedrive.", zone, inside=True)
+
+    @staticmethod
+    def _zone_of(model, hit):
+        """The cell zone a collision check's hit is with, or None."""
+        if not hit or hit.get("obstacle") is None:
+            return None
+        return getattr(model.obstacles[hit["obstacle"]], "zone", None)
+
+    def _open_or_refuse(self, zone, guarded, error, locked=False):
+        """A move would enter the guarded `zone` (or go deeper into it): read its interlocks, and refuse (ZoneClosed)
+        unless they all hold."""
+        failing, states = self._closed(guarded[zone], locked)
+        if failing:
+            hit = getattr(error, "hit", None)
+            raise plannermod.ZoneClosed(f"{str(error).rstrip('.')}: the {zone} zone is closed, as "
+                                        f"{self.interlock_text(failing, states)}.", zone, hit,
+                                        getattr(error, "clear", None), inside=bool(hit and hit.get("inside")))
+
+    def plan_guarded(self, plan_fn, start=None, dry=False, locked=False):
+        """plan_fn(planner) -> Plan from `start` (deg), planned against every zone but the guarded ones it may go into:
+        - one the plan would enter: its interlocks are read, and if they all hold it's planned again with the zone open;
+          otherwise it's refused (ZoneClosed), saying which doesn't hold;
+        - one the arm is in already (zones_in, at `start`): open if its interlocks hold, whatever the move does in it;
+          refused (ZoneClosed) if they don't, whatever asked for the move, the page included: a box can't say which way
+          is out, and the door may be shut on the arm (docs/decisions.md D121).
+        A dry run assumes the interlocks hold. The plan's `guards` are the guarded zones the move depends on, with their
+        interlocks, which are watched as the arm moves."""
+        guarded = self.cell.guarded_zones()
+        passable = set()
+        inside = self.zones_in(start, guarded) if guarded and start is not None else {}
+        for zone in sorted(inside):
+            if not dry:
+                failing, states = self._closed(guarded[zone], locked)
+                if failing:
+                    raise self._in_closed(zone, inside[zone], failing, states)
+            passable.add(zone)
+        while True:
+            planner = self.planner(passable)
+            try:
+                plan = plan_fn(planner)
+            except plannermod.PlanError as e:
+                zone = self._zone_of(planner.model, e.hit)
+                if zone is None or zone not in guarded or zone in passable:
+                    raise
+                if not dry:
+                    self._open_or_refuse(zone, guarded, e, locked)
+                passable.add(zone)
+                continue
+            plan.guards = {zone: guarded[zone] for zone in sorted(passable)}
+            return plan
+
+    def check_guarded(self, start_deg, goal_deg, locked=False):
+        """The cell's collision check of a joint move from the page (a jog or Move), with the guarded zones it may go
+        into open, as plan_guarded has them: (why it's refused, or None; the guarded zones it depends on, with their
+        interlocks)."""
+        guarded = self.cell.guarded_zones()
+        passable = set()
+        inside = self.zones_in(start_deg, guarded) if guarded else {}
+        for zone in sorted(inside):
+            failing, states = self._closed(guarded[zone], locked)
+            if failing:
+                return str(self._in_closed(zone, inside[zone], failing, states)), {}
+            passable.add(zone)
+        while True:
+            model = self.cell_model(passable)
+            hit = model.check_path(start_deg, goal_deg)
+            if hit is None:
+                return None, {zone: guarded[zone] for zone in sorted(passable)}
+            zone = self._zone_of(model, hit)
+            if zone not in guarded or zone in passable:
+                return blocked(hit), {}
+            failing, states = self._closed(guarded[zone], locked)
+            if failing:
+                return f"{blocked(hit)[:-1]}: the {zone} zone is closed, as {self.interlock_text(failing, states)}.", {}
+            passable.add(zone)
+
+    def zones_for_brain(self, joints, dry=False):
+        """The guarded zones a path or burst from the brain may go into, from `joints` (deg): those whose interlocks
+        all hold, read now (in a dry run, all of them: it assumes they'll hold). Refuses (ZoneClosed) if the arm is in
+        one whose interlocks don't: the server doesn't move the arm in a closed zone on its own."""
+        guarded = self.cell.guarded_zones()
+        if not guarded or dry:
+            return set(guarded)
+        states = self.interlock_states(sorted({n for names in guarded.values() for n in names}))
+        failing = {zone: [n for n in names if not states[n]["holds"]] for zone, names in guarded.items()}
+        inside = self.zones_in(joints, [zone for zone, f in failing.items() if f])
+        for zone in sorted(inside):
+            raise self._in_closed(zone, inside[zone], failing[zone], states)
+        return {zone for zone, f in failing.items() if not f}
+
+    def zones_entered(self, path, passable):
+        """The guarded zones among `passable` (open) that a joint-space path from the brain (waypoints, deg) depends on,
+        with their interlocks: those the arm is in at its start, and those it comes within the margin of on the way."""
+        if not passable or self.model is None:
+            return {}
+        guarded = self.cell.guarded_zones()
+        out = {zone: guarded.get(zone, []) for zone in self.zones_in(path[0], passable)}
+        for zone in sorted(set(passable) - set(out)):
+            model = self.cell_model(set(passable) - {zone})
+            limits = model.start_limits(path[0])  # the whole path's allowance, not each segment's
+            if any(model.check_path(a, b, limits=limits) is not None for a, b in zip(path, path[1:])):
+                out[zone] = guarded.get(zone, [])
+        return dict(sorted(out.items()))
+
+    def guard_dropped(self, guards, locked=False):
+        """For a move into guarded zones ({zone: [interlocks]}): (zone, why) if an interlock no longer holds, or they
+        can't be read; None while they all hold. Never raises."""
+        if not guards:
+            return None
+        names = sorted({n for v in guards.values() for n in v})
+        try:
+            states = self.interlock_states(names, locked)
+        except Exception as e:  # can't confirm they hold: stop
+            return sorted(guards)[0], f"its interlocks couldn't be read ({e})"
+        for zone, ils in sorted(guards.items()):
+            failing = [n for n in ils if not states[n]["holds"]]
+            if failing:
+                return zone, self.interlock_text(failing, states)
+        return None
+
+    def watch_guards(self, guards, watch):
+        """guard_dropped, read a few times a second while the arm moves (the page's watchdog, a run's supervision). It
+        waits at most WATCH_LOCK_WAIT_S for the SDK, which a request can hold for seconds while the status stream
+        stalls, so the other reasons to stop are never held up behind it; but if the interlocks can't be read within
+        GUARD_CONFIRM_S of when they last were (`watch["at"]`, monotonic), that's a stop too."""
+        if not guards:
+            return None
+        if not self.lock.acquire(timeout=WATCH_LOCK_WAIT_S):
+            if time.monotonic() - watch["at"] > GUARD_CONFIRM_S:
+                return sorted(guards)[0], f"its interlocks couldn't be read for {GUARD_CONFIRM_S:g} s"
+            return None
+        try:
+            dropped = self.guard_dropped(guards, locked=True)
+        finally:
+            self.lock.release()
+        if dropped is None:
+            watch["at"] = time.monotonic()
+        return dropped
+
+    # ---- grippers ------------------------------------------------------------------------------------------------
+
+    def read_signal(self, signal):
+        """An input named in a {"input", "value"} (0 or 1)."""
+        line, bit = cellmod.check_io(signal["input"], "input")
+        return self.read_input(line, bit)
+
+    def grip(self, name, action, part=None, sleep=time.sleep, log=lambda event, **detail: None):
+        """Open, close or grasp with gripper `name`: set its outputs, then wait for the input that confirms it (or,
+        without one, its set time). A grasp then reads the gripper's "closed on a part" input, if it has one, failing
+        (runner.ProgramError) when there's no part, and switches the payload to the tool and the part together; opening
+        switches it back. `sleep` waits (a run's checks its pause, stop and the controller as it waits). Returns what
+        happened, for the message."""
+        g = self.cell.gripper(name)
+        begun, stops = time.monotonic(), self.stop_count  # a STOP from now on keeps the arm stopped (apply_payload)
+        outputs = g["open"] if action == "open" else g["close"]
+        for o in outputs:
+            self.write_output(o["output"], o["value"])
+        log("gripper.set", gripper=name, action=action, outputs={o["output"]: o["value"] for o in outputs})
+        started = time.monotonic()
+        confirm = g.get("opened") if action == "open" else g.get("closed")
+        verb = "opened" if action == "open" else "closed"
+        if confirm is not None:
+            while self.read_signal(confirm) != confirm["value"]:
+                if time.monotonic() - started > g["timeout"]:
+                    raise runnermod.ProgramError(f"{name} didn't confirm it {verb} within {g['timeout']:g} s "
+                                                 f"({confirm['input']} doesn't read {confirm['value']})")
+                sleep(GRIP_POLL_S)
+        else:
+            end = started + g["seconds"]
+            while time.monotonic() < end:
+                sleep(min(GRIP_POLL_S, max(0.0, end - time.monotonic())))
+        how = f"{confirm['input']} confirmed it" if confirm is not None else f"after its {g['seconds']:g} s"
+        if action == "grasp" and g.get("part") is not None:
+            sensor, settle = g["part"], time.monotonic() + PART_SETTLE_S
+            while True:
+                got = self.read_signal(sensor)
+                if got == sensor["value"]:
+                    break
+                if time.monotonic() > settle:
+                    raise runnermod.ProgramError(f"{name} closed, but {sensor['input']} reads {got}, not "
+                                                 f"{sensor['value']}: there's no part in it")
+                sleep(GRIP_POLL_S)
+            how += f"; {sensor['input']} says it holds a part"
+        if action == "grasp":
+            self.held[name] = dict(part or {"mass": 0.0, "cog": [0.0, 0.0, 0.0]})
+        elif action == "open":
+            self.held.pop(name, None)
+        note = self.apply_payload(begun, stops) if action in ("grasp", "open") else ""
+        seconds = round(time.monotonic() - started, 2)
+        detail = {"payload": self.payload()[0]} if action != "close" else {}
+        if note:
+            detail["note"] = note.strip()
+        log("gripper.done", gripper=name, action=action, seconds=seconds, **detail)
+        word = {"open": "opened", "close": "closed", "grasp": "grasped"}[action]
+        return f"{name} {word} in {seconds:g} s ({how}).{note}"
+
+    def gripper_states(self, io):
+        """Each gripper as its outputs and inputs read now (`io`: io_state()): whether its outputs are set to close it
+        or open it, each confirming input's reading, and the part it holds, if any."""
+        def bit(line_name, kind):
+            line, n = cellmod.check_io(line_name, kind)
+            word = io[line]["inputs" if kind == "input" else "outputs"]
+            return None if word is None else (word >> n) & 1
+        out = {}
+        for name, g in self.cell.data["grippers"].items():
+            def matches(settings):
+                return all(bit(o["output"], "output") == o["value"] for o in settings)
+            state = "closed" if matches(g["close"]) else "open" if matches(g["open"]) else "neither"
+            entry = {"outputs": state, "held": self.held.get(name)}
+            for key in ("closed", "opened", "part"):
+                if g.get(key) is not None:
+                    entry[key] = bit(g[key]["input"], "input") == g[key]["value"]
+            out[name] = entry
+        return out
+
+    # ---- calling the owner ---------------------------------------------------------------------------------------
+
+    def call_owner(self, message, program=None, path=None, why="step"):
+        """A call to the owner: kept, and shown in the panel (status "calls") until it's seen; a run's log has it too.
+        A phone notification can follow the same calls later."""
+        with self.calls_lock:
+            self.call_seq += 1
+            call = {"id": self.call_seq, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "message": str(message)[:500],
+                    "program": program, "path": path, "why": why, "seen": False}
+            self.calls.append(call)
+            del self.calls[:-CALLS_KEPT]
+        return dict(call)
+
+    def calls_seen(self, call_id=None):
+        """Marks a call (or, without an id, every call) as seen. Returns how many were marked."""
+        with self.calls_lock:
+            marked = 0
+            for call in self.calls:
+                if not call["seen"] and (call_id is None or call["id"] == call_id):
+                    call["seen"] = True
+                    marked += 1
+        return marked
+
+    def why_not_ready(self):
+        """Why a run couldn't carry on moving the arm now, or None if it can: as check_can_run, without changing
+        anything."""
+        try:
+            frame = self._fresh_frame()
+        except arm.ArmError:
+            return "there's no fresh status from the controller"
+        if self.stop_alarm:
+            return "a stop wasn't confirmed"
+        if frame["err"]:
+            return f"the controller reports error {arm.error_text(frame['err'])}"
+        if frame["mode"] == 2:
+            return "the arm is in freedrive"
+        if frame["enable"] & self.mask != self.mask:
+            return "the motors are off"
+        if frame["status"] not in (0, 2):
+            return f"the arm isn't ready (state {frame['status']})"
+        return None
 
     # ---- what the brain is told, and asked ------------------------------------------------------------------------
 
     def goal_joints(self, step, start):
-        """Where a planned move ends (deg): a joint target's joints, or a tool target's solved from the joints it was
-        taught at, so the arm arrives in the taught configuration. Returns (joints, label)."""
-        target, label = self._target_for(step)
-        if "joints" in target:
-            goal = [float(v) for v in target["joints"]]
-            for i, g in enumerate(goal):
+        """Where a planned move ends (deg): a joint target's joints, or a tool target's (or a pattern slot's) solved
+        from the joints it was taught at, so the arm arrives in the taught configuration. Returns (joints, label)."""
+        goal = self._goal(step)
+        if "joints" in goal:
+            for i, g in enumerate(goal["joints"]):
                 low, high = DRAG_LIMITS_DEG[i]
                 if not low <= g <= high:
                     raise plannermod.PlanError(f"J{i + 1} would have to go to {g:.1f}\u00b0, outside {low:g}\u00b0 to "
                                                f"{high:g}\u00b0.")
-            return goal, label
-        pose = self.cell.target_matrix(step["target"], step.get("offset"))
-        return self.planner().solve(target.get("seed") or start, pose, self.cell.tool_matrix()), label
+            return goal["joints"], goal["label"]
+        return self.planner().solve(goal["seed"] or start, goal["pose"], self.cell.tool_matrix()), goal["label"]
 
     def observe(self, after=None, inputs=False, virtual=None):
         """The arm's state for the brain: a fresh status frame's sequence number and arrival time (one that came after
@@ -642,16 +1153,18 @@ class Panel:
             out[line] = int(values[1]) & 0xFFFF
         return out
 
-    def world(self):
+    def world(self, passable=()):
         """What the spine knows of the cell, for the brain (mm, base frame): the active tool's point and shape, and
-        the keep-out zones as boxes."""
+        the zones as boxes, leaving out the guarded zones in `passable` (open while their interlocks hold); a guarded one
+        sent (closed) is marked `guarded`, as no part may get into it from outside, even by the 1 mm allowance."""
         with self.cell.lock:
             data = self.cell.data
             name = data["active"]["tool"]
             tool = data["tools"][name]
-            zones = [{"name": zone, "centre": [round(v * 1000.0, 3) for v in o.centre],
-                      "axes": [[round(v, 9) for v in axis] for axis in o.axes], "size": [round(h * 2000.0, 3) for h in o.half]}
-                     for o, zone in zip(self.cell.zone_obstacles(), data["zones"])]
+            zones = [dict({"name": o.zone, "centre": [round(v * 1000.0, 3) for v in o.centre],
+                           "axes": [[round(v, 9) for v in axis] for axis in o.axes],
+                           "size": [round(h * 2000.0, 3) for h in o.half]}, **({"guarded": True} if o.guarded else {}))
+                     for o in self.cell.zone_obstacles(passable)]
             return {"cellRevision": data["revision"], "marginMm": utra_model.MARGIN_M * 1000.0,
                     "tool": {"name": name, "tcp": {"xyz": list(tool["tcp"]["xyz"]), "rpy": list(tool["tcp"]["rpy"])},
                              "capsules": [dict(c) for c in tool["capsules"]]},
@@ -720,11 +1233,7 @@ class Panel:
 
     def read_input(self, line, bit):
         """A digital input: line "tool" or "controller", bit 0-15."""
-        with self.lock:
-            st, values = (self.arm.get_tgpio_in if line == "tool" else self.arm.get_cgpio_in)()
-        if not isinstance(values, list) or len(values) < 2:
-            raise MoveFailed(f"couldn't read the {line}'s inputs (code {st})")
-        return (int(values[1]) >> bit) & 1
+        return (self._input_word(line) >> bit) & 1
 
     def write_output(self, name, value):
         line, bit = runnermod.io_name(name, "output")
@@ -759,6 +1268,8 @@ class Panel:
                      "teach sensitivity")
         if self.runner.busy:
             raise arm.ArmError("A program is running. Stop it before freedrive.")
+        if self.grip_lock.locked():
+            raise arm.ArmError("A gripper is opening or closing. Wait for it, then hold freedrive.")
         frame = self._fresh_frame()
         if frame["err"] or self.stop_alarm:
             raise arm.ArmError("Clear the fault first (hold Enable).")
@@ -813,14 +1324,19 @@ class Panel:
             if not confirmed:
                 raise arm.ArmError("STOP NOT CONFIRMED leaving freedrive: press the hardware E-stop now.")
             raise arm.ArmError("The controller didn't confirm leaving freedrive; stopped. Hold Enable to carry on.")
+        note = ""
+        if self.payload_due:  # a grasp or release in freedrive: the payload goes now, with the motors off
+            self.send_payload()
+            note = f" The payload it holds now ({self.payload_sent[0]:g} kg) went to the controller."
         if not reenable:
-            return self._say("Freedrive off: the motors are off and the arm rests on its brakes. Hold Enable to carry on.")
+            return self._say("Freedrive off: the motors are off and the arm rests on its brakes. Hold Enable to carry "
+                             "on." + note)
         try:
             self.enable()  # Enable's checks (no jump) and sequence: ready in position mode
         except arm.ArmError as e:
             raise arm.ArmError(f"Freedrive off; the motors are off and the arm rests on its brakes. {e}")
         return self._say("Freedrive off: motors back on, ready to move. The arm settled onto its brakes first "
-                         "(about 0.5 mm); targets recorded in freedrive are unaffected.")
+                         "(about 0.5 mm); targets recorded in freedrive are unaffected." + note)
 
     def jog(self, body):
         """Move one step. Returns (moved, message)."""
@@ -855,6 +1371,8 @@ class Panel:
                 raise arm.ArmError("A program is running. Pause or stop it first.")
             if frame["mode"] == 2:
                 raise arm.ArmError("The arm is in freedrive. Leave freedrive to jog.")
+            if self.grip_lock.locked():
+                raise arm.ArmError("A gripper is opening or closing. Wait for it, then jog.")
             self.require_hold()
             busy = self._busy(frame)
             if self.goal is None or not busy:
@@ -864,16 +1382,17 @@ class Panel:
 
             goal = list(self.goal)
             sign = "+" if direction > 0 else "\u2212"
+            guards = {}
             if kind == "joint":
                 goal[index] += direction * math.radians(step)
                 lead = max(abs(math.degrees(g - m)) for g, m in zip(goal, frame["joints"]))
                 if lead > MAX_LEAD_STEPS * step + 0.5:
                     return False, self._say("Holding: the arm is still catching up with earlier clicks.")
                 if self.model is not None:  # the step this click adds, from the goal before it
-                    hit = self.cell_model().check_path([math.degrees(g) for g in self.goal],
-                                                       [math.degrees(g) for g in goal])
-                    if hit is not None:
-                        raise arm.ArmError(blocked(hit))
+                    why, guards = self.check_guarded([math.degrees(g) for g in self.goal],
+                                                     [math.degrees(g) for g in goal], locked=True)
+                    if why:
+                        raise arm.ArmError(why)
                 sent, limiting = capped_joint_speed(speed, [step if i == index else 0.0 for i in range(self.axis)])
                 why = f", J{index + 1}'s top speed" if limiting is not None else ""
                 if self.reduced_speed:  # the step from the goal before it, where the controller takes it from
@@ -900,7 +1419,9 @@ class Panel:
                     if cap < sent:
                         sent, why = cap, plannermod.REDUCED_WHY
                 if self.model is not None:  # the line this click adds, planned and checked like a program's
-                    self._check_tool_step(frame, self.goal, goal, sent)
+                    guards = self._check_tool_step(frame, self.goal, goal, sent, busy)
+                    if guards is None:
+                        return False, self._say("Holding: the arm is still catching up with earlier clicks.")
                 ret = self.arm.moveto_cartesian_line(goal, sent, self._tool_acc(sent), 0)
                 axis_name = ("X", "Y", "Z", "Roll", "Pitch", "Yaw")[index]
                 value = goal[index] if index < 3 else math.degrees(goal[index])
@@ -912,23 +1433,43 @@ class Panel:
             if ret not in arm.OK_CODES:
                 self.goal = None
                 raise arm.abort_motion(self.ip, self.arm, f"The controller rejected the move (code {ret}).", STOP_LOCK_WAIT_S)
+            self.page_guards = dict(self.page_guards, **guards) if busy else guards
+            if guards:  # read just now, holding
+                self.page_watch = {"at": time.monotonic()}
             self.goal, self.sent_at = goal, time.monotonic()
             self.heard_at = self.sent_at  # the page is waiting on this very request, so it isn't quiet
         return True, self._say(text)
 
-    def _check_tool_step(self, frame, before, after, speed):
+    def _check_tool_step(self, frame, before, after, speed, busy):
         """Plan a tool step as a straight line of the flange (the controller's own tool point is the flange), from
         the goal before it to the new one, with the cell's tool and zones: refuses a step out of reach, through a
-        singularity or into anything."""
+        singularity or into anything (or into a guarded zone whose interlocks don't hold). Returns the guarded zones
+        it depends on, or None to hold the click while the arm is still on its way (`busy`) to a goal its joints can't
+        be solved for from where it is. Called with self.lock held."""
         p = self.planner()
         q = [math.degrees(v) for v in frame["joints"][:self.axis]]
         start = p.kin.solve(q, kin.from_controller_pose(before), DRAG_LIMITS_DEG)
         if not start["ok"]:
-            return  # the arm is between goals it hasn't reached; the controller has the earlier step in hand
+            if busy:
+                return None
+            raise arm.ArmError(self._unsolved_text(q))
         try:
-            p.line(start["joints"], kin.from_controller_pose(after), kin.IDENTITY, speed, label="the step's end")
+            plan = self.plan_guarded(lambda planner: planner.line(start["joints"], kin.from_controller_pose(after),
+                                                                  kin.IDENTITY, speed, label="the step's end"),
+                                     start["joints"], locked=True)
         except plannermod.PlanError as e:
             raise arm.ArmError(str(e))
+        return plan.guards
+
+    @staticmethod
+    def _unsolved_text(q):
+        """Why a tool step from the joints q (deg) can't be checked, and so isn't sent."""
+        out = [f"J{i + 1} is at {v:.1f}\u00b0, outside {low:g}\u00b0 to {high:g}\u00b0"
+               for i, (v, (low, high)) in enumerate(zip(q, DRAG_LIMITS_DEG)) if not low <= v <= high]
+        if out:
+            return (f"Not moving: {' and '.join(out)}, where tool steps are planned and checked. Bring it back with "
+                    "the joint keys first.")
+        return "Not moving: the arm's pose can't be solved from its joints here, so the tool step can't be checked."
 
     def move(self, body):
         """Move the arm to a plan: absolute angles for one or more joints, all sent as one joint move.
@@ -974,6 +1515,8 @@ class Panel:
                 raise arm.ArmError("The arm is still moving. Wait for it to settle, or press STOP.")
             if frame["mode"] == 2:
                 raise arm.ArmError("The arm is in freedrive. Leave freedrive first.")
+            if self.grip_lock.locked():
+                raise arm.ArmError("A gripper is opening or closing. Wait for it, then press Move.")
             self.require_hold()
             start = self._synced_goal("joint", frame)
             start_deg = [math.degrees(v) for v in start]
@@ -982,10 +1525,11 @@ class Panel:
                 return False, self._say("The arm is already in that position.")
             goal_deg = [float(targets[i]) if i in moving else start_deg[i] for i in range(self.axis)]
             # The whole path, not just the plan: never within the margin of the arm itself, the cart, the floor, the
-            # tool or the cell's keep-out zones (or, for parts already that close, no closer than they are now).
-            hit = self.cell_model().check_path(start_deg, goal_deg)
-            if hit is not None:
-                raise arm.ArmError(blocked(hit))
+            # tool or the cell's keep-out zones (or, for parts already that close, no closer than they are now), nor of
+            # a guarded zone unless its interlocks hold, nor at all from inside a closed one.
+            why, guards = self.check_guarded(start_deg, goal_deg, locked=True)
+            if why:
+                raise arm.ArmError(why)
             # Joints not in the plan stay exactly at their current targets.
             goal = [math.radians(goal_deg[i]) if i in moving else start[i] for i in range(self.axis)]
             sent, limiting = capped_joint_speed(speed, [abs(math.degrees(g - s)) for g, s in zip(goal, start)])
@@ -999,6 +1543,8 @@ class Panel:
                 self.goal = None
                 raise arm.abort_motion(self.ip, self.arm, f"The controller rejected the move (code {ret}).", STOP_LOCK_WAIT_S)
             self.goal, self.goal_kind, self.sent_at = goal, "joint", time.monotonic()
+            self.page_guards = guards
+            self.page_watch = {"at": time.monotonic()}  # any it depends on were read just now, holding
             self.heard_at = self.sent_at  # the page is waiting on this very request, so it isn't quiet
         if len(moving) == 1:
             return True, self._say(f"J{moving[0] + 1} \u2192 {goal_deg[moving[0]]:.1f}\u00b0 at {sent:g}\u00b0/s{why}")
@@ -1044,6 +1590,8 @@ class Panel:
             now = time.monotonic()
             if not (frame["status"] == 1 or frame["queued"] > 0 or now - sent_at < BUSY_AFTER_SEND_S):
                 continue
+            # Every reason to stop that needs no SDK request comes first: the interlocks are read last, and without
+            # waiting long for the SDK (watch_guards), so nothing here is held up behind a request in flight.
             lapsed = self.hold_lapsed() if frame["mode"] != 2 else None  # freedrive is the hand's
             if lapsed:
                 self.stop(lapsed)
@@ -1053,6 +1601,11 @@ class Panel:
                 self.stop("the controller's status went quiet")
             elif frame["err"]:
                 self.stop(f"the controller reported error {arm.error_text(frame['err'])}")
+            elif self.page_guards and frame["mode"] != 2:
+                dropped = self.watch_guards(self.page_guards, self.page_watch)
+                if dropped:
+                    self.page_guards = {}
+                    self.stop(f"{dropped[1]}, during a move into the {dropped[0]} zone")
 
 
 def static_file(url_path):
@@ -1229,7 +1782,8 @@ def make_handler(panel, token, page, port, three):
 
 def cell_view(panel):
     """The cell, with every frame and target placed in the base frame and the collision model the page should
-    check against (with the active tool's shape and the zones)."""
+    check against (with the active tool's shape and the zones, guarded zones marked with their interlocks), the
+    patterns' geometry and their counters."""
     cell = panel.cell
     data = cell.snapshot()
     frames = {}
@@ -1244,21 +1798,49 @@ def cell_view(panel):
                 targets[name] = kin.matrix_to_pose(cell.target_matrix(name), 3)
             except cellmod.CellError:
                 targets[name] = None
-    out = {"ok": True, "cell": data, "framesInBase": frames, "targetsInBase": targets,
+    patterns = {}
+    for name in data["patterns"]:
+        try:
+            g = cell.pattern_geometry(name)
+            patterns[name] = {"count": g["count"], "frame": g["frame"], "tool": g["tool"], "pitchMm": g["pitchMm"],
+                              "angleDeg": g["angleDeg"]}
+        except cellmod.CellError as e:
+            patterns[name] = {"error": str(e)}
+    out = {"ok": True, "cell": data, "framesInBase": frames, "targetsInBase": targets, "patterns": patterns,
+           "counters": panel.counters.snapshot(),
            "pending": {"frames": panel.pending_points, "tools": {k: len(v) for k, v in panel.pending_poses.items()}}}
-    scene = {"zones": [], "frames": [], "targets": []}  # what the 3D view draws (metres, base frame)
-    for o, (name, zone) in zip(cell.zone_obstacles(), data["zones"].items()):
-        scene["zones"].append({"name": name, "centre": o.centre, "axes": o.axes, "half": o.half})
+    scene = {"zones": [], "frames": [], "targets": [], "slots": []}  # what the 3D view draws (metres, base frame)
+    for o in cell.zone_obstacles():
+        scene["zones"].append({"name": o.zone, "centre": o.centre, "axes": o.axes, "half": o.half,
+                               "interlocks": data["zones"][o.zone].get("interlocks", [])})
     for name in data["frames"]:
         t = cell.frame_matrix(name)
         scene["frames"].append({"name": name, "origin": [t[i][3] for i in range(3)], "x": [t[i][0] for i in range(3)],
                                 "y": [t[i][1] for i in range(3)]})
     for name, pose in targets.items():
         if pose is not None:
-            scene["targets"].append({"name": name, "p": [v / 1000.0 for v in pose["xyz"]]})
+            entry = {"name": name, "p": [v / 1000.0 for v in pose["xyz"]]}
+            previous = data["targets"][name].get("previous")
+            if previous and "pose" in previous and previous.get("frame") in ([cellmod.BASE] + list(data["frames"])):
+                was = kin.mul(cell.frame_matrix(previous["frame"]), kin.pose_to_matrix(previous["pose"]))
+                entry["was"] = [v / 1000.0 for v in kin.position(was)]  # where it was before its touch-up
+            scene["targets"].append(entry)
+    for name, info in patterns.items():
+        if "error" in info or info["count"] > 400:  # a big pattern's slots would bury the view
+            continue
+        for slot in range(1, info["count"] + 1):
+            p = kin.position(cell.slot_matrix(name, slot))
+            scene["slots"].append({"pattern": name, "slot": slot, "p": [v / 1000.0 for v in p]})
     out["scene"] = scene
     if panel.model is not None:
-        out["collision"] = panel.cell_model().collision_config()
+        model = panel.cell_model()
+        config = model.collision_config()
+        guarded = cell.guarded_zones()
+        for entry, o in zip(config["obstacles"], model.obstacles):
+            zone = getattr(o, "zone", None)
+            if zone in guarded:
+                entry["zone"], entry["guard"] = zone, guarded[zone]
+        out["collision"] = config
     return out
 
 
@@ -1272,7 +1854,13 @@ def api_get(panel, path, query):
     if path == "/api/run":
         return {"ok": True, "run": panel.runner.status()}
     if path == "/api/io":
-        return {"ok": True, "io": panel.io_state()}
+        io = panel.io_state()
+        words = {line: io[line]["inputs"] for line in io if io[line]["inputs"] is not None}
+        interlocks = panel.interlock_states(words=words) if len(words) == len(io) else {}
+        return {"ok": True, "io": io, "interlocks": interlocks, "grippers": panel.gripper_states(io)}
+    if path == "/api/calls":
+        with panel.calls_lock:
+            return {"ok": True, "calls": [dict(c) for c in panel.calls]}
     return None
 
 
@@ -1296,7 +1884,10 @@ def api_post(panel, path, body):
         return dict(cell_view(panel), message=f"Tool {body.get('name')} deleted.")
     if path == "/api/cell/tool/activate":
         _idle_for_setup(panel)
+        was = cell.data["active"]["tool"]
         cell.activate_tool(body.get("name"), rev)
+        if cell.data["active"]["tool"] != was:
+            panel.held.clear()  # another tool on the flange: whatever the last one's grippers held isn't carried now
         panel.send_payload()
         return dict(cell_view(panel), message=f"Tool {body.get('name')} in use; its payload sent to the controller.")
     if path == "/api/cell/tool/touch":
@@ -1362,6 +1953,12 @@ def api_post(panel, path, body):
         return dict(cell_view(panel), remapped=report, message=text)
     if path == "/api/cell/target":
         return teach_target(panel, body)
+    if path == "/api/cell/target/touchup":
+        return touch_up_target(panel, body)
+    if path == "/api/cell/target/undo":
+        entry = cell.undo_touch_up(body.get("name"), rev)
+        return dict(cell_view(panel), target=entry, message=f"Target {body.get('name')} is back as it was before its "
+                                                            "touch-up (the change is in cell/logs/targets.jsonl).")
     if path == "/api/cell/target/delete":
         users = runnermod.programs_using(panel.programs, body.get("name"))
         if users:
@@ -1370,11 +1967,59 @@ def api_post(panel, path, body):
         cell.delete_target(body.get("name"), rev)
         return dict(cell_view(panel), message=f"Target {body.get('name')} deleted.")
     if path == "/api/cell/zone":
-        cell.set_zone(body.get("name"), body.get("frame", cellmod.BASE), body.get("pose"), body.get("size"), rev)
-        return dict(cell_view(panel), message=f"Zone {body.get('name')} saved.")
+        cell.set_zone(body.get("name"), body.get("frame", cellmod.BASE), body.get("pose"), body.get("size"), rev,
+                      body.get("interlocks"))
+        guards = cell.data["zones"][body.get("name")].get("interlocks")
+        return dict(cell_view(panel), message=f"Zone {body.get('name')} saved"
+                    + (f": the arm may enter it while {' and '.join(guards)} {'holds' if len(guards) == 1 else 'hold'}."
+                       if guards else "."))
     if path == "/api/cell/zone/delete":
         cell.delete_zone(body.get("name"), rev)
         return dict(cell_view(panel), message=f"Zone {body.get('name')} deleted.")
+    if path == "/api/cell/interlock":
+        cell.set_interlock(body.get("name"), body.get("input"), body.get("value", 1), rev)
+        return dict(cell_view(panel), message=f"Interlock {body.get('name')} saved: it holds while {body.get('input')} "
+                                              f"reads {body.get('value', 1)}.")
+    if path == "/api/cell/interlock/delete":
+        cell.delete_interlock(body.get("name"), rev)
+        return dict(cell_view(panel), message=f"Interlock {body.get('name')} deleted.")
+    if path == "/api/cell/gripper":
+        _idle_for_setup(panel)
+        cell.set_gripper(body.get("name"), body.get("close"), body.get("open"),
+                         body.get("seconds", cellmod.GRIPPER_SECONDS), body.get("timeout", cellmod.GRIPPER_TIMEOUT_S),
+                         body.get("closed"), body.get("opened"), body.get("part"), rev)
+        return dict(cell_view(panel), message=f"Gripper {body.get('name')} saved.")
+    if path == "/api/cell/gripper/delete":
+        users = runnermod.programs_using(panel.programs, body.get("name"), "gripper")
+        if users:
+            raise cellmod.CellError(f"Gripper {body.get('name')!r} is used by {', '.join(users)}; take it out of "
+                                    f"{'them' if len(users) > 1 else 'it'} first.")
+        cell.delete_gripper(body.get("name"), rev)
+        panel.held.pop(body.get("name"), None)
+        return dict(cell_view(panel), message=f"Gripper {body.get('name')} deleted.")
+    if path == "/api/cell/pattern":
+        g = cell.set_pattern(body.get("name"), body.get("rows"), body.get("columns"), body.get("layers", 1),
+                             body.get("layerPitch", 0.0), body.get("first"), body.get("rowEnd"), body.get("columnEnd"), rev)
+        return dict(cell_view(panel), message=f"Pattern {body.get('name')} saved: {pattern_text(g)}.")
+    if path == "/api/cell/pattern/delete":
+        users = runnermod.programs_using(panel.programs, body.get("name"), "pattern")
+        if users:
+            raise cellmod.CellError(f"Pattern {body.get('name')!r} is used by {', '.join(users)}; take it out of "
+                                    f"{'them' if len(users) > 1 else 'it'} first.")
+        cell.delete_pattern(body.get("name"), rev)
+        panel.counters.drop(body.get("name"))
+        return dict(cell_view(panel), message=f"Pattern {body.get('name')} deleted.")
+    if path == "/api/cell/pattern/counter":
+        _idle_for_setup(panel)
+        name = body.get("name")
+        count = cell.pattern_geometry(name)["count"]
+        slot = body.get("slot", 1)
+        if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= count + 1:
+            raise cellmod.CellError(f"{name}'s counter goes from slot 1 to {count}, or {count + 1} for used up; not "
+                                    f"{slot!r}.")
+        panel.counters.set(name, slot)
+        return dict(cell_view(panel), message=f"{name}'s counter is at slot {slot} of {count}." if slot <= count
+                    else f"{name}'s counter is past its last slot: used up.")
     if path == "/api/program":
         saved = panel.programs.save(body.get("program"), cell, rev)
         return {"ok": True, "program": saved, "message": f"Program {saved['name']} saved."}
@@ -1400,7 +2045,13 @@ def api_post(panel, path, body):
         runner.set_override(body.get("percent"))
         return {"ok": True, "run": runner.status(), "message": f"Speed override {runner.override}%."}
     if path in ("/api/moveto", "/api/plan"):
-        step = {"type": "move", "kind": body.get("kind", "joint"), "target": body.get("target")}
+        step = {"type": "move", "kind": body.get("kind", "joint")}
+        if body.get("pattern") is not None:
+            step["pattern"] = body["pattern"]
+            if body.get("slot") is not None:
+                step["slot"] = body["slot"]
+        else:
+            step["target"] = body.get("target")
         if body.get("offset"):
             step["offset"] = body["offset"]
         if body.get("speed") is not None:
@@ -1409,12 +2060,52 @@ def api_post(panel, path, body):
         if path == "/api/plan":
             checked = runnermod.check_program(program, cell)
             s = checked["steps"][0]
+            if s.get("pattern") is not None and s.get("slot") is None:  # the slot its counter stands at
+                count = cell.pattern_geometry(s["pattern"])["count"]
+                s["slot"] = panel.counters.slot(s["pattern"])
+                if s["slot"] > count:
+                    raise cellmod.CellError(f"{s['pattern']} is used up: all {count} of its slots are done.")
             speed = s.get("speed", checked["speed"]["tcp" if s["kind"] == "line" else "joint"])
             plan = panel.plan_move(s, panel.current_joints(), speed, checked["speed"]["ori"])
             return {"ok": True, "plan": plan.summary(), "message": plan.text}
         panel.require_hold()
         runner.start(program=program, manual=True)
-        return {"ok": True, "run": runner.status(), "message": f"Moving to {body.get('target')}."}
+        to = body.get("target") if body.get("pattern") is None else \
+            f"{body['pattern']} slot {body['slot']}" if body.get("slot") is not None else f"{body['pattern']}'s next slot"
+        return {"ok": True, "run": runner.status(), "message": f"Moving to {to}."}
+    if path == "/api/home":
+        step = {"type": "home", "target": body.get("target"), "retract": body.get("retract", runnermod.HOME_RETRACT_MM)}
+        if body.get("speed") is not None:
+            step["speed"] = body["speed"]
+        panel.require_hold()
+        runner.start(program={"name": "manual", "steps": [step], "speed": body.get("defaults") or {}}, manual=True)
+        return {"ok": True, "run": runner.status(), "message": f"Safe home to {body.get('target')}: backing off along "
+                                                              "the tool, then a joint move."}
+    if path == "/api/gripper":
+        action = body.get("action")
+        if action not in runnermod.GRIPPER_ACTIONS:
+            raise runnermod.ProgramError(f"A gripper opens, closes or grasps, not {action!r}.")
+        part = runnermod.check_part(body["part"]) if body.get("part") is not None and action == "grasp" else None
+        # One gripper action from the page at a time, and none while the arm moves, as the payload may change: while it
+        # works, no run starts (Runner.start), nor a jog, Move or freedrive.
+        if not panel.grip_lock.acquire(blocking=False):
+            raise arm.ArmError("A gripper is already opening or closing. Wait for it.")
+        try:
+            with runner.lock:
+                if runner.busy:
+                    raise arm.ArmError("A program is under way; its gripper is its own.")
+            with panel.lock:
+                if panel._page_move_under_way():
+                    raise arm.ArmError("The arm is moving. Wait for it to stop: the gripper may change the payload.")
+            message = panel.grip(body.get("name"), action, part)
+        finally:
+            panel.grip_lock.release()
+        return {"ok": True, "held": panel.held, "message": message}
+    if path == "/api/calls/ack":
+        marked = panel.calls_seen(body.get("id"))
+        with panel.calls_lock:
+            unseen = [dict(c) for c in panel.calls if not c["seen"]]
+        return {"ok": True, "calls": unseen, "message": f"{marked} call{'s' if marked != 1 else ''} marked as seen."}
     if path == "/api/io/set":
         _idle_for_setup(panel)
         if runner.busy:
@@ -1461,17 +2152,63 @@ def teach_target(panel, body):
         move = body.get("move") or ("joint" if "joints" in entry else "line")
         step = {"type": "move", "kind": move, "target": name}
         steps, at = program["steps"], body.get("at")
-        if at:  # insert after this step (a path of 0-based indexes)
-            container = steps
-            for i in at[:-1]:
-                node = container[i]
-                container = node.get("steps") or node.get("then") or []
-            container.insert(at[-1] + 1, step)
+        if at:  # insert after this step (a path of 0-based indexes, as runs number them)
+            container, index = runnermod.step_list(steps, at)
+            container.insert(index + 1, step)
         else:
             steps.append(step)
         saved = panel.programs.save(program, cell, program.get("revision"))
         message += f" Added a {'straight' if move == 'line' else 'joint'} move to it in {saved['name']}."
     return dict(cell_view(panel), message=message, target=entry)
+
+
+def pattern_text(g):
+    """A pattern's geometry in words: '12 slots, columns 40.0 mm apart, rows 35.0 mm apart, at 90.0°'."""
+    bits = [f"{g['count']} slot{'s' if g['count'] != 1 else ''} in {g['frame']}"]
+    along, down, up = g["pitchMm"]
+    if along:
+        bits.append(f"columns {along:.1f} mm apart")
+    if down:
+        bits.append(f"rows {down:.1f} mm apart")
+    if g["angleDeg"] is not None:
+        bits.append(f"at {g['angleDeg']:.1f}\u00b0 to each other")
+    if up:
+        bits.append(f"layers {up:.1f} mm apart")
+    return ", ".join(bits)
+
+
+def touch_up_target(panel, body):
+    """Re-teach an existing target in place, where the arm is now: a tool target keeps its frame and tool (which must
+    be the tool in use), a joint target stays one. The reply says how far it moved; the old value stays in the target,
+    for Undo, and in cell/logs/targets.jsonl."""
+    cell, name, rev = panel.cell, body.get("name"), body.get("revision")
+    if panel.runner.moving:
+        raise arm.ArmError("A program is running. Pause or stop it first.")
+    target = cell.target(name)
+    q = panel.current_joints()
+    taught = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "how": "freedrive" if panel.frame["mode"] == 2 else "here",
+              "joints": [round(v, 4) for v in q]}
+    if "joints" in target:
+        entry, change = cell.touch_up(name, joints=[round(v, 4) for v in q], revision=rev, taught=taught)
+        text = f"Target {name} touched up: its joints changed by up to {change['jointsMaxDeg']:.2f}\u00b0"
+    else:
+        active = cell.data["active"]["tool"]
+        if target["tool"] != active:
+            raise cellmod.CellError(f"{name!r} was taught with the tool {target['tool']!r}, not {active!r}: make it the "
+                                    "tool in use (Use) to touch the target up.")
+        pose = kin.mul(kin.invert(cell.frame_matrix(target["frame"])), panel.tool_point(q))
+        entry, change = cell.touch_up(name, pose=kin.matrix_to_pose(pose, 4), seed=[round(v, 4) for v in q],
+                                      revision=rev, taught=taught)
+        d = change["deltaMm"]
+        text = (f"Target {name} touched up: moved {change['movedMm']:.2f} mm ({d[0]:+.2f}, {d[1]:+.2f}, {d[2]:+.2f} "
+                f"along {target['frame']}'s x, y, z) and turned {change['turnedDeg']:.2f}\u00b0")
+        if "jointsMaxDeg" in change:
+            text += f"; its joints by up to {change['jointsMaxDeg']:.2f}\u00b0"
+    users = runnermod.programs_using(panel.programs, name) + cell.patterns_using(name)
+    if users:
+        text += f". Every move to it changes with it ({', '.join(users)})"
+    text += ". Undo puts the old value back; it's also in cell/logs/targets.jsonl."
+    return dict(cell_view(panel), message=text, target=entry, change=change)
 
 
 def main(argv=None):

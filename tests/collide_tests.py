@@ -77,6 +77,54 @@ for kind in ("box", "cylinder"):
     check(f"{kind}: exact within sampling resolution below it", worst_under < 3e-3, worst_under)
     check(f"{kind}: closest point lies on the shape", inside_ok)
 
+
+def oracle_sd(kind, R, centre, size, points):
+    """Signed distances of `points` (n x 3) from a box (sides `size`) or a cylinder (diameter size[0], length size[1],
+    along R's third column), worked out here with NumPy: outside, the distance; inside, minus the distance to the
+    surface."""
+    local = (points - np.array(centre)) @ R
+    if kind == "box":
+        d = np.abs(local) - np.array(size) / 2
+    else:
+        d = np.stack([np.hypot(local[:, 0], local[:, 1]) - size[0] / 2, np.abs(local[:, 2]) - size[1] / 2], axis=1)
+    return np.linalg.norm(np.maximum(d, 0.0), axis=1) + np.minimum(d.max(axis=1), 0.0)
+
+
+print("== the signed gap (Obstacle.segment_gap): outside, the distance; reaching inside, minus the deepest point's depth")
+for kind in ("box", "cylinder"):
+    worst_over, worst_under, worst_points, inside = 0.0, 0.0, 0.0, 0
+    for n in range(400):
+        R = rot()
+        size = [rng.uniform(0.05, 1.0) for _ in range(3)]
+        centre = rand3(0.5)
+        ob = um.Obstacle("x", kind, centre, R.T.tolist(), size if kind == "box" else [size[0] / 2, size[1]])
+        p, q = rand3(1.5), rand3(1.5)
+        if n % 3 == 0:  # from somewhere inside the shape
+            p = list(np.array(centre) + R @ (np.array([rng.uniform(-0.45, 0.45) for _ in range(3)]) * np.array(size)))
+        if n % 10 == 0:
+            q = list(p)  # a point
+        gap, (x, s) = ob.segment_gap(p, q)
+        seg = np.array(p) + np.outer(ts, np.array(q) - np.array(p))
+        brute = float(oracle_sd(kind, R, centre, size, seg).min())
+        inside += gap < 0
+        worst_over = max(worst_over, gap - brute)
+        worst_under = max(worst_under, brute - gap)
+        # its points: on the segment, as far from the shape as the gap says; and on the shape's surface
+        at_x, at_s = oracle_sd(kind, R, centre, size, np.array([x, s]))
+        worst_points = max(worst_points, abs(at_x - gap), abs(at_s), abs(math.dist(x, s) - abs(gap)))
+    check(f"{kind}: the signed gap never above the sampled minimum ({inside} of 400 segments reach inside)",
+          worst_over < 1e-9 and inside > 100, (worst_over, inside))
+    check(f"{kind}: and within sampling resolution below it", worst_under < 3e-3, worst_under)
+    check(f"{kind}: its points are the deepest (or nearest) point of the segment and the surface's nearest it",
+          worst_points < 1e-9, worst_points)
+
+# Deeper is closer: a segment pushed into a box along one axis, from 10 mm out to 90 mm in, has a gap falling
+# all the way (the old unsigned gap stopped at 0 once inside).
+box = um.Obstacle("b", "box", [0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [0.4, 0.4, 0.4])
+gaps = [box.segment_gap([0.21 - d, 0.0, 0.05], [0.21 - d, 0.0, -0.05])[0] for d in (0.0, 0.02, 0.06, 0.1)]
+check(f"pushing a segment into a box from 10 mm out to 90 mm in, the gap goes {', '.join(f'{g * 1000:.0f}' for g in gaps)}"
+      " mm", all(abs(g - want) < 1e-12 for g, want in zip(gaps, (0.01, -0.01, -0.05, -0.09))), gaps)
+
 # nearest() for a cylinder against an analytic answer
 cyl = um.Obstacle("c", "cylinder", [0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [0.1, 0.2])
 check("cylinder side", abs(math.dist([0.3, 0, 0], cyl.nearest([0.3, 0, 0])) - 0.2) < 1e-12)

@@ -1,6 +1,6 @@
 """Oracle checks for the featureset's geometry: frame and tool calibration, re-mapping targets when a frame moves,
-offsets, keep-out zones in the collision check, and straight-line planning. Independent references: NumPy, SciPy
-(Rotation, align_vectors, least_squares) and Pinocchio. Needs the oracle environment. Usage:
+offsets, keep-out zones in the collision check, straight-line planning, and patterns' slots. Independent references:
+NumPy, SciPy (Rotation, align_vectors, least_squares) and Pinocchio. Needs the oracle environment. Usage:
 python tests/feature_oracle_tests.py"""
 import math
 import os
@@ -289,8 +289,72 @@ def lines_with_pinocchio():
           (worst, planned))
 
 
+def scipy_pose(pose):
+    """A pose as a 4x4 (mm) from SciPy's rotations: R = Rz(yaw) Ry(pitch) Rx(roll), independent of kinematics.py."""
+    out = np.eye(4)
+    roll, pitch, yaw = pose["rpy"]
+    out[:3, :3] = Rotation.from_euler("ZYX", [yaw, pitch, roll], degrees=True).as_matrix()
+    out[:3, 3] = pose["xyz"]
+    return out
+
+
+def patterns_against_numpy():
+    print("== patterns: every slot of 200 synthetic grids (up to 6 x 6 x 3, skewed or square, in a frame or a frame "
+          "in a frame) against NumPy and SciPy's own, within 0.01 mm and 1e-6 deg")
+    folder = tempfile.mkdtemp(prefix="umbratek-patterns-")
+    worst_mm = worst_deg = 0.0
+    slots = grids = 0
+    try:
+        for trial in range(200):
+            cell = cellmod.Cell(os.path.join(folder, str(trial)))
+            fixture = rand_pose()
+            cell.set_frame("fixture", "base", fixture)
+            frame, truth_frame = "fixture", scipy_pose(fixture)
+            if trial % 3 == 0:
+                tray = rand_pose(150)
+                cell.set_frame("tray", "fixture", tray)
+                frame, truth_frame = "tray", truth_frame @ scipy_pose(tray)
+            rows, columns, layers = rng.randint(1, 6), rng.randint(1, 6), rng.choice((1, 1, 2, 3))
+            origin = np.array([rng.uniform(-200, 200) for _ in range(3)])
+            while True:  # a step along a row and one down a column, 25 to 155 deg apart (or square, half the time)
+                along = Rotation.random(random_state=rng.randrange(10 ** 6)).apply([rng.uniform(5, 60), 0, 0])
+                if trial % 2:
+                    down = np.cross([0, 0, 1], along)
+                    down = down / max(np.linalg.norm(down), 1e-9) * rng.uniform(5, 60)
+                else:
+                    down = Rotation.random(random_state=rng.randrange(10 ** 6)).apply([rng.uniform(5, 60), 0, 0])
+                cos = np.dot(along, down) / np.linalg.norm(along) / np.linalg.norm(down)
+                if np.linalg.norm(down) > 1 and 25 < math.degrees(math.acos(np.clip(cos, -1, 1))) < 155:
+                    break
+            pitch = rng.choice((-1, 1)) * rng.uniform(5, 80)
+            yaw, tilt, roll = Rotation.random(random_state=rng.randrange(10 ** 6)).as_euler("ZYX", degrees=True)
+            rpy = [roll, tilt, yaw]
+            corners = {"first": origin, "rowEnd": origin + (columns - 1) * along, "columnEnd": origin + (rows - 1) * down}
+            for name, xyz in corners.items():
+                cell.set_target(name, frame, {"xyz": xyz.tolist(), "rpy": rpy}, tool="flange")
+            cell.set_pattern("grid", rows, columns, layers, pitch if layers > 1 else 0.0, "first",
+                             "rowEnd" if columns > 1 else None, "columnEnd" if rows > 1 else None)
+            grids += 1
+            orientation = truth_frame[:3, :3] @ Rotation.from_euler("ZYX", [yaw, tilt, roll], degrees=True).as_matrix()
+            for slot in range(1, rows * columns * layers + 1):
+                layer, rest = divmod(slot - 1, rows * columns)
+                row, column = divmod(rest, columns)
+                local = origin + column * along + row * down + layer * pitch * np.array([0.0, 0.0, 1.0])
+                truth = truth_frame @ np.append(local, 1.0)
+                got = np.array(cell.slot_matrix("grid", slot))
+                worst_mm = max(worst_mm, np.linalg.norm(got[:3, 3] * 1000.0 - truth[:3]))
+                worst_deg = max(worst_deg, math.degrees(np.linalg.norm(
+                    Rotation.from_matrix(orientation.T @ got[:3, :3]).as_rotvec())))
+                slots += 1
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    check(f"{grids} grids, {slots} slots: within {worst_mm:.2g} mm and {worst_deg:.2g} deg of the truth (0.01 mm, 1e-6 deg)",
+          grids == 200 and worst_mm < 0.01 and worst_deg < 1e-6, (worst_mm, worst_deg))
+
+
 def main():
-    for part in (frames_from_points, tool_points, remapping, offsets, zones_against_sampling, lines_with_pinocchio):
+    for part in (frames_from_points, tool_points, remapping, offsets, zones_against_sampling, lines_with_pinocchio,
+                 patterns_against_numpy):
         try:
             part()
         except Exception as e:  # report and carry on

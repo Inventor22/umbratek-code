@@ -53,11 +53,22 @@ REDUCED_REACH_MM = 1150.0
 
 
 class PlanError(Exception):
-    """Why a move can't be planned; `hit` is utra_model's description of the collision, when that's why."""
+    """Why a move can't be planned; `hit` is utra_model's description of the collision, when that's why. For a straight
+    line, `clear` is the fraction of it that could be planned before the trouble (0 to 1), when that's known."""
 
-    def __init__(self, message, hit=None):
+    def __init__(self, message, hit=None, clear=None):
         super().__init__(message)
         self.hit = hit
+        self.clear = clear
+
+
+class ZoneClosed(PlanError):
+    """A move refused because a guarded zone is closed, its interlocks not all holding: `zone` names it. `inside` is set
+    when the arm is in the zone already, and the move would stay in it or go deeper."""
+
+    def __init__(self, message, zone, hit=None, clear=None, inside=False):
+        super().__init__(message, hit, clear)
+        self.zone, self.inside = zone, inside
 
 
 def capped_joint_speed(speed, travel):
@@ -146,6 +157,10 @@ def reduced_line_speed(length_mm, turn_deg, reach_mm, limit=REDUCED_SPEED_MM_S):
 
 
 def blocked(hit, margin_mm=10):
+    if hit.get("inside"):
+        return f"{hit['part']} would go further into {hit['other']}"
+    if hit.get("gap", 0.0) < 0.0:  # from within the margin, past what it may come closer (ArmModel._close_limit)
+        return f"{hit['part']} would go into {hit['other']}"
     return f"{hit['part']} would come within {margin_mm:.0f} mm of {hit['other']}"
 
 
@@ -190,16 +205,17 @@ class Planner:
         self.reduced = reduced
 
     # -- joint moves ---------------------------------------------------------------------------------------------
-    def joint(self, start, goal, speed, label="the joints", tool=None, tool_speed=None):
+    def joint(self, start, goal, speed, label="the joints", tool=None, tool_speed=None, limits=None):
         """A joint move. With `tool_speed` (mm/s) it's also slowed until the tool point (`tool`: flange <- tool point)
         can't pass that speed anywhere on the way (tool_speed_per_deg_s); with reduced speed on, until neither the tool
-        point nor the flange can pass REDUCED_SPEED_MM_S (reduced_joint_speed)."""
+        point nor the flange can pass REDUCED_SPEED_MM_S (reduced_joint_speed). `limits`: when it's one segment of a
+        longer path, the path's (utra_model.ArmModel.start_limits at its start)."""
         start, goal = [float(v) for v in start], [float(v) for v in goal]
         for i, g in enumerate(goal):
             low, high = DRAG_LIMITS_DEG[i]
             if not low <= g <= high:
                 raise PlanError(f"J{i + 1} would have to go to {g:.1f}\u00b0, outside {low:g}\u00b0 to {high:g}\u00b0.")
-        hit = self.model.check_path(start, goal)
+        hit = self.model.check_path(start, goal, limits=limits)
         if hit is not None:
             raise PlanError(f"Not moving: {blocked(hit)}.", hit)
         travel = [abs(g - s) for s, g in zip(start, goal)]
@@ -284,27 +300,33 @@ class Planner:
         peak = motion_profile.double_s(length, speed, acc, self.tool_jerk).v_lim if length > 0 else speed
         seconds_per_sample = max(length / max(peak, 1e-9), turn / min(ori_speed, MAX_ORI_SPEED_DEG_S)) / n
         path, q = [start], start
+        limits = self.model.start_limits(start)  # one allowance for parts already close, for the whole line
         for k in range(1, n + 1):
             pose = kin.interpolate(t0, target, k / n)
             result = self.kin.solve(q, pose, DRAG_LIMITS_DEG, tool)
-            along = f"{length * k / n:.0f} mm along the line" if length >= 0.5 else f"{turn * k / n:.0f}\u00b0 into the turn"
+            # Where on the line: in mm, to a tenth on a short one (a jog may be a fraction of a millimetre), or for a
+            # turn in place, in degrees.
+            along = (f"{length * k / n:.{1 if length < 10 else 0}f} mm along the line" if length >= 0.5 or turn < 0.5
+                     else f"{turn * k / n:.0f}\u00b0 into the turn")
+            clear = (k - 1) / n  # the samples before this one were fine
             if not result["ok"]:
                 if result["atLimit"] >= 0:
-                    raise PlanError(f"Not moving: J{result['atLimit'] + 1} would pass its limit {along}.")
-                raise PlanError(f"Not moving: the line leaves the arm's reach {along}.")
+                    raise PlanError(f"Not moving: J{result['atLimit'] + 1} would pass its limit {along}.", clear=clear)
+                raise PlanError(f"Not moving: the line leaves the arm's reach {along}.", clear=clear)
             nxt = result["joints"]
             jump = max(abs(a - b) for a, b in zip(nxt, q))
             if jump > FLIP_DEG:
                 raise PlanError(f"Not moving: the arm would flip its configuration {along} (a joint jumps "
-                                f"{jump:.0f}\u00b0).")
+                                f"{jump:.0f}\u00b0).", clear=clear)
             for j in range(6):
                 rate = abs(nxt[j] - q[j]) / seconds_per_sample
                 if rate > JOINT_RATED_DEG_S[j]:
                     raise PlanError(f"Not moving: the line passes too close to a singularity {along}: J{j + 1} would "
-                                    f"need {rate:.0f}\u00b0/s at this speed (its top speed is {JOINT_RATED_DEG_S[j]:g}).")
-            hit = self.model.check_path(q, nxt)
+                                    f"need {rate:.0f}\u00b0/s at this speed (its top speed is {JOINT_RATED_DEG_S[j]:g}).",
+                                    clear=clear)
+            hit = self.model.check_path(q, nxt, limits=limits)
             if hit is not None:
-                raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit)
+                raise PlanError(f"Not moving: {blocked(hit)} {along}.", hit, clear=clear)
             path.append(nxt)
             q = nxt
         if segments is None:  # they depend on the line and its number of samples, not on the joints solved

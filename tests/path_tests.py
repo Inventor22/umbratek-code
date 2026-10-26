@@ -74,6 +74,62 @@ for n in range(PATHS):
           f" in {times[-1] * 1000:.0f} ms; dense worst {worst * 1000:.2f} mm", flush=True)
 print(f"{len(times)} paths: {sum(verdicts)} clear, {len(times) - sum(verdicts)} blocked; {bad} problems")
 print(f"check_path time: median {statistics.median(times) * 1000:.1f} ms, max {max(times) * 1000:.1f} ms")
+
+# From inside a keep-out zone the gap is signed, so a part already inside may move out, or no more than SLACK_M
+# further in: check that on short moves starting inside a big zone, against dense sampling with the same limits.
+cage = um.Obstacle("the cage zone", "box", [0.35, 0.0, 0.55], [[0.8, 0.6, 0], [-0.6, 0.8, 0], [0, 0, 1]], [0.7, 0.6, 0.5])
+caged = m.with_cell((), [cage])
+inside_paths, inside_hits = 0, 0
+for n in range(400):
+    if inside_paths >= max(6, PATHS // 5):
+        break
+    start = [rng.uniform(*lim) for lim in LIMITS]
+    placed = caged.placed(start)
+    limits = [um.MARGIN_M] * len(caged.pairs)
+    for p, pair in enumerate(caged.pairs):
+        gap, _ = caged._gap(placed, pair)
+        if gap < um.MARGIN_M:
+            limits[p] = gap - um.SLACK_M
+    in_cage = [p for p, pair in enumerate(caged.pairs) if pair[2] and pair[1] == len(caged.obstacles) - 1
+               and limits[p] < -um.SLACK_M]
+    if not in_cage:
+        continue
+    inside_paths += 1
+    goal = list(start)
+    for j in rng.sample(range(6), rng.randint(1, 3)):
+        goal[j] = max(LIMITS[j][0], min(LIMITS[j][1], start[j] + rng.uniform(-25, 25)))
+    hit = caged.check_path(start, goal)
+    turn = [abs(math.radians(g - s)) for s, g in zip(start, goal)]
+    fastest = max(sum(turn[j] * caged.reach[c][j] + turn[j] * caged.capsules[c][3] for j in range(len(caged.reach[c])))
+                  for c in range(len(caged.capsules)))
+    worst = (0.0, None, None)
+    steps = max(20, int(fastest / 0.0005))
+    for k in range(1, steps + 1):
+        t = k / steps
+        pose = [s + (g - s) * t for s, g in zip(start, goal)]
+        placed = caged.placed(pose)
+        for p, pair in enumerate(caged.pairs):
+            if caged._lower_bound(placed, pair) >= limits[p]:
+                continue
+            gap, _ = caged._gap(placed, pair)
+            if gap - limits[p] < worst[0]:
+                worst = (gap - limits[p], t, caged._names(pair))
+    if hit is None and worst[0] < -um.ADVANCE_M - 0.0005:
+        bad += 1
+        print(f"  MISSED from inside: dense check finds {worst[2]} {worst[0] * 1000:.2f} mm past its limit at "
+              f"t={worst[1]:.4f}")
+    if hit is not None:
+        inside_hits += 1
+        if worst[0] >= 0:
+            bad += 1
+            print("  FALSE HIT from inside: dense check never goes past a limit", hit)
+    verdict = "clear" if hit is None else \
+        f"blocked: {hit['part']} {'deeper into' if hit.get('inside') else 'near'} {hit['other']}"
+    print(f"  from inside the cage, path {inside_paths}: {verdict}; dense worst {worst[0] * 1000:.2f} mm", flush=True)
+print(f"{inside_paths} short paths from inside a zone: {inside_hits} blocked")
+if inside_paths < 6:
+    bad += 1
+    print("  too few starting poses inside the zone were found")
 print(f"\n{bad} failure(s)")
 sys.exit(1 if bad else 0)
 
