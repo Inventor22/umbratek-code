@@ -51,7 +51,7 @@ the standard library. Node runs the `js` suite.
 ```powershell
 git submodule update --init      # Umbratek's SDK; a new worktree doesn't have it
 python tests/run_all.py --list   # [oracle] and [brain] mark the suites that need an environment
-$B = 151                         # your base: see "Beside other sessions"
+$B = 129                         # your base: see "Beside other sessions"
 python tests/run_all.py --base $B inproc cli    # the suites you touched; full output in tests/logs/<suite>.out
 python tests/run_all.py --base $B --python (py -3.12 -c "import sys; print(sys.executable)") inproc   # code on 3.12
 $env:UTRA_TEST_HOST = "127.0.0.$B"; $env:UTRA_TEST_HTTP_PORT = 8800 + $B - 11   # before running a script directly,
@@ -89,10 +89,11 @@ leftover simulators and twins kept ports busy and the CPU loaded.
   start even when their port is taken, and share it; only the simulator refuses. Don't use the defaults (panel 8765,
   stub brain 8770, which is also the panel's default `--brain`, twin 30100, simulator 502, 30001, 30003 and 30099 on
   127.0.0.1); other programs on this PC hold some of them too.
-- **Pick a base.** `--base B` takes 127.0.0.B to B+13 for simulators, panel ports 8800+B-11 to 8813+B-11 on 127.0.0.1,
-  and those + 1000 for stub brains, so bases under 14 apart overlap. Use the base your prompt names; otherwise pick
-  one of 41, 71, 131, 151 or 211 at random (clear of the default 11, tests/README.md's 111 and `tools/media`'s
-  127.0.0.200 and port 8960). Then check that nothing holds its addresses or ports and no other run uses it (a
+- **Pick a base.** `--base B` takes 127.0.0.B to B+13 for simulators (the twin suite's HTTP port 30100 included),
+  panel ports 8800+B-11 to 8813+B-11 on 127.0.0.1, and those + 1000 for stub brains, so bases under 14 apart overlap.
+  Use the base your prompt names; otherwise pick one of 101, 115, 129 and 143 at random. Other projects on this PC use
+  other loopback ranges, 11 (the default) is the owner's, and tests/README.md's example, 111, overlaps 101 and 115, so
+  don't use it. Then check that nothing holds the base's addresses or ports and that no other run uses it (a
   `run_all.py` without `--base` uses 11):
 
   ```powershell
